@@ -141,6 +141,9 @@ export function subscribeAgentSessionStates(): () => void {
   }
 
   const unsubscribe = useTerminalStore.subscribe((state) => {
+    for (const id of requested)
+      if (!state.instances.some((instance) => instance.id === id && recordedAgent(instance)))
+        requested.delete(id);
     for (const id of owned.keys())
       if (!state.instances.some((instance) => instance.id === id)) owned.delete(id);
     const now = Date.now();

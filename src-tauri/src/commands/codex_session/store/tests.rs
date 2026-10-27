@@ -7,6 +7,54 @@ const SESSION_A: &str = "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
 const SESSION_B: &str = "019fc114-970b-7933-a31b-bbd53883b57e";
 
 #[test]
+fn native_and_guest_selection_vetoes_survive_task_probe_projection() {
+    for mode in ["pending", "rejected", "closed", "multiple"] {
+        let temp = tempfile::tempdir().unwrap();
+        let logs = create_logs_db(temp.path());
+        write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+        insert_log(&logs, 1, "pid:101:current", None);
+        let entries = match mode {
+            "pending" => vec![(None, "app_server.request{rpc.method=\"thread/start\" rpc.request_id=2 app_server.client_name=\"codex-tui\"}: pending".to_owned())],
+            "rejected" => vec![(Some(SESSION_B), format!("app_server.request{{rpc.method=\"thread/resume\" rpc.request_id=2 app_server.client_name=\"codex-tui\"}}:thread_spawn{{}}:session_init:startup_prewarm{{otel.name=\"startup_prewarm\" thread.id={SESSION_B}}}: ready"))],
+            "closed" => vec![(Some(SESSION_A), format!("session_loop{{thread_id={SESSION_A}}}: Agent loop exited"))],
+            _ => {
+                write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
+                vec![(Some(SESSION_A), format!("session_loop{{thread_id={SESSION_A}}}: active")), (Some(SESSION_B), format!("session_loop{{thread_id={SESSION_B}}}: active"))]
+            }
+        };
+        for (index, (thread, body)) in entries.into_iter().enumerate() {
+            let id = index as i64 + 2;
+            insert_log(&logs, id, "pid:101:current", thread);
+            logs.execute(
+                "UPDATE logs SET feedback_log_body=?1 WHERE id=?2",
+                (&body, id),
+            )
+            .unwrap();
+        }
+        let store = CodexSessionStore::new(temp.path().into(), temp.path().into());
+        assert!(
+            matches!(
+                store.probe_selection_for_pid_checked(101, None).unwrap(),
+                SelectionProbe::Blocked
+            ),
+            "native {mode}"
+        );
+        let guest = CodexSessionStore::for_guest(temp.path().into());
+        let rows = super::super::lifecycle::ProcessRows {
+            process_uuid: "pid:101:current".into(),
+            rows: read_lifecycle_rows(&logs, "pid:101:current", 0).unwrap(),
+        };
+        assert!(
+            matches!(
+                guest.probe_process_rows(&rows).unwrap(),
+                SelectionProbe::Blocked
+            ),
+            "guest {mode}"
+        );
+    }
+}
+
+#[test]
 fn turn_observation_requires_a_selection_and_changes_when_the_process_restarts() {
     let temp = tempfile::tempdir().unwrap();
     let logs = create_logs_db(temp.path());

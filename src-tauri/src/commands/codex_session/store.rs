@@ -8,15 +8,14 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 mod diagnostics;
 mod retained;
+mod selection;
 mod title;
-use diagnostics::{
-    find_process_thread_ids_checked, find_process_uuid_checked, is_temporary_thread_checked,
-};
+pub(super) use selection::SelectionProbe;
 
 use crate::commands::claude_session::is_valid_session_id;
 use crate::constants::{
     CODEX_SESSION_DIRECTORY_DEPTH, CODEX_SESSION_META_MAX_BYTES, CODEX_SQLITE_BUSY_TIMEOUT,
-    CODEX_SQLITE_LOG_PREFIX, CODEX_SQLITE_STATE_PREFIX,
+    CODEX_SQLITE_STATE_PREFIX,
 };
 
 pub(super) struct CodexSessionStore {
@@ -105,48 +104,15 @@ impl CodexSessionStore {
             .map(|s| s.id))
     }
 
+    #[cfg(test)]
     pub(super) fn find_selection_for_pid_checked(
         &self,
         pid: u32,
         max_age_hours: Option<u64>,
     ) -> Result<Option<ResolvedSession>, String> {
-        let Some(logs_path) =
-            latest_versioned_db_checked(&self.sqlite_home, CODEX_SQLITE_LOG_PREFIX)?
-        else {
-            return Ok(None);
-        };
-        let mut connection = open_read_only_checked(&logs_path)?;
-        let logs = connection.transaction().map_err(|e| e.to_string())?;
-        let Some((process_uuid, first_log_id)) = find_process_uuid_checked(&logs, pid)? else {
-            return Ok(None);
-        };
-        let rows = read_lifecycle_rows(&logs, &process_uuid, first_log_id)?;
-        if super::lifecycle::select(&rows).is_some()
-            || rows
-                .iter()
-                .any(|r| r.feedback_log_body.starts_with("session_loop{"))
-        {
-            return self
-                .resolve_process_rows(&super::lifecycle::ProcessRows { process_uuid, rows });
-        }
-        for thread_id in find_process_thread_ids_checked(&logs, &process_uuid, first_log_id)? {
-            if is_temporary_thread_checked(&logs, &process_uuid, first_log_id, &thread_id)? {
-                continue;
-            }
-            match self.validate_session_checked(&thread_id, max_age_hours)? {
-                Some(true) => {
-                    return Ok(Some(ResolvedSession {
-                        id: thread_id,
-                        fresh: false,
-                        selection_key: None,
-                    }))
-                }
-                // Only a positively identified auxiliary thread can be skipped.
-                Some(false) => continue,
-                None => return Ok(None),
-            }
-        }
-        Ok(None)
+        Ok(self
+            .probe_selection_for_pid_checked(pid, max_age_hours)?
+            .into_session())
     }
 
     pub(super) fn resolve_selection(

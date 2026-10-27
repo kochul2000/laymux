@@ -85,11 +85,14 @@ fn lookup_with_observer(
         observation,
     )
     .map_err(crate::error::AppError::Other)?;
-    let resolve = |terminal: &str, store: &CodexSessionStore, distro: Option<&str>, selected| {
+    let resolve = |terminal: &str,
+                   store: &CodexSessionStore,
+                   distro: Option<&str>,
+                   selected: store::SelectionProbe| {
         if task_state {
             conversations.resolve_task(terminal, store, distro, selected)
         } else {
-            conversations.resolve(terminal, store, distro, selected)
+            conversations.resolve(terminal, store, distro, selected.into_session())
         }
     };
     let domains = provider_terminal_domains(state)?;
@@ -135,7 +138,7 @@ fn lookup_with_observer(
         // Native candidates are observed, but have no WSL missing-FD evidence.
         rollout_absence.insert(terminal_id.clone(), false);
         match store
-            .find_selection_for_pid_checked(*pid, session_max_age_hours)
+            .probe_selection_for_pid_checked(*pid, session_max_age_hours)
             .and_then(|selected| resolve(terminal_id, &store, None, selected))
         {
             Ok(Some(session)) => {
@@ -186,7 +189,7 @@ fn lookup_with_observer(
                                     .codex_home_dir()
                                     .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
                                 let store = CodexSessionStore::for_guest(home);
-                                let session = store.resolve_process_rows(&rows)?;
+                                let session = store.probe_process_rows(&rows)?;
                                 let session =
                                     resolve(&terminal_id, &store, Some(&process.distro), session)?;
                                 if let Some(session) = &session {

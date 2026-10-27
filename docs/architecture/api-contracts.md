@@ -2527,6 +2527,8 @@ Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에
 
 Codex 턴 조회는 프로세스 선택 키가 없는 경우에 한해 현재 PTY 세대의 live 관리 제목 UUID/축약 UUID와 실제 프로세스의 Codex 홈 안의 유일한 최상위 rollout을 대조할 수 있다. backend가 `title:<generation>:<revision>` 선택 키를 발급하고 파일 I/O 전후 제목·세대를 검증한다. 훅 메모리·resume 요청이 없어도 사용할 수 있으나 저장된 복원 ID만으로는 사용할 수 없다. 중복·보조 스레드·손상·충돌은 미확인으로 유지한다. 일반/종료 checkpoint에는 적용하지 않는다([ADR-0358](../adr/0358-agent-task-state-entry-and-periodic-recovery.md)).
 
+상태 복구의 프로세스 선택 내부 결과는 증거 부재와 명시적 차단을 구분한다. 미완료 전환·종료 loop·복수 최상위 후보·검증 거부는 제목 fallback으로 덮지 않는다. 외부 응답은 기존 unknown을 유지한다(ADR-0358, ADR-0258·0267 불변식 유지).
+
 ### 에이전트 상태·clear 보완 (ADR-0355)
 
 검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 훅은 현재 귀속의 6초 lease 안에서 유지하며, 진행·입력 대기는 기존 60초 기한을 유지한다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex 및 ADR-0356이 추가한 Grok의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.

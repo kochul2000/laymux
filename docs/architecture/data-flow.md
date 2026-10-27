@@ -1267,6 +1267,8 @@ Grok 1.0.70의 `/clear`는 이전 대화를 같은 PID의 `active_sessions.json`
 
 Codex 턴 조회에 한해 프로세스 선택 키가 없으면 현재 세대의 관리된 live OSC 제목 식별자와 실제 프로세스의 Codex 홈 안의 유일한 최상위 rollout 헤더를 대조한다. 훅 메모리가 없는 GUI 재부착에서도 동일하게 적용하며 heuristic 모드도 포함한다. backend는 `title:<generation>:<revision>` 선택 키를 발급하고 session ID와 함께 source를 구성한다. 제목 revision·세대를 파일 I/O 전후 대조하며 중복 파일·축약 충돌·보조 스레드·손상·다른 대화는 거부한다. 제목의 Ready·출력 정지로 작업 상태를 만들지 않고 기존 reader로 실제 턴 기록만 읽는다. 이 경로는 앞 절의 프로세스 선택 전용 규칙을 보완하며, 일반/종료 checkpoint의 복원점 귀속에는 적용하지 않는다.
 
+프로세스 선택 조회는 `SelectionProbe`로 증거 부재(`Missing`)와 명시적 차단(`Blocked`)을 구분한다. 미완료 전환·종료 loop·복수 최상위 후보·검증 거부는 이전 제목으로 복구하지 않는다. 진입 수요의 대상이 삭제되거나 Claude/Grok을 종료하거나 PTY 준비를 잃으면 보류 요청을 버려 나머지 pane의 정상 1초 폴링을 유지한다.
+
 #### Claude·Grok 세션 기록의 작업 상태
 
 [ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)에 따라 휴리스틱 작업이 확정되지 않은 Claude·Grok pane은 `get_agent_session_states`로 에이전트가 자기 세션 파일에 남긴 상태를 읽는다. 확정되지 않음은 관찰 없음, unknown, stale, 만료를 뜻하고, 세션 기록이 마지막으로 쓴 작업도 포함한다. 프론트 `agent-session-subscription`은 대상이 있을 때만 1초마다 한 요청을 보낸다. 응답은 요청 이후 generation·task epoch·입력·앱·작업 sequence가 그대로일 때만 반영한다. WSL pane의 게스트 스캔은 표시 폴링 계약으로 3초 안의 공유 run을 재사용하며, Claude와 Grok 기록이 같은 run을 읽는다(§13.4 "WSL 게스트 관측 공유", [ADR-0335](../adr/0335-shared-wsl-guest-observations.md)).

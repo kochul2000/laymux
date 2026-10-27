@@ -100,12 +100,34 @@ fn live_title_recovers_turn_scope_after_gui_restart_without_hook_memory() {
         f.rollout(ID, "cli".into());
         let lookup = ConversationLookup::new(&f.state, hooks, GuestObservation::Reusable).unwrap();
         let recovered = lookup
-            .resolve_task("pane", &f.store(), None, None)
+            .resolve_task("pane", &f.store(), None, SelectionProbe::Missing)
             .unwrap()
             .unwrap();
         assert_eq!(recovered.id, ID);
         assert_eq!(recovered.selection_key.as_deref(), Some("title:7:1"));
     }
+}
+
+#[test]
+fn pending_thread_selection_never_recovers_the_previous_completed_title() {
+    let f = Fixture::new();
+    *f.state.agent_hook_observations.lock().unwrap() = Default::default();
+    f.rollout(ID, "cli".into());
+    let rows = super::super::lifecycle::ProcessRows {
+        process_uuid: "current-process".into(),
+        rows: vec![super::super::lifecycle::LogRow {
+            id: 2,
+            thread_id: None,
+            feedback_log_body: "app_server.request{rpc.method=\"thread/start\" rpc.request_id=2 app_server.client_name=\"codex-tui\"}: pending".into(),
+        }],
+    };
+    let selected = f.store().probe_process_rows(&rows).unwrap();
+    assert!(matches!(selected, SelectionProbe::Blocked));
+    let lookup = ConversationLookup::new(&f.state, false, GuestObservation::Reusable).unwrap();
+    assert!(lookup
+        .resolve_task("pane", &f.store(), None, selected)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -145,7 +167,12 @@ fn task_recovery_requires_current_live_identity_even_with_a_saved_resume_id() {
         };
         assert!(
             lookup
-                .resolve_task("pane", &f.store(), None, candidate)
+                .resolve_task(
+                    "pane",
+                    &f.store(),
+                    None,
+                    candidate.map_or(SelectionProbe::Missing, SelectionProbe::Selected)
+                )
                 .ok()
                 .flatten()
                 .is_none(),
@@ -183,7 +210,7 @@ fn live_title_does_not_recover_ambiguous_or_auxiliary_rollouts() {
         let lookup = ConversationLookup::new(&f.state, true, GuestObservation::Reusable).unwrap();
         assert!(
             lookup
-                .resolve_task("pane", &f.store(), None, None)
+                .resolve_task("pane", &f.store(), None, SelectionProbe::Missing)
                 .ok()
                 .flatten()
                 .is_none(),

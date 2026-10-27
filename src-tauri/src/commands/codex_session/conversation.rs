@@ -1,5 +1,5 @@
 //! Current conversation evidence shared by ordinary and final checkpoints.
-use super::store::{CodexSessionStore, ResolvedSession};
+use super::store::{CodexSessionStore, ResolvedSession, SelectionProbe};
 use crate::agent_hooks::title::TitleBinding;
 use crate::constants::CODEX_TITLE_SELECTION_PREFIX;
 use crate::lock_ext::MutexExt;
@@ -48,8 +48,12 @@ impl<'a> ConversationLookup<'a> {
         terminal: &str,
         store: &CodexSessionStore,
         distro: Option<&str>,
-        selected: Option<ResolvedSession>,
+        selected: SelectionProbe,
     ) -> Result<Option<ResolvedSession>, String> {
+        if matches!(selected, SelectionProbe::Blocked) {
+            return Ok(None);
+        }
+        let selected = selected.into_session();
         let selected = self.resolve(terminal, store, distro, selected)?;
         if selected.as_ref().is_some_and(|s| s.selection_key.is_some()) {
             return Ok(selected);

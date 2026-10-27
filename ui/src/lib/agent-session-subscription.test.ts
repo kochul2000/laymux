@@ -55,6 +55,42 @@ afterEach(() => {
 });
 
 describe("agent session record observation", () => {
+  it.each(["removed", "shell", "not-ready"])(
+    "재확인 대상이 %s이면 다른 pane의 정상 1초 조회를 유지한다",
+    async (mode) => {
+      agent("Claude");
+      useTerminalStore
+        .getState()
+        .registerInstance({ id: "other", workspaceId: "ws", profile: "ps", syncGroup: "s" });
+      useTerminalStore.getState().updateInstanceInfo("other", {
+        sessionReady: true,
+        generation: 1,
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+      let resolve!: (value: Record<string, AgentSessionState>) => void;
+      vi.mocked(getAgentSessionStates).mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolve = r;
+          }),
+      );
+      vi.mocked(getAgentSessionStates).mockResolvedValue({ other: record("idle") });
+      stop = subscribeAgentSessionStates();
+      await vi.advanceTimersByTimeAsync(0);
+      requestTaskStateRefresh(["pane"]);
+      if (mode === "removed") useTerminalStore.getState().unregisterInstance("pane");
+      if (mode === "shell")
+        useTerminalStore.getState().updateInstanceInfo("pane", { activity: { type: "shell" } });
+      if (mode === "not-ready")
+        useTerminalStore.getState().updateInstanceInfo("pane", { sessionReady: false });
+      resolve({ other: record("idle") });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reads()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(reads()).toBe(2);
+    },
+  );
+
   it("진입 폴백도 입력 대화상자의 대기를 해제하지 않는다", async () => {
     agent("Claude");
     observeTaskInput("pane", true);
