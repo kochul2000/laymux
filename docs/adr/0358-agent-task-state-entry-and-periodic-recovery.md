@@ -1,6 +1,6 @@
 # 0358. 작업 상태는 진입·60초 재확인으로 복구하고 Codex live 제목과 유일한 기록을 대조한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-27
 - Source: Remote에서 대기 Codex가 점·stateUnknown으로 남아 clear할 수 없다는 사용자 제보 및 workspace/pane 진입·1분 이상 폴백 요구, [data-flow.md §9](../architecture/data-flow.md), [ADR-0248](0248-codex-turn-lifecycle-activity.md), [ADR-0321](0321-agent-session-record-fills-unconfirmed-task.md)
 - Amends: ADR-0248의 작업 상태에 허용하는 귀속 증거. 저장 복원점의 귀속 계약은 유지한다.
