@@ -6,7 +6,7 @@ import { useSettingsStore } from "./settings-store";
 
 export const SESSION_ATTRIBUTION_STARTUP_GRACE_MS = 15_000;
 
-export type TerminalActivityType = "shell" | "running" | "interactiveApp";
+export type TerminalActivityType = "unknown" | "shell" | "running" | "interactiveApp";
 
 export interface TerminalActivityInfo {
   type: TerminalActivityType;

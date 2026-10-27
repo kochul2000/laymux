@@ -779,11 +779,6 @@ pub const EVENT_TERMINAL_ACTIVITY_RECONCILED: &str = "terminal-activity-reconcil
 /// `ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`.
 pub const ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 
-/// How often the worker forgets what it published and re-publishes everything.
-/// The diff only sees backend-side changes, so frontend drift with no backend
-/// change behind it would otherwise never be corrected.
-pub const ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL: Duration = Duration::from_secs(60);
-
 // ── WSL interactive-app liveness (ADR-0134) ────────────────────────
 
 /// Upper bound for one `wsl.exe --exec` liveness probe.

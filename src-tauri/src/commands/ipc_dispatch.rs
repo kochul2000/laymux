@@ -368,6 +368,7 @@ pub fn do_set_command_status(
     command: Option<&str>,
     exit_code: Option<i32>,
 ) -> Result<LxResponse, String> {
+    let activity_sequence = crate::activity_order::next_activity_sequence();
     {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -391,6 +392,7 @@ pub fn do_set_command_status(
 
     let mut payload = serde_json::json!({
         "terminalId": terminal_id,
+        "activitySequence": activity_sequence,
     });
     if let Some(cmd) = command {
         payload["command"] = serde_json::json!(cmd);
@@ -399,6 +401,7 @@ pub fn do_set_command_status(
         payload["exitCode"] = serde_json::json!(code);
     }
     let _ = app.emit(EVENT_COMMAND_STATUS, payload);
+    activity::record_observation(state, terminal_id, activity_sequence);
 
     let desc = match (command, exit_code) {
         (Some(cmd), Some(code)) => format!("command '{}' exit {}", cmd, code),
@@ -840,7 +843,8 @@ fn filter_targets_not_busy(
                 // would be typed literally into the app's input buffer.
                 continue;
             }
-            crate::terminal::TerminalActivity::Running => {
+            crate::terminal::TerminalActivity::Running
+            | crate::terminal::TerminalActivity::Unknown => {
                 // A shell command is mid-execution; defer cd to avoid racing
                 // with the current command's output.
                 continue;
@@ -1365,7 +1369,7 @@ mod tests {
         let state = AppState::new();
         // t1: at prompt (last OSC is 133;D)
         // t2: command running (last OSC is 133;C)
-        // t3: no output (assume at prompt)
+        // t3: no output (unknown, must not receive input)
         {
             let mut buffers = state.output_buffers.lock().unwrap();
             let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
@@ -1392,20 +1396,20 @@ mod tests {
             "t2 is busy, should be excluded"
         );
         assert!(
-            filtered.contains(&"t3".to_string()),
-            "t3 no output, assume at prompt"
+            !filtered.contains(&"t3".to_string()),
+            "t3 has no evidence of a prompt"
         );
         assert!(claude_ids.is_empty(), "no Claude terminals in this test");
     }
 
     #[test]
-    fn filter_targets_not_busy_includes_unknown_terminals() {
+    fn filter_targets_not_busy_excludes_unknown_terminals() {
         let state = AppState::new();
         let targets = vec!["unknown".into()];
         let (filtered, _) =
             filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
                 .unwrap();
-        assert_eq!(filtered, vec!["unknown"]);
+        assert!(filtered.is_empty());
     }
 
     #[test]
@@ -1529,16 +1533,16 @@ mod tests {
     fn is_terminal_at_prompt_empty_buffer() {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
         assert!(
-            activity::is_terminal_at_prompt_from_buffer(Some(&buf)),
-            "Empty buffer → assume at prompt"
+            !activity::is_terminal_at_prompt_from_buffer(Some(&buf)),
+            "Empty buffer cannot prove a prompt"
         );
     }
 
     #[test]
     fn is_terminal_at_prompt_no_buffer() {
         assert!(
-            activity::is_terminal_at_prompt_from_buffer(None),
-            "No buffer → assume at prompt"
+            !activity::is_terminal_at_prompt_from_buffer(None),
+            "No buffer cannot prove a prompt"
         );
     }
 
@@ -1661,7 +1665,7 @@ mod tests {
         use crate::terminal::TerminalActivity;
         assert_eq!(
             activity::detect_terminal_activity(None),
-            TerminalActivity::Shell
+            TerminalActivity::Unknown
         );
     }
 
@@ -1671,7 +1675,7 @@ mod tests {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
         assert_eq!(
             activity::detect_terminal_activity(Some(&buf)),
-            TerminalActivity::Shell
+            TerminalActivity::Unknown
         );
     }
 
@@ -3118,10 +3122,9 @@ mod tests {
     }
 
     #[test]
-    fn is_source_sync_allowed_no_buffer() {
-        // Unknown/no buffer → assume shell (permissive default).
+    fn is_source_sync_blocked_without_a_buffer() {
         let state = AppState::new();
-        assert!(is_source_sync_allowed(&state, "t1", None).unwrap());
+        assert!(!is_source_sync_allowed(&state, "t1", None).unwrap());
     }
 
     #[test]

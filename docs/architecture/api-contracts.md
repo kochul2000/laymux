@@ -2523,7 +2523,11 @@ Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에
 
 ### 에이전트 상태 재확인 (ADR-0358)
 
-기존 `get_codex_turn_states`·`get_agent_session_states`·`get_agent_hook_states` 응답 스키마를 유지한다. 호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀와 60초 전체 sweep에서 기존 조회를 앞당긴다. 진행 중 요청은 겹치지 않고 완료 뒤 재확인한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다.
+기존 `get_codex_turn_states`·`get_agent_session_states`·`get_agent_hook_states` 응답 스키마를 유지한다. 호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀에서 기존 조회를 앞당긴다. 진행 중 요청은 겹치지 않고 완료 뒤 재확인한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다. [ADR-0360](../adr/0360-unknown-activity-and-event-recovery.md)에 따라 60초 전체 task 재조회와 activity 전체 재발행은 없다. 최초 task 복구와 foreground 복귀는 현재 workspace만 조회하고 3초 생존 감지·변경분 발행은 유지한다.
+
+기존 terminal activity tagged union은 `unknown | shell | running | interactiveApp`이다. 버퍼/lifecycle 근거가 없는 activity는 `{type:"unknown"}`이며 agent 부재만으로 shell을 반환하지 않는다. unknown은 자동 CWD·MCP shell 실행·clear를 허용하지 않는다. 제목의 앱 종료/리셋만으로 frontend shell을 만들지 않고 OSC 133 또는 backend 판정을 기다린다.
+
+`command-status`는 선택적인 `activitySequence`를 포함한다. 제목·command/lifecycle 발행 뒤 해당 PTY callback의 관측 sequence가 증가하며, 재판정은 activity 값이 같아도 새 관측이 있던 pane만 보정한다. 미확인으로 보류한 관측은 정상 복구 때까지 소비하지 않는다. frontend는 낡은 activity 변경을 거절하지만 command metadata/task 관측은 별도로 처리한다. 앱 내부의 자식 명령은 현재 앱 소유권을 바꾸지 않는다.
 
 Codex 턴 조회는 프로세스 선택 키가 없는 경우에 한해 현재 PTY 세대의 live 관리 제목 UUID/축약 UUID와 실제 프로세스의 Codex 홈 안의 유일한 최상위 rollout을 대조할 수 있다. backend가 `title:<generation>:<revision>` 선택 키를 발급하고 파일 I/O 전후 제목·세대를 검증한다. 훅 메모리·resume 요청이 없어도 사용할 수 있으나 저장된 복원 ID만으로는 사용할 수 없다. 중복·보조 스레드·손상·충돌은 미확인으로 유지한다. 일반/종료 checkpoint에는 적용하지 않는다([ADR-0358](../adr/0358-agent-task-state-entry-and-periodic-recovery.md)).
 

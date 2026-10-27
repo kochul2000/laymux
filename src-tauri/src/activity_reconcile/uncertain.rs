@@ -15,6 +15,20 @@ pub(super) fn discard_replaced_baselines(
     });
 }
 
+pub(super) fn retain_deferred_observations(
+    previous: &HashMap<String, u64>,
+    current: &mut HashMap<String, u64>,
+    deferred: &HashSet<String>,
+) {
+    for id in deferred {
+        if let Some(revision) = previous.get(id) {
+            current.insert(id.clone(), *revision);
+        } else {
+            current.remove(id);
+        }
+    }
+}
+
 /// Keep the diff baseline, without publishing it as a new observation.
 pub(super) fn defer_uncertain_agent_exits(
     published: &HashMap<String, TerminalActivity>,
@@ -50,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_probe_cannot_publish_shell_or_run_exit_cleanup_even_on_full_resync() {
+    fn unavailable_probe_cannot_publish_shell_or_run_exit_cleanup_when_repeated() {
         for app in ["Claude", "Codex", "Grok"] {
             for live in [
                 PtyAppLiveness::Unknown,
@@ -61,13 +75,11 @@ mod tests {
                 let mut current = HashMap::from([("pane".into(), TerminalActivity::Shell)]);
                 let deferred = defer_uncertain_agent_exits(&before, &mut current, |_| live);
                 assert!(exited_apps(&before, &current).is_empty(), "{app}: {live:?}");
-                for full in [false, true] {
-                    let events: Vec<_> = diff(&before, &current, full, 123)
-                        .into_iter()
-                        .filter(|e| !deferred.contains(&e.terminal_id))
-                        .collect();
-                    assert!(events.is_empty());
-                }
+                let events: Vec<_> = diff(&before, &current, 123)
+                    .into_iter()
+                    .filter(|e| !deferred.contains(&e.terminal_id))
+                    .collect();
+                assert!(events.is_empty());
                 assert_eq!(
                     current, before,
                     "a later confirmed exit still needs its baseline"
@@ -157,7 +169,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            diff(&published, &current, false, 123).len(),
+            diff(&published, &current, 123).len(),
             1,
             "the fresh pane needs its own observation"
         );

@@ -39,13 +39,13 @@ it("workspace 진입과 Remote도 공유하는 pane focus에서 대상 상태를
   expect(refreshed).not.toHaveBeenCalled();
 });
 
-it("출력과 진입이 없어도 60초마다 모든 pane을 다시 읽고 dispose 후 멈춘다", async () => {
-  await vi.advanceTimersByTimeAsync(59_999);
+it("시간 경과만으로 전체 pane을 재조회하지 않고 foreground에서는 현재 workspace만 읽는다", async () => {
+  await vi.advanceTimersByTimeAsync(180_000);
   expect(refreshed).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1);
-  expect(refreshed).toHaveBeenLastCalledWith(["a", "b"]);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(refreshed).toHaveBeenLastCalledWith(["a"]);
   stop();
   refreshed.mockClear();
-  await vi.advanceTimersByTimeAsync(120_000);
+  document.dispatchEvent(new Event("visibilitychange"));
   expect(refreshed).not.toHaveBeenCalled();
 });

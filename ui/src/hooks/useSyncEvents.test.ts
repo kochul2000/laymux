@@ -424,6 +424,7 @@ describe("useSyncEvents", () => {
     renderHook(() => useSyncEvents());
     const emit = mockOnCommandStatus.mock.calls[0][0];
     act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({ type: "shell" });
     expect(useTerminalStore.getState().instances[0].task?.state).toBe("idle");
     act(() => emit({ terminalId: "shell-task", generation: 7, phase: "start" }));
     act(() => emit({ terminalId: "shell-task", generation: 6, phase: "end", exitCode: 0 }));
@@ -440,6 +441,31 @@ describe("useSyncEvents", () => {
       result: "success",
     });
     expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("an agent exit title alone does not prove a shell prompt", () => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "exit-pane", profile: "WSL", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("exit-pane", {
+      generation: 7,
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+    renderHook(() => useSyncEvents());
+    const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() =>
+      title({
+        terminalId: "exit-pane",
+        generation: 7,
+        title: "",
+        interactiveAppExited: true,
+        activitySequence: 100,
+      }),
+    );
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({ type: "unknown" });
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    act(() => command({ terminalId: "exit-pane", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({ type: "shell" });
   });
 
   it("ends a shell command the integration reports as stopped as interrupted (ADR-0341)", () => {
@@ -1103,7 +1129,7 @@ describe("useSyncEvents", () => {
     expect(instance?.lastCommand).toBe("gh pr view 3237");
   });
 
-  it("preserves interactiveApp activity when sub-command exits with error (OSC 133 D)", () => {
+  it.each(["Claude", "Codex", "Grok"])("preserves %s activity when a sub-command exits", (name) => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
@@ -1112,7 +1138,7 @@ describe("useSyncEvents", () => {
     });
     // Set terminal as Claude interactiveApp
     useTerminalStore.getState().updateInstanceInfo("t1", {
-      activity: { type: "interactiveApp", name: "Claude" },
+      activity: { type: "interactiveApp", name },
     });
 
     renderHook(() => useSyncEvents());
@@ -1123,7 +1149,7 @@ describe("useSyncEvents", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     // Activity should remain interactiveApp, NOT "shell"
-    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name });
     // But exitCode should still be recorded
     expect(instance?.lastExitCode).toBe(1);
   });
@@ -1374,7 +1400,7 @@ describe("useSyncEvents", () => {
     ).toBe("previous status message");
   });
 
-  it("returns Codex terminal to shell on exitCode", () => {
+  it("does not infer Codex process exit from an exit code alone", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
@@ -1392,8 +1418,37 @@ describe("useSyncEvents", () => {
     callback({ terminalId: "t1", exitCode: 0 });
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-    expect(instance?.activity).toEqual({ type: "shell" });
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
     expect(instance?.lastExitCode).toBe(0);
+  });
+
+  it("an agent's child command naming another agent cannot change its owner", () => {
+    useTerminalStore.getState().registerInstance({ id: "parent", profile: "WSL", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("parent", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      activitySequence: 10,
+    });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    act(() => command({ terminalId: "parent", command: "codex", activitySequence: 11 }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
+    expect(useTerminalStore.getState().instances[0].lastCommand).toBe("codex");
+  });
+
+  it("a command derived before a reconcile cannot overwrite the newer activity", () => {
+    useTerminalStore.getState().registerInstance({ id: "ordered", profile: "WSL", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("ordered", {
+      activity: { type: "shell" },
+      activitySequence: 20,
+    });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    act(() => command({ terminalId: "ordered", command: "codex", activitySequence: 10 }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({ type: "shell" });
+    expect(useTerminalStore.getState().instances[0].activitySequence).toBe(20);
   });
 
   it("clears outputActive immediately on active:false event (app-agnostic)", () => {

@@ -15,6 +15,8 @@ pub(crate) use startup_probe::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TerminalActivity {
+    /// No reliable evidence of an app, command, or shell prompt.
+    Unknown,
     /// At shell prompt, waiting for user input.
     Shell,
     /// A non-interactive command is running (e.g., npm build, sleep).

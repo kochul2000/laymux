@@ -1321,7 +1321,7 @@ impl McpHandler {
     }
 
     /// Sample a terminal's pre-write state in a single `output_buffers` lock:
-    /// its activity (shell / running / interactiveApp) as JSON, and — when
+    /// its activity (unknown / shell / running / interactiveApp) as JSON, and — when
     /// `want_seq` — the current output-buffer write sequence to bracket a
     /// `capture_ms` window. Call this while holding the per-terminal exec lock so
     /// the sample is atomic w.r.t. this terminal's write ordering. A poisoned
@@ -1944,7 +1944,7 @@ impl McpHandler {
 
     /// List terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition.
     /// Pass workspace_id to filter terminals by workspace (omit for all terminals).
-    /// The activity field reflects backend detection: shell, running, or interactiveApp (with name).
+    /// The activity field reflects backend detection: unknown, shell, running, or interactiveApp (with name).
     #[tool]
     async fn list_terminals(
         &self,
@@ -2231,7 +2231,7 @@ impl McpHandler {
     }
 
     /// Get backend activity as {states: {terminalId: {activity: {type, name?}}}}.
-    /// type is shell, running, or interactiveApp (with app name).
+    /// type is unknown, shell, running, or interactiveApp (with app name).
     #[tool]
     async fn get_terminal_states(&self) -> Result<CallToolResult, ErrorData> {
         let states = match crate::activity::detect_all_terminal_states(&self.state.app_state) {

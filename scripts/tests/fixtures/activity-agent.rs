@@ -16,7 +16,7 @@ fn main() {
     if provider == "Codex" {
         fs::write(&rollout, format!("{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"source\":\"cli\",\"cwd\":\"/tmp\"}}}}\n{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"fixture-turn\"}}}}\n")).unwrap();
         print!("\x1b]0;codex | {id} | dev fixture\x07");
-    } else {
+    } else if provider == "Claude" {
         print!("\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07");
     }
     println!("ACTIVITY_FIXTURE_READY:{}", std::process::id());
@@ -25,6 +25,15 @@ fn main() {
         let command = line.unwrap();
         match command.trim() {
             "flood" => println!("{}", "x".repeat(32768)),
+            "title-reset" => print!("\x1b]0;dev fixture cwd\x07"),
+            "stale-title" => print!("\x1b]0;Claude Code\x07"),
+            "restore-title" => {
+                if provider == "Codex" {
+                    print!("\x1b]0;codex | {id} | dev fixture\x07");
+                } else {
+                    print!("\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07");
+                }
+            }
             "busy" | "done" if provider == "Codex" => {
                 let kind = if command.trim() == "busy" {
                     "task_started"

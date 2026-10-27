@@ -14,6 +14,8 @@ mod liveness_tests;
 
 mod state_detection;
 pub use state_detection::detect_terminal_state;
+mod observations;
+pub use observations::{observation_sequences, record_observation};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -264,25 +266,16 @@ pub fn is_claude_idle_from_buffer(buffer: Option<&TerminalOutputBuffer>) -> bool
 /// Check if a terminal is at a shell prompt by examining its output buffer.
 pub fn is_terminal_at_prompt_from_buffer(buffer: Option<&TerminalOutputBuffer>) -> bool {
     let Some(buf) = buffer else {
-        return true; // Unknown terminal → assume at prompt
+        return false;
     };
     let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
         // A poisoned authoritative ring must not be mistaken for an idle shell.
         return false;
     };
-    if recent.is_empty() {
-        return true; // No output yet → assume at prompt
-    }
-
-    let last_c = osc::find_last_osc_133(&recent, b"C");
-    let last_d = osc::find_last_osc_133(&recent, b"D");
-
-    match (last_c, last_d) {
-        (Some(c_pos), Some(d_pos)) => d_pos > c_pos,
-        (None, Some(_)) => true,
-        (Some(_), None) => false,
-        (None, None) => true,
-    }
+    matches!(
+        state_detection::detect_shell_activity(&recent),
+        TerminalActivity::Shell
+    )
 }
 
 /// Detect if a known interactive app is running based on the terminal title.
@@ -999,25 +992,20 @@ pub fn detect_interactive_app_from_live_title(
 /// Detect the activity state of a terminal from its output buffer.
 pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> TerminalActivity {
     let Some(buf) = buffer else {
-        return TerminalActivity::Shell;
+        return TerminalActivity::Unknown;
     };
     let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
-        return TerminalActivity::Shell;
+        return TerminalActivity::Unknown;
     };
     if recent.is_empty() {
-        return TerminalActivity::Shell;
+        return TerminalActivity::Unknown;
     }
 
     if let Some(name) = detect_interactive_app(&recent) {
         return TerminalActivity::InteractiveApp { name };
     }
 
-    let at_prompt = is_terminal_at_prompt_from_buffer(Some(buf));
-    if at_prompt {
-        return TerminalActivity::Shell;
-    }
-
-    TerminalActivity::Running
+    state_detection::detect_shell_activity(&recent)
 }
 
 /// Detect one terminal state for a control/admission decision.
@@ -1404,6 +1392,8 @@ pub struct PtyCallbackState {
     /// that discriminator: read it with the verdict, and refuse the cleanup if
     /// it moved (ADR-0136 §5).
     pub detection_epoch: AtomicU64,
+    /// Last emitted title/command observation, scoped to this PTY callback.
+    pub activity_observation_sequence: AtomicU64,
     pub burst_detector: BurstDetector,
     /// Volume-based activity detector — the app-agnostic signal that keeps the
     /// working verdict alive when the frame and title paths both miss
@@ -1428,6 +1418,7 @@ impl PtyCallbackState {
             codex_detected: AtomicBool::new(false),
             grok_detected: AtomicBool::new(false),
             detection_epoch: AtomicU64::new(0),
+            activity_observation_sequence: AtomicU64::new(0),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
             volume_detector: OutputVolumeDetector::new(
                 volume_window_ms,
@@ -1438,6 +1429,11 @@ impl PtyCallbackState {
                 crate::constants::DEC_SYNC_OUTPUT_SET,
             )),
         }
+    }
+
+    pub fn record_observation(&self, sequence: u64) {
+        self.activity_observation_sequence
+            .fetch_max(sequence, std::sync::atomic::Ordering::Release);
     }
 
     /// Scan `data` for DEC 2026 Synchronized Output set markers, correctly
@@ -1514,7 +1510,7 @@ mod tests {
     fn detect_activity_empty_buffer() {
         assert!(matches!(
             detect_terminal_activity(None),
-            TerminalActivity::Shell
+            TerminalActivity::Unknown
         ));
     }
 
@@ -1549,7 +1545,7 @@ mod tests {
 
     #[test]
     fn prompt_detection_no_markers() {
-        assert!(is_terminal_at_prompt_from_buffer(None));
+        assert!(!is_terminal_at_prompt_from_buffer(None));
     }
 
     // ── detect_interactive_app_from_title word boundary tests ──
@@ -2112,14 +2108,14 @@ mod tests {
     // ── P1 #1 stale-cache regressions (review follow-up) ──
 
     #[test]
-    fn stale_codex_cache_yields_shell_without_live_signal() {
+    fn stale_codex_cache_yields_unknown_without_live_signal() {
         // P1 #1: a pane previously ran Codex so its ID sits in
         // `known_codex_terminals`. The PTY exit path may not have fired
         // (callback dropped, no OSC 0/2 emitted on exit, exit detected by
         // a non-title channel, etc.), so the cache alone cannot be
         // authoritative. Pre-fix the helper returned true on cache hit
         // alone and pinned the pane as InteractiveApp{Codex} forever,
-        // blocking sync-cwd. Post-fix: no live signal -> Shell, AND the
+        // blocking sync-cwd. Post-fix: no live signal -> Unknown, AND the
         // stale cache entry is dropped so subsequent calls don't recurse.
         let state = AppState::new();
         let tid = "t-codex-stale-no-signal";
@@ -2137,11 +2133,8 @@ mod tests {
 
         let activity = detect_terminal_state(&state, tid, Some(&buf)).activity;
         assert!(
-            matches!(
-                activity,
-                TerminalActivity::Shell | TerminalActivity::Running
-            ),
-            "stale Codex cache without live signal must yield Shell, got {:?}",
+            matches!(activity, TerminalActivity::Unknown),
+            "stale Codex cache without live signal must yield Unknown, got {:?}",
             activity
         );
         assert!(
@@ -2151,8 +2144,8 @@ mod tests {
     }
 
     #[test]
-    fn stale_claude_cache_yields_shell_without_live_signal() {
-        // Mirror of stale_codex_cache_yields_shell. Claude has an exit
+    fn stale_claude_cache_yields_unknown_without_live_signal() {
+        // Mirror of stale_codex_cache_yields_unknown. Claude has an exit
         // path (cr.exited), but the same hazard exists if the title
         // sequence never fires (SIGKILL, callback drop, PTY chunk
         // boundary loss). Cache alone must not pin classification.
@@ -2170,11 +2163,8 @@ mod tests {
 
         let activity = detect_terminal_state(&state, tid, Some(&buf)).activity;
         assert!(
-            matches!(
-                activity,
-                TerminalActivity::Shell | TerminalActivity::Running
-            ),
-            "stale Claude cache without live signal must yield Shell, got {:?}",
+            matches!(activity, TerminalActivity::Unknown),
+            "stale Claude cache without live signal must yield Unknown, got {:?}",
             activity
         );
         assert!(

@@ -411,8 +411,10 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
   label: string;
   color: string;
 } {
-  if (!activity) return { label: "shell", color: "var(--text-secondary)" };
+  if (!activity) return { label: "unknown", color: "var(--text-secondary)" };
   switch (activity.type) {
+    case "unknown":
+      return { label: "unknown", color: "var(--text-secondary)" };
     case "shell":
       return { label: "shell", color: "var(--text-secondary)" };
     case "running":
