@@ -4,6 +4,7 @@
 
 use super::lifecycle::ProcessRows;
 use crate::commands::wsl_agent_session::WslAgentProcess;
+use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::{GuestObservation, GuestProbeKey, TerminalCatalog};
 use std::collections::{BTreeMap, HashMap};
@@ -47,7 +48,70 @@ pub(super) fn read_rows_batch(
     observation: GuestObservation,
     deadline: Instant,
 ) -> HashMap<String, Result<ProcessRows, String>> {
+    if observation.is_reusable() {
+        return read_cached_rows(state, processes);
+    }
     read_rows_batch_with(state, processes, observation, deadline, run_batch)
+}
+
+fn read_cached_rows(
+    state: &AppState,
+    processes: &HashMap<String, Option<WslAgentProcess>>,
+) -> HashMap<String, Result<ProcessRows, String>> {
+    processes
+        .iter()
+        .filter_map(|(id, process)| {
+            let process = process.as_ref()?;
+            let result = (|| {
+                let catalog =
+                    TerminalCatalog::for_ids(state, &std::collections::HashSet::from([id.clone()]))
+                        .map_err(|e| e.to_string())?;
+                let generation = state
+                    .pty_handles
+                    .lock_or_err()
+                    .map_err(|e| e.to_string())?
+                    .get(id)
+                    .map(|h| h.terminal_generation())
+                    .unwrap_or(0);
+                let root = crate::commands::cached_root_pid(
+                    state,
+                    id,
+                    generation,
+                    "codex",
+                    Some(&process.distro),
+                );
+                let runs = if root == Some(process.pid) {
+                    state
+                        .wsl_guest_snapshots
+                        .cached_run_for_verified_root(
+                            BATCH_NAME,
+                            &process.distro,
+                            &catalog,
+                            &[process.pid.to_string(), id.clone()],
+                        )
+                        .into_iter()
+                        .collect()
+                } else {
+                    state
+                        .wsl_guest_snapshots
+                        .cached_runs(BATCH_NAME, &process.distro, &catalog)
+                };
+                for (args, output) in runs {
+                    let Some(index) = args
+                        .chunks_exact(2)
+                        .position(|pair| pair[0] == process.pid.to_string() && &pair[1] == id)
+                    else {
+                        continue;
+                    };
+                    let output = output?;
+                    let mut rows = parse_batch_output(&output, args.len() / 2)?;
+                    return require_identity(rows.remove(index)?, process.pid);
+                }
+                Err("Codex ownership awaits a targeted observation".into())
+            })();
+            Some((id.clone(), result))
+        })
+        .collect()
 }
 
 fn read_rows_batch_with<R>(
@@ -192,6 +256,7 @@ fn run_batch(distro: &str, panes: &[Pane], timeout: Duration) -> Result<Vec<u8>,
     }
     let helper =
         crate::path_utils::windows_to_wsl_path(helper.to_str().ok_or("invalid WSL probe path")?);
+    crate::activity_reconcile::metrics::guest(distro, BATCH_NAME);
     let mut command = crate::process::headless_wsl_command();
     command.args([
         "-d",

@@ -1,34 +1,7 @@
-//! Interactive-app liveness across the WSL boundary (ADR-0134).
-//!
-//! [`crate::process_tree`] answers "is Claude / Codex alive under this PTY?" by
-//! walking the Windows process tree. For a WSL-backed pane that walk can only
-//! ever see `wsl.exe`: the agent runs as a Linux process inside the VM, which
-//! no Windows snapshot enumerates. The tree therefore has no standing to call
-//! such a pane empty, and this module supplies the verdict instead.
-//!
-//! The probe cannot run on the PTY callback thread — OSC 0/2 spinner titles
-//! arrive several times per second and `wsl.exe --exec` costs tens of
-//! milliseconds. Every guest crossing therefore happens on the activity
-//! reconcile worker ([`crate::activity_reconcile`]), which calls [`refresh`]
-//! once per pass; detection only ever reads the snapshot it published, so the
-//! reconcile cadence is also the probe cadence (ADR-0135, correcting ADR-0134's
-//! observation gating).
-//!
-//! Freshness is deliberately asymmetric:
-//!
-//! - Fresh snapshot — both verdicts are authoritative.
-//! - Stale snapshot — only `Running` survives. A stale negative degrades to
-//!   `Unknown` so a just-started agent is picked up by the title/buffer
-//!   heuristics immediately instead of waiting out the staleness window.
-//! - No snapshot / no verdict for this pane in the last pass — `Unknown`.
-//!
-//! Exit decisions read the same verdict as display: for a WSL pane the guest
-//! probe owns the exit, and the reconcile worker publishes the correction if a
-//! suppression turns out to be wrong (ADR-0135, superseding ADR-0134's
-//! withhold-on-exit rule).
-//!
-//! Verdicts are keyed by PTY generation, because a pane can be torn down and
-//! respawned under the same terminal id.
+//! Generation-bound WSL liveness, observed only for requested targets (ADR-0362).
+//! PTY callbacks read per-target results without crossing the guest boundary.
+//! Negatives expire after 8s, positives after 20s; neither is a reason to run
+//! periodic whole-app probes. Expiry is Unknown, never proof of Shell.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -59,7 +32,7 @@ use crate::state::AppState;
 const WSL_LIVENESS_PROBE: &str = r#"
 printf 'LAYMUX_WSL_LIVENESS_PROBE_V1\n'
 for proc in /proc/[0-9]*; do
-  name=$(cat "$proc/comm" 2>/dev/null) || continue
+  IFS= read -r name < "$proc/comm" 2>/dev/null || continue
   case "$name" in
     claude|codex|grok) ;;
     *) continue ;;
@@ -79,7 +52,12 @@ for proc in /proc/[0-9]*; do
     elif [ -z "$terminal_id" ]; then
       unreadable=1
     fi
-    parent=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$current/status" 2>/dev/null)
+    parent=
+    if [ -r "/proc/$current/status" ]; then
+      while read -r key value; do
+        if [ "$key" = 'PPid:' ]; then parent=$value; break; fi
+      done < "/proc/$current/status" 2>/dev/null
+    fi
     [ -n "$parent" ] || break
     [ "$parent" = "0" ] && break
     current=$parent
@@ -134,30 +112,25 @@ pub struct WslLivenessSnapshot {
 
 struct CacheEntry {
     taken_at: Instant,
-    snapshot: WslLivenessSnapshot,
+    generation: u64,
+    app: Option<&'static str>,
 }
 
-static CACHE: std::sync::Mutex<Option<CacheEntry>> = std::sync::Mutex::new(None);
+static CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, CacheEntry>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
-/// The liveness verdict for a WSL-backed pane. Cheap: one mutex and a map
-/// lookup, no process enumeration and no guest crossing.
-///
-/// The same verdict serves display and exit decisions. ADR-0134 withheld
-/// positives from exit decisions because a wrong suppression would pin a dead
-/// pane with nothing to undo it; the reconcile worker (ADR-0135) is now that
-/// undo, so the guest probe owns WSL exits outright — a title-derived exit for a
-/// live agent is the failure that actually reaches users.
+/// Per-pane timestamps: observing B cannot renew an old negative about A.
 pub fn liveness(terminal_id: &str, generation: u64) -> PtyAppLiveness {
     let Ok(guard) = CACHE.lock_or_err() else {
         return PtyAppLiveness::Unknown;
     };
-    let Some(entry) = guard.as_ref() else {
+    let Some(entry) = guard.get(terminal_id) else {
         return PtyAppLiveness::Unknown;
     };
-    decide(
-        &entry.snapshot,
+    decide_entry(
+        entry.generation,
+        entry.app,
         entry.taken_at.elapsed(),
-        terminal_id,
         generation,
     )
 }
@@ -172,40 +145,53 @@ pub fn decide(
     let Some((verdict_generation, app)) = snapshot.verdicts.get(terminal_id) else {
         return PtyAppLiveness::Unknown;
     };
-    // A verdict about a previous PTY generation is not about this pane's
-    // current process at all.
-    if *verdict_generation != generation {
+    decide_entry(*verdict_generation, *app, age, generation)
+}
+
+fn decide_entry(
+    verdict_generation: u64,
+    app: Option<&'static str>,
+    age: Duration,
+    generation: u64,
+) -> PtyAppLiveness {
+    if verdict_generation != generation {
         return PtyAppLiveness::Unknown;
     }
     match app {
         Some(app) if age <= crate::constants::WSL_LIVENESS_POSITIVE_MAX_AGE => {
             PtyAppLiveness::Running(app)
         }
-        Some(_) => PtyAppLiveness::Unknown,
         None if age <= crate::constants::WSL_LIVENESS_AUTHORITATIVE_MAX_AGE => {
             PtyAppLiveness::NoneAlive
         }
-        None => PtyAppLiveness::Unknown,
+        _ => PtyAppLiveness::Unknown,
     }
 }
 
-/// Drop any verdict about `terminal_id`. Called when a PTY session closes so a
-/// verdict cannot outlive the process it described, even if a probe pass that
-/// started before the teardown is still in flight.
 pub fn forget(terminal_id: &str) {
     if let Ok(mut guard) = CACHE.lock_or_err() {
-        if let Some(entry) = guard.as_mut() {
-            entry.snapshot.verdicts.remove(terminal_id);
-        }
+        guard.remove(terminal_id);
     }
 }
 
-fn publish(snapshot: WslLivenessSnapshot) {
+fn publish_selected(snapshot: WslLivenessSnapshot, selected: &HashSet<String>) {
     if let Ok(mut guard) = CACHE.lock_or_err() {
-        *guard = Some(CacheEntry {
-            taken_at: Instant::now(),
-            snapshot,
-        });
+        let now = Instant::now();
+        for id in selected {
+            guard.remove(id);
+        }
+        for (id, (generation, app)) in snapshot.verdicts {
+            if selected.contains(&id) {
+                guard.insert(
+                    id,
+                    CacheEntry {
+                        taken_at: now,
+                        generation,
+                        app,
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -240,6 +226,18 @@ fn probe_timeout(remaining: Duration) -> Option<Duration> {
 /// ones every time.
 #[cfg(windows)]
 pub fn refresh(state: &AppState) {
+    let ids = pty_generations(state)
+        .unwrap_or_default()
+        .into_keys()
+        .collect();
+    refresh_selected(state, &ids);
+}
+
+#[cfg(windows)]
+pub(crate) fn refresh_selected(state: &AppState, selected: &HashSet<String>) {
+    if selected.is_empty() {
+        return;
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
     static PASS: AtomicUsize = AtomicUsize::new(0);
 
@@ -249,15 +247,17 @@ pub fn refresh(state: &AppState) {
     // top of every probe below.
     let target_deadline =
         pass_deadline.min(Instant::now() + crate::constants::WSL_LIVENESS_PROBE_TIMEOUT);
-    let targets = match crate::wsl_probe::wsl_terminal_targets(state, target_deadline) {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!(%error, "WSL liveness target resolution failed");
-            return;
-        }
-    };
+    let targets =
+        match crate::wsl_probe::wsl_terminal_targets_scoped(state, target_deadline, Some(selected))
+        {
+            Ok(targets) => targets,
+            Err(error) => {
+                tracing::warn!(%error, "WSL liveness target resolution failed");
+                return;
+            }
+        };
     if targets.targets.is_empty() {
-        publish(WslLivenessSnapshot::default());
+        publish_selected(WslLivenessSnapshot::default(), selected);
         return;
     }
     if targets.lookup_failed {
@@ -346,7 +346,7 @@ pub fn refresh(state: &AppState) {
             "WSL liveness pass ran out of budget; distributions left without a verdict"
         );
     }
-    publish(snapshot);
+    publish_selected(snapshot, selected);
 }
 
 /// Current PTY generation per terminal. Taken after `terminals` is released so
@@ -456,7 +456,7 @@ pub fn resolve_rows(rows: Vec<WslAgentRow>) -> (HashMap<String, &'static str>, H
 mod tests {
     use super::*;
     use crate::constants::{
-        ACTIVITY_RECONCILE_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_PASS_BUDGET,
+        ACTIVITY_FALLBACK_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_PASS_BUDGET,
         WSL_LIVENESS_POSITIVE_MAX_AGE, WSL_LIVENESS_PROBE_TIMEOUT,
     };
 
@@ -476,17 +476,18 @@ mod tests {
     }
 
     #[test]
-    fn steady_state_refresh_keeps_snapshots_inside_the_authoritative_window() {
-        // Two publishes are separated by one cadence plus one whole pass, and
-        // the pass — resolution plus every distribution's probe — is bounded by
-        // the pass budget rather than by a single probe timeout. A negative must
-        // stay authoritative across that worst case instead of flapping to
-        // Unknown in normal operation.
-        assert!(
-            ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET
-                <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE
-        );
+    fn display_fallback_does_not_extend_control_liveness() {
+        assert!(ACTIVITY_FALLBACK_INTERVAL > WSL_LIVENESS_POSITIVE_MAX_AGE);
         assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
+        assert_eq!(
+            decide(
+                &fresh(),
+                WSL_LIVENESS_AUTHORITATIVE_MAX_AGE + Duration::from_millis(1),
+                "t-empty",
+                GEN
+            ),
+            PtyAppLiveness::Unknown
+        );
     }
 
     /// The budget has to cover more than one probe: resolution spends from it

@@ -9,8 +9,8 @@ use tauri::State;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::GuestObservation;
 
-use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
-use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
+use super::session_attribution::{provider_terminal_domains_scoped, ProviderSessionLookup};
+use super::wsl_agent_session::{resolve_wsl_agent_processes_scoped, WslAgentProvider};
 
 /// `<configured grok command> --resume <uuid>` only. Prefix is re-derived
 /// from disk settings (ADR-0125 / ADR-0156).
@@ -184,7 +184,16 @@ pub(crate) fn get_grok_session_lookup_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, String> {
-    Ok(get_grok_session_records_impl(session_max_age_hours, state, observation)?.lookup)
+    get_grok_session_lookup_scoped(session_max_age_hours, state, observation, None)
+}
+
+pub(crate) fn get_grok_session_lookup_scoped(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<ProviderSessionLookup, String> {
+    Ok(get_grok_session_records_scoped(session_max_age_hours, state, observation, scope)?.lookup)
 }
 
 /// Session attribution plus each attributed session's directory.
@@ -200,9 +209,18 @@ pub(crate) fn get_grok_session_records_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<GrokSessionRecords, String> {
+    get_grok_session_records_scoped(session_max_age_hours, state, observation, None)
+}
+
+pub(crate) fn get_grok_session_records_scoped(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<GrokSessionRecords, String> {
     let home = grok_home();
     let mut directories = HashMap::new();
-    let domains = provider_terminal_domains(state)?;
+    let domains = provider_terminal_domains_scoped(state, scope)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
         .iter()
@@ -212,7 +230,7 @@ pub(crate) fn get_grok_session_records_impl(
     let mut observed = Vec::new();
     let mut candidates = Vec::new();
     if !terminal_roots.is_empty() {
-        match crate::process_tree::try_snapshot_processes() {
+        match crate::process_tree::session_processes(state, observation) {
             Ok(snapshot) => {
                 for (terminal_id, root_pid) in terminal_roots {
                     let Some((pid, app)) =
@@ -256,7 +274,7 @@ pub(crate) fn get_grok_session_records_impl(
         .filter_map(|(id, session)| session.map(|session| (id, session)))
         .collect(),
     );
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Grok, observation) {
+    match resolve_wsl_agent_processes_scoped(state, WslAgentProvider::Grok, observation, scope) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {

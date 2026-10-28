@@ -2,9 +2,7 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Barrier;
 
-use crate::constants::{
-    ACTIVITY_RECONCILE_INTERVAL, WSL_AGENT_PROBE_TIMEOUT, WSL_GUEST_SNAPSHOT_MAX_AGE,
-};
+use crate::constants::{WSL_AGENT_PROBE_TIMEOUT, WSL_GUEST_SNAPSHOT_MAX_AGE};
 
 const LONG: Duration = Duration::from_secs(5);
 
@@ -23,6 +21,157 @@ fn catalog(entries: &[(&str, u64)]) -> TerminalCatalog {
 
 fn deadline() -> Instant {
     Instant::now() + LONG
+}
+
+#[test]
+fn cached_display_reads_never_start_runs_and_cannot_cross_a_generation() {
+    let cache = GuestSnapshots::<usize>::new(LONG, LONG);
+    let runs = Arc::new(AtomicUsize::new(0));
+    let both = catalog(&[("a", 1), ("b", 1)]);
+    assert!(cache.cached_runs("test-probe", "Ubuntu", &both).is_empty());
+    assert_eq!(cache.runs_started("test-probe"), 0);
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &both,
+        GuestObservation::starting_now(),
+        counted(&runs, Duration::ZERO),
+    )
+    .unwrap();
+    for _ in 0..360 {
+        assert_eq!(
+            *cache.cached_runs("test-probe", "Ubuntu", &catalog(&[("a", 1)]))[0]
+                .1
+                .as_ref()
+                .unwrap()
+                .as_ref(),
+            1
+        );
+    }
+    assert!(cache
+        .cached_runs("test-probe", "Ubuntu", &catalog(&[("a", 2)]))
+        .is_empty());
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &catalog(&[("a", 1)]),
+        GuestObservation::starting_now(),
+        counted(&runs, Duration::ZERO),
+    )
+    .unwrap();
+    assert_eq!(
+        *cache.cached_runs("test-probe", "Ubuntu", &catalog(&[("a", 1)]))[0]
+            .1
+            .as_ref()
+            .unwrap()
+            .as_ref(),
+        2
+    );
+    assert_eq!(
+        *cache.cached_runs("test-probe", "Ubuntu", &catalog(&[("b", 1)]))[0]
+            .1
+            .as_ref()
+            .unwrap()
+            .as_ref(),
+        1
+    );
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_failed_newer_display_observation_never_falls_back_to_an_older_success() {
+    let cache = GuestSnapshots::<usize>::new(LONG, LONG);
+    let c = catalog(&[("a", 1)]);
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &c,
+        GuestObservation::starting_now(),
+        |_| Ok(1),
+    )
+    .unwrap();
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &c,
+        GuestObservation::starting_now(),
+        |_| Err("probe failure".into()),
+    )
+    .unwrap_err();
+    assert_eq!(
+        cache.cached_runs("test-probe", "Ubuntu", &c)[0]
+            .1
+            .as_ref()
+            .unwrap_err(),
+        "probe failure"
+    );
+    assert_eq!(cache.runs_started("test-probe"), 2);
+}
+
+#[test]
+fn retaining_a_live_roots_metadata_never_renews_observation_freshness() {
+    let cache = GuestSnapshots::<usize>::new(LONG, LONG);
+    let runs = Arc::new(AtomicUsize::new(0));
+    let c = catalog(&[("a", 1)]);
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &c,
+        GuestObservation::starting_now(),
+        counted(&runs, Duration::ZERO),
+    )
+    .unwrap();
+    let original = Instant::now() - crate::constants::ACTIVITY_DISPLAY_RETENTION - LONG;
+    cache
+        .slots
+        .lock()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap()
+        .completed
+        .as_mut()
+        .unwrap()
+        .0 = original;
+    assert!(cache.cached_runs("test-probe", "Ubuntu", &c).is_empty());
+    let retained = cache
+        .cached_run_for_verified_root("test-probe", "Ubuntu", &c, &[])
+        .unwrap();
+    assert_eq!(*retained.1.unwrap(), 1);
+    assert!(
+        cache.cached_runs("test-probe", "Ubuntu", &c).is_empty(),
+        "retention is not a fresh observation"
+    );
+    assert_eq!(
+        cache
+            .slots
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .completed
+            .as_ref()
+            .unwrap()
+            .0,
+        original
+    );
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert!(cache
+        .cached_run_for_verified_root("test-probe", "Ubuntu", &catalog(&[("a", 2)]), &[])
+        .is_none());
+    assert_eq!(
+        ask(
+            &cache,
+            key("Ubuntu"),
+            &c,
+            GuestObservation::starting_now(),
+            counted(&runs, Duration::ZERO)
+        )
+        .unwrap(),
+        2
+    );
 }
 
 /// One request answered to completion.
@@ -57,13 +206,13 @@ fn counted(
 
 /// The two bounds `WSL_GUEST_SNAPSHOT_MAX_AGE` documents.
 #[test]
-fn reuse_window_covers_a_whole_run_and_stays_within_one_reconcile_pass() {
+fn reusable_run_window_is_independent_of_metadata_wakeup() {
     // A polling caller that arrives while a run is still in flight must join
     // it; otherwise slow guests would grow a second run beside the first.
     assert!(WSL_GUEST_SNAPSHOT_MAX_AGE >= WSL_AGENT_PROBE_TIMEOUT);
     // Attribution polling must not lag the liveness verdict it is combined
     // with by more than one reconcile pass.
-    assert!(WSL_GUEST_SNAPSHOT_MAX_AGE <= ACTIVITY_RECONCILE_INTERVAL);
+    assert!(WSL_GUEST_SNAPSHOT_MAX_AGE < crate::constants::ACTIVITY_FALLBACK_INTERVAL);
 }
 
 #[test]

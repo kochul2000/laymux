@@ -17,6 +17,9 @@ pub struct ProcessIdentity {
     pub pid: u32,
     pub parent_pid: Option<u32>,
     pub start_time: u64,
+    /// Linux kernel birth ticks are stable across WSL wall-clock corrections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ticks: Option<u64>,
     pub name: String,
     pub helper: bool,
 }
@@ -127,6 +130,7 @@ fn ancestors() -> Vec<ProcessIdentity> {
             pid: pid.as_u32(),
             parent_pid: parent.map(Pid::as_u32),
             start_time: process.start_time(),
+            start_ticks: process_start_ticks(pid.as_u32()),
             name,
             helper,
         });
@@ -139,6 +143,28 @@ fn ancestors() -> Vec<ProcessIdentity> {
         pid = parent;
     }
     result
+}
+
+pub fn process_start_ticks(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        parse_start_ticks(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_start_ticks(stat: &str) -> Option<u64> {
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
 }
 
 pub fn emit(provider: &str) -> Result<(), String> {
@@ -203,6 +229,18 @@ pub fn emit(provider: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn kernel_birth_ticks_parse_names_with_spaces_and_parentheses() {
+        let stat = format!(
+            "42 (worker (name) test) S {} 123456 0 0",
+            ["0"; 18].join(" ")
+        );
+        assert_eq!(parse_start_ticks(&stat), Some(123456));
+        assert_eq!(parse_start_ticks("truncated"), None);
+        #[cfg(target_os = "linux")]
+        assert!(process_start_ticks(std::process::id()).is_some_and(|ticks| ticks > 0));
+    }
 
     #[test]
     fn grok_payload_preserves_prompt_identity_and_drops_contents() {

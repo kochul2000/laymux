@@ -51,12 +51,22 @@ pub(crate) struct ProviderTerminalDomains {
 pub(crate) fn provider_terminal_domains(
     state: &AppState,
 ) -> Result<ProviderTerminalDomains, crate::error::AppError> {
+    provider_terminal_domains_scoped(state, None)
+}
+
+pub(crate) fn provider_terminal_domains_scoped(
+    state: &AppState,
+    scope: Option<&HashSet<String>>,
+) -> Result<ProviderTerminalDomains, crate::error::AppError> {
     let ptys = state.pty_handles.lock_or_err()?;
     let mut native_roots = Vec::new();
     let mut wsl_terminal_ids = HashSet::new();
     // Display caches can lag a provider handover. Every live PTY must reach
     // the process-tree lookup even when its current provider was never cached.
     for (terminal_id, handle) in ptys.iter() {
+        if scope.is_some_and(|ids| !ids.contains(terminal_id)) {
+            continue;
+        }
         if handle.is_wsl_backed() {
             wsl_terminal_ids.insert(terminal_id.clone());
         } else if let Some(child_pid) = handle.child_pid() {
@@ -313,9 +323,27 @@ pub(crate) fn get_terminal_session_attributions_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
+    get_terminal_session_attributions_scoped(
+        claude_session_max_age_hours,
+        codex_session_max_age_hours,
+        grok_session_max_age_hours,
+        state,
+        observation,
+        None,
+    )
+}
+
+pub(crate) fn get_terminal_session_attributions_scoped(
+    claude_session_max_age_hours: Option<u64>,
+    codex_session_max_age_hours: Option<u64>,
+    grok_session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    selected: Option<&HashSet<String>>,
+) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
     // A reused guest view may predate the capture; only the checkpoint's own
     // observation may vouch for NoAgent in its receipt.
-    let receipt_capture = if observation.is_reusable() {
+    let receipt_capture = if observation.is_reusable() || selected.is_some() {
         None
     } else {
         crate::session_checkpoint::receipt::collection_token(state)
@@ -327,38 +355,62 @@ pub(crate) fn get_terminal_session_attributions_impl(
         .pty_handles
         .lock_or_err()?
         .iter()
+        .filter(|(id, _)| selected.is_none_or(|ids| ids.contains(*id)))
         .map(|(terminal_id, handle)| (terminal_id.clone(), handle.terminal_generation()))
         .collect();
     // Each provider owns a bounded WSL wait. Run the three independent
     // lookups together so the command consumes one probe budget rather than
     // serially multiplying it past the five-second window-close deadline.
     // They share one guest scan per distribution (ADR-0335).
-    let (claude, mut codex, grok) = collect_provider_session_lookups(
-        || {
-            super::claude_session::get_claude_session_lookup_impl(
-                claude_session_max_age_hours,
-                state,
-                observation,
-            )
-        },
-        || {
-            super::codex_session::get_codex_session_lookup_impl(
-                codex_session_max_age_hours,
-                state,
-                observation,
-            )
-            .map_err(|error| error.to_string())
-        },
-        || {
-            super::grok_session::get_grok_session_lookup_impl(
-                grok_session_max_age_hours,
-                state,
-                observation,
-            )
-        },
-    )?;
-    let status_sessions =
-        super::codex_session::verified_status_sessions(state, &codex, observation)?;
+    let lookup = || {
+        collect_provider_session_lookups(
+            || {
+                super::claude_session::get_claude_session_lookup_scoped(
+                    claude_session_max_age_hours,
+                    state,
+                    observation,
+                    selected,
+                )
+            },
+            || {
+                super::codex_session::get_codex_session_lookup_scoped(
+                    codex_session_max_age_hours,
+                    state,
+                    observation,
+                    selected,
+                )
+                .map_err(|error| error.to_string())
+            },
+            || {
+                super::grok_session::get_grok_session_lookup_scoped(
+                    grok_session_max_age_hours,
+                    state,
+                    observation,
+                    selected,
+                )
+            },
+        )
+    };
+    #[cfg(windows)]
+    let (claude, mut codex, grok) = std::thread::scope(|scope| {
+        let ids = terminals.iter().map(|(id, _)| id.clone()).collect();
+        let guest = (selected.is_none() && !observation.is_reusable())
+            .then(|| scope.spawn(move || crate::wsl_liveness::refresh_selected(state, &ids)));
+        let result = lookup();
+        if let Some(guest) = guest {
+            guest
+                .join()
+                .map_err(|_| "WSL control liveness observer panicked".to_string())?;
+        }
+        result
+    })?;
+    #[cfg(not(windows))]
+    let (claude, mut codex, grok) = lookup()?;
+    let status_sessions = if selected.is_none() {
+        super::codex_session::verified_status_sessions(state, &codex, observation)?
+    } else {
+        HashMap::new()
+    };
     for (id, (generation, session_id, fresh)) in status_sessions {
         if terminals
             .iter()
@@ -377,12 +429,16 @@ pub(crate) fn get_terminal_session_attributions_impl(
     }
     codex.attributions =
         crate::process_tree::reject_duplicate_session_attributions(codex.attributions, "Codex");
-    let observed_handles = state.pty_handles.lock_or_err()?.clone();
-    let liveness = liveness::collect(
-        &observed_handles,
-        [&claude, &codex, &grok],
-        crate::process_tree::snapshot_processes,
-    );
+    let observed_handles = state
+        .pty_handles
+        .lock_or_err()?
+        .iter()
+        .filter(|(id, _)| selected.is_none_or(|ids| ids.contains(*id)))
+        .map(|(id, handle)| (id.clone(), handle.clone()))
+        .collect();
+    let liveness = liveness::collect(&observed_handles, [&claude, &codex, &grok], || {
+        crate::process_tree::session_processes(state, observation).unwrap_or_default()
+    });
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {

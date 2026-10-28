@@ -778,6 +778,7 @@ pub fn apply_interactive_app_exit(
     // window cannot re-pin the cache on the next title.
     clear_interactive_app_grace_window_for(state, terminal_id, app_name);
     record_interactive_app_exit(state, terminal_id, app_name);
+    crate::commands::forget_hook_binding(state, terminal_id, app_name);
     true
 }
 
@@ -1062,11 +1063,29 @@ fn detect_all_terminal_states_inner(
     state: &AppState,
     after_terminals_lock: impl FnOnce(),
 ) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_terminal_states_scoped_inner(state, None, after_terminals_lock)
+}
+
+pub(crate) fn detect_terminal_states_scoped(
+    state: &AppState,
+    ids: &std::collections::HashSet<String>,
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_terminal_states_scoped_inner(state, Some(ids), || {})
+}
+
+fn detect_terminal_states_scoped_inner(
+    state: &AppState,
+    ids: Option<&std::collections::HashSet<String>>,
+    after_terminals_lock: impl FnOnce(),
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
     let mut result = std::collections::HashMap::new();
     let terminals = state.terminals.lock_or_err()?;
     after_terminals_lock();
     let buffers = state.output_buffers.lock_or_err()?;
     for id in terminals.keys() {
+        if ids.is_some_and(|ids| !ids.contains(id)) {
+            continue;
+        }
         let buffer = buffers.get(id).ok_or_else(|| {
             AppError::Other(format!("Terminal '{id}' has no authoritative output ring"))
         })?;

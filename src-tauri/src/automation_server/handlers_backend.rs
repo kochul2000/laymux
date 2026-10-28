@@ -83,6 +83,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} }, inputDelivery: { [terminalId]: { attempts, succeeded, failed, attemptedBytes, succeededBytes, failedBytes } } } | null, terminalOutput: [{ terminalId, generation, desktopOutputState, reason, ...bounded counters/identities }] }"
             },
             {
+                "method": "GET", "path": "/api/v1/dev/activity-metrics",
+                "description": "Dev only: counts actual native process snapshots and WSL probe runs; lists recent targeted activity observations. Read-only; release returns 403.",
+                "response": "{ nativeSnapshots, guestRuns: { [distroAndProbe]: count }, passes: [{ ageMs, ids }] }"
+            },
+            {
                 "method": "POST", "path": "/api/v1/dev/terminal-output/{id}/fail-stop",
                 "description": "Dev only: fail-stop the current desktop output lease without ending its daemon child."
             },

@@ -3,6 +3,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { HookStateSnapshot } from "./agent-hooks-api";
 import { observeTaskTitle } from "./terminal-task-observers";
+import { terminalTaskPolicy } from "./terminal-task";
 
 const snapshot = (provider: "claude" | "codex", sequence = 1): HookStateSnapshot => ({
   generation: 7,
@@ -33,6 +34,35 @@ beforeEach(() => {
   store.observeTask("pane", { source: "heuristic", taskId: "1", sequence: 1, state: "running" });
 });
 afterEach(() => vi.useRealTimers());
+it("cached reads preserve the last hook state without renewing input permission", () => {
+  const store = useTerminalStore.getState();
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  const ended = { ...snapshot("claude"), state: "ended" as const, verifiedAtMs: Date.now() };
+  store.observeAgentHook("pane", ended);
+  expect(terminalTaskPolicy(useTerminalStore.getState().instances[0]).clearAllowed).toBe(true);
+  vi.advanceTimersByTime(7000);
+  store.observeAgentHook("pane", ended);
+  const current = useTerminalStore.getState().instances[0];
+  expect(current.agentHook?.verifiedAt).toBe(ended.verifiedAtMs);
+  expect(current.taskDetectionSource).toBe("hooks");
+  expect(current.task?.state).toBe("ended");
+  expect(terminalTaskPolicy(current).observation).toBe("stale");
+  expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+});
+
+it("fresh ownership alone cannot renew an expired running task phase", () => {
+  const store = useTerminalStore.getState();
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", {
+    ...snapshot("claude"),
+    state: "running",
+    observedAtMs: Date.now() - 61000,
+    verifiedAtMs: Date.now(),
+  });
+  const current = useTerminalStore.getState().instances[0];
+  expect(current.task?.state).toBe("running");
+  expect(terminalTaskPolicy(current).observation).toBe("stale");
+});
 describe.each(["claude", "codex"] as const)("%s hook selection", (provider) => {
   it("defaults to heuristics, selects hooks explicitly, and keeps the fallback current", () => {
     const store = useTerminalStore.getState();

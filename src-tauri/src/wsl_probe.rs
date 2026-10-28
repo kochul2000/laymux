@@ -15,6 +15,7 @@
 //! so its runs go through [`snapshot`]: one shared run per distribution, with
 //! the freshness each caller needs (ADR-0335).
 
+mod default_distro;
 pub mod snapshot;
 
 use std::time::{Duration, Instant};
@@ -51,11 +52,23 @@ pub fn wsl_terminal_targets(
     state: &AppState,
     deadline: Instant,
 ) -> Result<WslTerminalTargets, AppError> {
+    wsl_terminal_targets_scoped(state, deadline, None)
+}
+
+#[cfg(windows)]
+pub(crate) fn wsl_terminal_targets_scoped(
+    state: &AppState,
+    deadline: Instant,
+    scope: Option<&std::collections::HashSet<String>>,
+) -> Result<WslTerminalTargets, AppError> {
     let terminals = state.terminals.lock_or_err()?;
     let mut unresolved_default = Vec::new();
     let mut targets = Vec::new();
     let mut lookup_failed = false;
     for (terminal_id, session) in terminals.iter() {
+        if scope.is_some_and(|ids| !ids.contains(terminal_id)) {
+            continue;
+        }
         if session.initial_execution_host != InitialExecutionHost::Wsl {
             continue;
         }
@@ -96,38 +109,14 @@ pub fn wsl_terminal_targets(
     })
 }
 
-/// The default distribution, cached for `WSL_DEFAULT_DISTRO_CACHE_TTL`.
-///
-/// `wsl.exe --list --quiet` is a second process spawn on top of the probe
-/// itself, and the liveness refresher would pay it on every pass for any pane
-/// whose profile does not name a distribution. The default only changes when
-/// the user runs `wsl --set-default`, so a short cache is safe. Negative
-/// results are cached too, otherwise a machine with no WSL installed would
-/// spawn a doomed `wsl.exe` every cycle.
-/// Also used by the path-link batch (`stat_paths`, ADR-0188): its ambient
-/// triggers (hover dwell, Remote idle screen scan) fire far more often than a
-/// drag did, and each POSIX-looking candidate would otherwise pay the probe.
+/// Read Lxss metadata without starting wsl.exe or a guest.
 #[cfg(windows)]
-pub(crate) fn default_distro_cached(timeout: Duration) -> Option<String> {
-    static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> = std::sync::Mutex::new(None);
-
-    if let Ok(guard) = CACHE.lock_or_err() {
-        if let Some((resolved_at, value)) = guard.as_ref() {
-            if resolved_at.elapsed() <= crate::constants::WSL_DEFAULT_DISTRO_CACHE_TTL {
-                return value.clone();
-            }
-        }
-    }
-    let fresh = crate::path_utils::get_default_wsl_distro_with_timeout(timeout)
-        .filter(|distro| is_safe_distro_name(distro));
-    if let Ok(mut guard) = CACHE.lock_or_err() {
-        *guard = Some((Instant::now(), fresh.clone()));
-    }
-    fresh
+pub(crate) fn default_distro_cached(_timeout: Duration) -> Option<String> {
+    default_distro::read()
 }
 
 /// `$HOME` of `distro`'s default user, cached per distribution for
-/// `WSL_DEFAULT_DISTRO_CACHE_TTL` (ADR-0288).
+/// `WSL_HOME_CACHE_TTL` (ADR-0288).
 ///
 /// Path links expand a WSL pane's `~/...` against it, and their hover and Remote
 /// idle-scan triggers would otherwise pay a `wsl.exe` spawn per evaluation.
@@ -140,7 +129,7 @@ pub(crate) fn home_dir_cached(distro: &str, timeout: Duration) -> Option<String>
 
     if let Ok(guard) = CACHE.lock_or_err() {
         if let Some((resolved_at, value)) = guard.as_ref().and_then(|cache| cache.get(distro)) {
-            if resolved_at.elapsed() <= crate::constants::WSL_DEFAULT_DISTRO_CACHE_TTL {
+            if resolved_at.elapsed() <= crate::constants::WSL_HOME_CACHE_TTL {
                 return value.clone();
             }
         }
@@ -184,6 +173,7 @@ pub fn run_probe_script(
     if !is_safe_distro_name(distro) {
         return Err("unsafe WSL distribution name".into());
     }
+    crate::activity_reconcile::metrics::guest(distro, arg0);
     let mut command = headless_wsl_command();
     command.args(["-d", distro, "--exec", "sh", "-c", script, arg0]);
     let output = output_with_timeout(&mut command, timeout).map_err(|error| error.to_string())?;

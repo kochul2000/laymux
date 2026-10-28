@@ -3,6 +3,8 @@ import { withClaudeTurnResult } from "./claude-turn-result";
 import { withGrokTurnResult } from "./grok-turn-result";
 import type { TerminalTask } from "./terminal-task";
 
+const staleHooks = new WeakMap<TerminalTask, TerminalTask>();
+
 const mergedCodex = new WeakMap<
   NonNullable<TerminalInstance["task"]>,
   NonNullable<TerminalInstance["task"]>
@@ -60,18 +62,33 @@ export function selectDetectedTask(
     instance.generation === hook.snapshot.generation &&
     instance.activity?.type === "interactiveApp" &&
     instance.activity.name?.toLowerCase() === hook.snapshot.provider &&
-    now - hook.verifiedAt < 6000 &&
+    (now - hook.verifiedAt < 6000 || hook.snapshot.verifiedAtMs !== undefined) &&
     hook.snapshot.observedAtMs >= (instance.lastUserInputAt ?? 0) &&
-    (hook.snapshot.state === "idle" ||
+    (hook.snapshot.verifiedAtMs !== undefined ||
+      hook.snapshot.state === "idle" ||
       hook.snapshot.state === "ended" ||
       now - hook.snapshot.observedAtMs <= 60000);
-  const task = usable
+  let task = usable
     ? hook.snapshot.provider === "codex"
       ? withCodexTurnResult(instance)
       : hook.snapshot.provider === "grok"
         ? withGrokTurnResult(instance)
         : withClaudeTurnResult(hook.task, instance.claudeTurns?.hook)
     : withClaudeTurnResult(heuristicTask(instance), instance.claudeTurns?.heuristic);
+  if (
+    usable &&
+    task &&
+    (now - hook.verifiedAt >= 6000 ||
+      ((task.state === "running" || task.state === "waiting") &&
+        now - hook.snapshot.observedAtMs > 60000))
+  ) {
+    let stale = staleHooks.get(task);
+    if (!stale) {
+      stale = { ...task, observation: "stale" };
+      staleHooks.set(task, stale);
+    }
+    task = stale;
+  }
   const taskDetectionSource = usable ? "hooks" : "heuristic";
   return instance.task === task && instance.taskDetectionSource === taskDetectionSource
     ? instance

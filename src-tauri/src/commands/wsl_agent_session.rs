@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use crate::lock_ext::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -9,7 +11,7 @@ use crate::state::AppState;
 use crate::wsl_probe::snapshot::{GuestObservation, GuestProbeKey, TerminalCatalog};
 use crate::wsl_probe::WslTerminalTargets;
 #[cfg(windows)]
-use crate::wsl_probe::{run_probe_script, wsl_terminal_targets};
+use crate::wsl_probe::{run_probe_script, wsl_terminal_targets_scoped};
 
 /// `arg0` of the guest shell, and the probe's name in the shared run table.
 const PROBE_NAME: &str = "laymux-wsl-agent-probe";
@@ -161,9 +163,18 @@ pub(super) fn resolve_wsl_agent_processes(
     provider: WslAgentProvider,
     observation: GuestObservation,
 ) -> Result<WslAgentProcessLookup, AppError> {
+    resolve_wsl_agent_processes_scoped(state, provider, observation, None)
+}
+
+pub(super) fn resolve_wsl_agent_processes_scoped(
+    state: &AppState,
+    provider: WslAgentProvider,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<WslAgentProcessLookup, AppError> {
     #[cfg(not(windows))]
     {
-        let _ = (state, provider, observation);
+        let _ = (state, provider, observation, scope);
         return Ok(WslAgentProcessLookup {
             attributions: HashMap::new(),
             failed_terminal_ids: HashSet::new(),
@@ -176,9 +187,96 @@ pub(super) fn resolve_wsl_agent_processes(
         // The close handler gives session persistence five seconds, so this
         // adapter must not multiply its timeout by the number of distros.
         let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
-        let targets = wsl_terminal_targets(state, deadline)?;
+        let targets = wsl_terminal_targets_scoped(state, deadline, scope)?;
+        if observation.is_reusable() {
+            return resolve_display_targets(state, targets, provider);
+        }
         resolve_targets(state, targets, provider, observation, deadline, scan_distro)
     }
+}
+
+#[cfg(windows)]
+fn resolve_display_targets(
+    state: &AppState,
+    targets: WslTerminalTargets,
+    provider: WslAgentProvider,
+) -> Result<WslAgentProcessLookup, AppError> {
+    let mut result = WslAgentProcessLookup {
+        attributions: HashMap::new(),
+        failed_terminal_ids: HashSet::new(),
+    };
+    for (id, distro) in targets.targets {
+        let catalog = TerminalCatalog::for_ids(state, &HashSet::from([id.clone()]))?;
+        let generation = state
+            .pty_handles
+            .lock_or_err()?
+            .get(&id)
+            .map(|h| h.terminal_generation())
+            .unwrap_or(0);
+        let provider_name = match provider {
+            WslAgentProvider::Claude => "claude",
+            WslAgentProvider::Codex => "codex",
+            WslAgentProvider::Grok => "grok",
+        };
+        let root = crate::commands::cached_root_pid(
+            state,
+            &id,
+            generation,
+            provider_name,
+            distro.as_deref(),
+        );
+        let output = distro.as_deref().and_then(|distro| {
+            if root.is_some() {
+                state
+                    .wsl_guest_snapshots
+                    .cached_run_for_verified_root(PROBE_NAME, distro, &catalog, &[])
+                    .map(|(_, output)| output)
+            } else {
+                state
+                    .wsl_guest_snapshots
+                    .cached_runs(PROBE_NAME, distro, &catalog)
+                    .into_iter()
+                    .find(|(args, _)| args.is_empty())
+                    .map(|(_, output)| output)
+            }
+        });
+        let entries = output
+            .unwrap_or_else(|| Err("WSL ownership awaits a targeted observation".into()))
+            .and_then(|bytes| parse_probe_output(&bytes));
+        let entries = match entries {
+            Ok(entries) => entries,
+            Err(_) => {
+                result.failed_terminal_ids.insert(id.clone());
+
+                result.attributions.insert(id, None);
+                continue;
+            }
+        };
+        let mut grouped = group_by_terminal(entries);
+        let Some(entries) = grouped.remove(&id) else {
+            continue;
+        };
+        let Some(selected) = select_top_level_agent(&entries, provider) else {
+            continue;
+        };
+        if root.is_some_and(|pid| selected.as_ref().is_none_or(|p| p.pid != pid)) {
+            result.failed_terminal_ids.insert(id.clone());
+            result.attributions.insert(id, None);
+            continue;
+        }
+        result.attributions.insert(
+            id,
+            selected.map(|entry| WslAgentProcess {
+                pid: entry.pid,
+                distro: distro.clone().unwrap_or_default(),
+                home: entry.home,
+                codex_home: entry.codex_home,
+                grok_home: entry.grok_home,
+                rollout_paths: entry.rollout_paths,
+            }),
+        );
+    }
+    Ok(result)
 }
 
 /// The platform-independent half of [`resolve_wsl_agent_processes`]: group the

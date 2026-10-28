@@ -42,6 +42,19 @@ pub struct HookRegistry {
 }
 
 impl HookRegistry {
+    /// Saving the conversation is driven by identity changes, not task phases.
+    pub(crate) fn identity_changed(&self, event: &HookEvent) -> bool {
+        self.entries
+            .iter()
+            .find(|o| same_conversation(&o.event, event))
+            .is_none_or(
+                |previous| match (root_identity(&previous.event), root_identity(event)) {
+                    (Some(a), Some(b)) => !same_root(a, b),
+                    (None, None) => false,
+                    _ => true,
+                },
+            )
+    }
     /// Resolve a live TUI title against all retained candidates before applying
     /// phase expiry. An expired collision must not make a different ID unique.
     pub fn by_codex_title(
@@ -163,6 +176,23 @@ impl HookRegistry {
         true
     }
 
+    /// Ownership-cache continuity includes ended/expired candidates so neither
+    /// expiry nor a SessionEnd can hide a collision with another config root.
+    pub(crate) fn binding(
+        &self,
+        provider: &str,
+        session: &str,
+        distro: Option<&str>,
+    ) -> Option<&Observation> {
+        let mut found = self.entries.iter().filter(|o| {
+            o.event.provider == provider
+                && o.event.session_id == session
+                && o.event.distro.as_deref() == distro
+        });
+        let first = found.next()?;
+        found.next().is_none().then_some(first)
+    }
+
     pub fn exact(
         &self,
         provider: &str,
@@ -181,6 +211,35 @@ impl HookRegistry {
         let first = matches.next()?;
         matches.next().is_none().then_some(first)
     }
+}
+
+pub(crate) fn root_identity(
+    event: &HookEvent,
+) -> Option<&laymux_agent_hook::runtime::ProcessIdentity> {
+    // An IDE launched by Codex can itself appear later in the ancestry. Select
+    // the nearest producer. The actual TUI owner is resolved independently.
+    event.ancestors.iter().find(|p| {
+        p.pid > 0
+            && p.start_time > 0
+            && crate::process_tree::name_to_app(&p.name)
+                .is_some_and(|app| app.eq_ignore_ascii_case(&event.provider))
+    })
+}
+
+pub(crate) fn same_root(
+    a: &laymux_agent_hook::runtime::ProcessIdentity,
+    b: &laymux_agent_hook::runtime::ProcessIdentity,
+) -> bool {
+    let birth_matches = match (a.start_ticks, b.start_ticks) {
+        (Some(a), Some(b)) => a == b,
+        (None, None) => a.start_time == b.start_time,
+        _ => false,
+    };
+    a.pid == b.pid
+        && birth_matches
+        && a.parent_pid == b.parent_pid
+        && a.name.eq_ignore_ascii_case(&b.name)
+        && a.helper == b.helper
 }
 
 fn same_conversation(a: &HookEvent, b: &HookEvent) -> bool {
