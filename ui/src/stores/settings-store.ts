@@ -142,6 +142,8 @@ export interface PasteSettings {
 
 /** Terminal behavior & rendering. */
 export interface TerminalSettings {
+  /** 가로·세로 분할과 stack에서 원본 터미널 프로필을 선택한다. */
+  inheritProfileOnSplit: boolean;
   /** Checkpoint Worker mode is fixed for each TerminalView lifetime. */
   checkpointWorker: boolean;
   /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
@@ -825,6 +827,7 @@ export const DEFAULT_PASTE: PasteSettings = {
 };
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
+  inheritProfileOnSplit: true,
   checkpointWorker: true,
   outputActivityBurst: {
     windowMs: 2000,

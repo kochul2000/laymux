@@ -1427,6 +1427,13 @@ function TerminalSection() {
         />
       </SettingsGroup>
       <SettingsGroup title={t("terminal.groupGeneral")}>
+        <SettingsToggleField
+          label={t("terminal.inheritProfileOnSplit")}
+          desc={t("terminal.inheritProfileOnSplitDesc")}
+          testId="inherit-profile-on-split-toggle"
+          checked={terminal.inheritProfileOnSplit}
+          onChange={(inheritProfileOnSplit) => update({ inheritProfileOnSplit })}
+        />
         <SettingsField
           label={t("terminal.defaultInputMode")}
           desc={t("terminal.defaultInputModeDesc")}

@@ -35,6 +35,12 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 
 const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
+        path: "/terminal/inheritProfileOnSplit",
+        description: "가로·세로 분할과 stack에서 원본 터미널의 프로필로 진입합니다(기본 true). 다음 생성부터 적용하며 CWD 상속과 독립입니다. Remote는 끄더라도 선택 가능한 터미널을 생성합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/terminal/checkpointWorker",
         description: "터미널 복원 상태를 별도 Worker에서 처리합니다(기본 true). 끄면 메인 스레드에서 처리해 Worker 메모리를 절약합니다. 새 터미널 또는 앱 재실행부터 적용하며, 출력 재연결은 기존 모드를 유지합니다.",
         sensitive: false,
