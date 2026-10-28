@@ -98,6 +98,7 @@ const token = crypto.randomUUID();
 const profileName = `profile-check-${Date.now()}`;
 let workspaceId;
 let browser;
+let leaseId;
 const results = [];
 async function screenshot() {
   const { dataUrl: _dataUrl, ...metadata } = await api("/screenshot", {});
@@ -290,7 +291,7 @@ try {
   await page.screenshot({
     path: path.join(artifacts, "remote-connecting.png"),
   });
-  await claimed;
+  leaseId = (await (await claimed).json()).leaseId;
   for (const enabled of [false, true]) {
     await evaluate(
       `profileCheck.settings.getState().setTerminal({inheritProfileOnSplit:${enabled}});true`,
@@ -348,6 +349,17 @@ try {
     ),
   );
 } finally {
+  if (leaseId) {
+    const released = await fetch(host + "/remote/v1/session/release", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ leaseId }),
+    });
+    assert.ok(released.ok, `Remote 검증 lease 반납 실패: ${released.status}`);
+  }
   await browser?.close();
   await invoke("set_remote_runtime_access", {
     enabled: originalAccess.runtimeEnabled,
