@@ -487,6 +487,7 @@ export function PaneGrid({
                       onKeyboardActivity={hover.clear}
                       terminalRestartEpoch={terminalRestarts[layer.id]?.epoch}
                       terminalRestartCwd={terminalRestarts[layer.id]?.cwd}
+                      terminalRestartCwdSourceProfile={terminalRestarts[layer.id]?.cwdSourceProfile}
                       terminalRestartFresh={terminalRestarts[layer.id]?.fresh}
                       terminalRestartRestoreSession={terminalRestarts[layer.id]?.restoreSession}
                       onTerminalRestartConsumed={() => consumeTerminalRestart(layer.id)}

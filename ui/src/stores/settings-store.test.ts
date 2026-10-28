@@ -3,6 +3,13 @@ import { useSettingsStore, makeDefaultColorScheme, type TerminalSettings } from 
 import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
+  it("워크트리의 원본 CWD 선택은 기본 true이고 false를 보존한다", () => {
+    expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(true);
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { ...useSettingsStore.getState().terminal, useMainWorktreeCwdOnSplit: false },
+    });
+    expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(false);
+  });
   it("프로필 상속은 기본 true이며 false 저장과 누락 필드 기본값을 보존한다", () => {
     expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(true);
     const legacy: Partial<TerminalSettings> = { ...useSettingsStore.getState().terminal };

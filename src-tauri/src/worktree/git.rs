@@ -13,10 +13,15 @@ const EXIT_POLL: Duration = Duration::from_millis(10);
 pub(super) struct Git {
     pub cwd: String,
     distro: Option<String>,
+    timeout: Duration,
 }
 
 impl Git {
     pub fn new(working_dir: &str) -> Result<Self, AppError> {
+        Self::with_timeout(working_dir, GIT_TIMEOUT)
+    }
+
+    pub fn with_timeout(working_dir: &str, timeout: Duration) -> Result<Self, AppError> {
         if working_dir.is_empty() || working_dir.contains('\0') {
             return Err(AppError::Other("저장소의 절대 경로가 필요합니다.".into()));
         }
@@ -39,10 +44,9 @@ impl Git {
                 && !input.starts_with("//")
             {
                 Some(
-                    crate::path_utils::get_default_wsl_distro_with_timeout(GIT_TIMEOUT)
-                        .ok_or_else(|| {
-                            AppError::Other("WSL 배포판을 확인할 수 없습니다.".into())
-                        })?,
+                    crate::path_utils::get_default_wsl_distro_with_timeout(timeout).ok_or_else(
+                        || AppError::Other("WSL 배포판을 확인할 수 없습니다.".into()),
+                    )?,
                 )
             } else {
                 None
@@ -54,13 +58,18 @@ impl Git {
                 return Ok(Self {
                     cwd: crate::path_utils::normalize_wsl_path(&input),
                     distro: Some(distro),
+                    timeout,
                 });
             }
             let cwd = crate::path_utils::resolve_address_path(&input, None);
             if !std::path::Path::new(&cwd).is_absolute() {
                 return Err(AppError::Other("저장소의 절대 경로가 필요합니다.".into()));
             }
-            Ok(Self { cwd, distro: None })
+            Ok(Self {
+                cwd,
+                distro: None,
+                timeout,
+            })
         }
         #[cfg(not(windows))]
         {
@@ -70,6 +79,7 @@ impl Git {
             Ok(Self {
                 cwd: working_dir.to_owned(),
                 distro: None,
+                timeout,
             })
         }
     }
@@ -128,14 +138,14 @@ impl Git {
     pub fn run(&self, cwd: &str, args: &[&str]) -> Result<Vec<u8>, AppError> {
         let cwd = self.git_path(cwd)?;
         let mut command = self.command(&cwd, args);
-        let output = bounded_output(&mut command)?;
+        let output = bounded_output_for(&mut command, self.timeout)?;
         checked_stdout(output)
     }
 
     pub fn worktrees(&self) -> Result<Vec<super::types::WorktreeEntry>, AppError> {
         let cwd = self.git_path(&self.cwd)?;
         let mut command = self.command(&cwd, &["worktree", "list", "--porcelain", "-z"]);
-        let output = bounded_output(&mut command)?;
+        let output = bounded_output_for(&mut command, self.timeout)?;
         if output.status.success() {
             return super::parsing::worktrees(&output.stdout);
         }
@@ -161,6 +171,18 @@ impl Git {
             .map_err(|_| AppError::Other("Git 출력이 올바른 UTF-8이 아닙니다.".into()))?;
         // Strip Git's one line terminator, preserving whitespace in path names.
         Ok(text.strip_suffix('\n').unwrap_or(&text).to_owned())
+    }
+
+    pub fn directory_exists(&self, path: &str) -> Result<bool, AppError> {
+        let path = self.git_path(path)?;
+        if let Some(distro) = &self.distro {
+            let mut command = crate::process::headless_wsl_command();
+            command.args(["-d", distro, "--exec", "test", "-d", &path]);
+            return Ok(bounded_output_for(&mut command, self.timeout)?
+                .status
+                .success());
+        }
+        Ok(std::path::Path::new(&path).is_dir())
     }
 
     fn command(&self, cwd: &str, args: &[&str]) -> Command {
@@ -239,6 +261,10 @@ fn drain(source: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>
 
 /// Bounded pipe reads fail closed; truncated status is never accepted as clean.
 pub(super) fn bounded_output(command: &mut Command) -> Result<Output, AppError> {
+    bounded_output_for(command, GIT_TIMEOUT)
+}
+
+fn bounded_output_for(command: &mut Command, timeout: Duration) -> Result<Output, AppError> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -254,7 +280,7 @@ pub(super) fn bounded_output(command: &mut Command) -> Result<Output, AppError> 
         .ok_or_else(|| AppError::Other("Git stderr pipe missing".into()))?;
     let stdout = drain(stdout);
     let stderr = drain(stderr);
-    let deadline = Instant::now() + GIT_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -293,6 +319,7 @@ mod tests {
         let git = Git {
             cwd: "/home/repo".into(),
             distro: Some("Ubuntu".into()),
+            timeout: GIT_TIMEOUT,
         };
         assert!(git.same_path(
             "//wsl.localhost/Ubuntu/home/repo",

@@ -32,6 +32,7 @@ export interface ViewRendererProps {
   terminalRestartEpoch?: number;
   /** 재시작 시 현재 세션의 CWD를 설정 복원 여부와 무관하게 전달한다. */
   terminalRestartCwd?: string;
+  terminalRestartCwdSourceProfile?: string;
   /** 재시작 요청이 아직 첫 세션 생성에 소비되지 않았는지 나타낸다. */
   terminalRestartFresh?: boolean;
   terminalRestartRestoreSession?: boolean;
@@ -51,6 +52,7 @@ function TerminalViewWithSyncCwd({
   location,
   terminalRestartEpoch,
   terminalRestartCwd,
+  terminalRestartCwdSourceProfile,
   terminalRestartFresh,
   terminalRestartRestoreSession,
   onTerminalRestartConsumed,
@@ -64,6 +66,7 @@ function TerminalViewWithSyncCwd({
   location: TerminalLocation;
   terminalRestartEpoch?: number;
   terminalRestartCwd?: string;
+  terminalRestartCwdSourceProfile?: string;
   terminalRestartFresh?: boolean;
   terminalRestartRestoreSession?: boolean;
   onTerminalRestartConsumed?: () => void;
@@ -113,6 +116,7 @@ function TerminalViewWithSyncCwd({
       lastAgentFresh={viewConfig?.lastAgentFresh === "codex" ? "codex" : undefined}
       lastGrokSession={lastGrokSession}
       restartCwd={terminalRestartCwd}
+      restartCwdSourceProfile={terminalRestartCwdSourceProfile}
       isUserRestart={terminalRestartFresh ?? false}
       restoreSessionOnRestart={terminalRestartRestoreSession ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}
@@ -292,6 +296,7 @@ export function ViewRenderer({
   location = "workspace",
   terminalRestartEpoch,
   terminalRestartCwd,
+  terminalRestartCwdSourceProfile,
   terminalRestartFresh,
   terminalRestartRestoreSession,
   onTerminalRestartConsumed,
@@ -323,6 +328,7 @@ export function ViewRenderer({
             location={location}
             terminalRestartEpoch={terminalRestartEpoch}
             terminalRestartCwd={terminalRestartCwd}
+            terminalRestartCwdSourceProfile={terminalRestartCwdSourceProfile}
             terminalRestartFresh={terminalRestartFresh}
             terminalRestartRestoreSession={terminalRestartRestoreSession}
             onTerminalRestartConsumed={onTerminalRestartConsumed}

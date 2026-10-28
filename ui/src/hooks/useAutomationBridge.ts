@@ -14,7 +14,6 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
-import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import {
   abbreviatePath,
@@ -70,7 +69,6 @@ import {
 import * as navigationActions from "@/lib/navigation-actions";
 import { stackPaneAt } from "@/lib/pane-stack-actions";
 import { resolveNewPaneView } from "@/lib/pane-profile";
-import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
@@ -828,9 +826,18 @@ const handlers: HandlerMap = {
       // The new slot is inserted after `idx`, shifting later slot indices; keep
       // the keyboard on the slot the user had focused (ADR-0298, ADR-0324).
       keepGridFocusOnSlot(() =>
-        useWorkspaceStore
-          .getState()
-          .splitPane(ctx.paneIndex, p.direction as "horizontal" | "vertical", ctx.ws.id),
+        useWorkspaceStore.getState().splitPane(
+          ctx.paneIndex,
+          p.direction as "horizontal" | "vertical",
+          ctx.ws.id,
+          p.profile || p.cwd
+            ? {
+                type: "TerminalView",
+                ...(p.profile ? { profile: p.profile } : {}),
+                ...(p.cwd ? { lastCwd: p.cwd } : {}),
+              }
+            : undefined,
+        ),
       );
       const newPaneIndex = ctx.paneIndex + 1;
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
@@ -846,13 +853,7 @@ const handlers: HandlerMap = {
           if (p.cwd) viewConfig.lastCwd = p.cwd as string;
           useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig, undefined, ctx.ws.id);
         }
-        // 호출자가 준 cwd 는 분할 상속 시드(ADR-0140)를 덮어쓴다. 시드가 남아 있으면
-        // 세션 생성 때 그쪽이 이겨서 요청한 디렉터리가 조용히 무시된다. 이 경로는
-        // 프로파일의 restoreCwd 설정과도 무관하게 요청값을 적용하며, 새 pane 이 이미
-        // TerminalView 인 경우(뷰 변환을 건너뛰는 경로)에도 요청값이 살아남아야 한다.
-        if (p.cwd) {
-          useTerminalRestartStore.getState().requestRestart(newPaneBefore.id, p.cwd as string);
-        }
+        // 명시 CWD는 store가 pane 공개 전에 시딩한다. 여기서는 뷰 변환만 수행한다.
       }
       const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === ctx.ws.id);
       const newSlot = ws?.panes[newPaneIndex];
@@ -933,14 +934,12 @@ const handlers: HandlerMap = {
       if (!entry) return err(`Pane '${paneId}' is not in the active workspace`);
       const source = entry.layer;
       if (source.view.type !== "TerminalView") return err(`Pane '${paneId}' is not a terminal`);
-      const cwd = resolvePaneCwd(source);
       const layerId = stackPaneAt(
         entry.slotIndex,
         resolveNewPaneView(source, { type: "TerminalView" }),
+        source.id,
       );
-      // The common store seeds from the slot's active layer. Remote may still
-      // be connected to another layer, whose CWD must win for this action.
-      if (layerId) useTerminalRestartStore.getState().requestRestart(layerId, cwd);
+      // The source content ID fixes the CWD before the new layer is published.
       return layerId
         ? ok({ stacked: paneId, layerId, terminalId: toTerminalId(layerId) })
         : err(`Pane '${paneId}' could not be stacked`);
@@ -967,9 +966,6 @@ const handlers: HandlerMap = {
           ctx.ws.id,
         );
       if (!layerId) return err(`Pane ${ctx.paneIndex} could not be stacked`);
-      if (p.cwd && viewType === "TerminalView") {
-        useTerminalRestartStore.getState().requestRestart(layerId, p.cwd as string);
-      }
       const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === ctx.ws.id);
       const entry = ws ? findLayerEntry(ws.panes, layerId) : null;
       const terminalId = viewType === "TerminalView" ? toTerminalId(layerId) : null;

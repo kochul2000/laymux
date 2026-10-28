@@ -15,9 +15,13 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
  * Stack a new layer on slot `paneIndex` of the active workspace and focus it.
  * Returns the new layer id, or null for an invalid slot.
  */
-export function stackPaneAt(paneIndex: number, view?: ViewInstanceConfig): string | null {
+export function stackPaneAt(
+  paneIndex: number,
+  view?: ViewInstanceConfig,
+  sourceLayerId?: string,
+): string | null {
   const state = useWorkspaceStore.getState();
-  const layerId = state.stackPane(paneIndex, view);
+  const layerId = state.stackPane(paneIndex, view, sourceLayerId ? { sourceLayerId } : undefined);
   if (layerId) activatePaneLayer(state.activeWorkspaceId, layerId);
   return layerId;
 }

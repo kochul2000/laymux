@@ -33,6 +33,7 @@ const terminalViewProps: {
   profile?: string;
   instanceId?: string;
   restartCwd?: string;
+  restartCwdSourceProfile?: string;
   isUserRestart?: boolean;
   restoreSessionOnRestart?: boolean;
   onRestart?: () => void;
@@ -43,6 +44,7 @@ vi.mock("./TerminalView", () => ({
     profile: string;
     syncGroup: string;
     restartCwd?: string;
+    restartCwdSourceProfile?: string;
     isUserRestart?: boolean;
     restoreSessionOnRestart?: boolean;
     onRestart?: () => void;
@@ -52,6 +54,7 @@ vi.mock("./TerminalView", () => ({
       profile: props.profile,
       instanceId: props.instanceId,
       restartCwd: props.restartCwd,
+      restartCwdSourceProfile: props.restartCwdSourceProfile,
       isUserRestart: props.isUserRestart,
       restoreSessionOnRestart: props.restoreSessionOnRestart,
       onRestart: props.onRestart,
@@ -487,12 +490,14 @@ describe("ViewRenderer", () => {
         paneId="pane-42"
         terminalRestartEpoch={1}
         terminalRestartCwd="C:\work"
+        terminalRestartCwdSourceProfile="WSL"
         terminalRestartFresh
         terminalRestartRestoreSession
       />,
     );
     expect(terminalViewProps.at(-1)).toMatchObject({
       restartCwd: "C:\\work",
+      restartCwdSourceProfile: "WSL",
       isUserRestart: true,
       restoreSessionOnRestart: true,
     });

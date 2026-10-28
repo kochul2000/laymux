@@ -5,6 +5,8 @@ export interface TerminalRestartRequest {
   epoch: number;
   /** CWD the fresh session should start in, resolved at request time. */
   cwd?: string;
+  /** Present only for split/stack inheritance; Rust applies the worktree CWD policy. */
+  cwdSourceProfile?: string;
   /**
    * True until `TerminalView` has consumed the request. A restart skips
    * output/cwd restore and, by default, agent resume. Once consumed, a later
@@ -17,7 +19,12 @@ export interface TerminalRestartRequest {
 
 interface TerminalRestartStoreState {
   requests: Readonly<Record<string, TerminalRestartRequest>>;
-  requestRestart: (paneId: string, cwd?: string, restoreSession?: boolean) => void;
+  requestRestart: (
+    paneId: string,
+    cwd?: string,
+    restoreSession?: boolean,
+    cwdSourceProfile?: string,
+  ) => void;
   consumeRestart: (paneId: string) => void;
   forgetRestart: (paneId: string) => void;
   /** Drop every request whose pane no longer exists. */
@@ -43,7 +50,7 @@ interface TerminalRestartStoreState {
 export const useTerminalRestartStore = create<TerminalRestartStoreState>()((set) => ({
   requests: {},
 
-  requestRestart: (paneId, cwd, restoreSession) =>
+  requestRestart: (paneId, cwd, restoreSession, cwdSourceProfile) =>
     set((state) => ({
       requests: {
         ...state.requests,
@@ -52,6 +59,7 @@ export const useTerminalRestartStore = create<TerminalRestartStoreState>()((set)
           cwd,
           fresh: true,
           ...(restoreSession ? { restoreSession: true } : {}),
+          ...(cwdSourceProfile ? { cwdSourceProfile } : {}),
         },
       },
     })),

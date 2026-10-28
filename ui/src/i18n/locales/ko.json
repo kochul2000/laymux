@@ -450,6 +450,8 @@
       "composerAutocomplete": "입력 자동완성",
       "composerAutocompleteDesc": "입력칸(Composer) 모드에서 타이핑하는 동안 일치하는 과거 입력을 추천합니다. Tab(또는 방향키 후 Enter)으로 골라 넣을 수 있습니다.",
       "inheritProfileOnSplit": "분할·스택 시 프로필 상속",
+      "useMainWorktreeCwdOnSplit": "분할·스택 시 워크트리의 원본 경로 사용",
+      "useMainWorktreeCwdOnSplitDesc": "워크트리에서 가로·세로 분할하거나 스택을 추가하면 원본 저장소의 같은 하위 폴더에서 시작합니다. 해당 폴더가 없으면 원본 루트로 시작합니다. 끄면 현재 워크트리 경로를 유지합니다. 프로필 상속 설정과 독립이며 명시한 시작 경로와 세션 복원에는 적용하지 않습니다.",
       "inheritProfileOnSplitDesc": "가로·세로 분할과 스택 추가 시 원본 터미널의 프로필로 바로 진입합니다. 끄면 빈 pane에서 시작합니다. Remote는 끄더라도 기본 프로필의 터미널을 엽니다.",
       "composerStarredEntries": "별표 입력 목록",
       "composerStarredEntriesDesc": "이 호스트의 모든 워크스페이스와 Remote에서 함께 쓰는 영구 목록입니다.",

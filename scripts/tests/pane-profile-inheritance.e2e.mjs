@@ -69,6 +69,13 @@ const invoke = (command, args) =>
   evaluate(
     `(async()=>{const{invoke}=await import('/node_modules/@tauri-apps/api/core.js');return invoke(${JSON.stringify(command)},${JSON.stringify(args)})})()`,
   );
+// HMR may replace a Zustand module while dynamic imports still point to another generation.
+await evaluate("location.reload(); true");
+await new Promise((resolve) => setTimeout(resolve, 1800));
+await until(
+  () => evaluate("!!document.querySelector('[data-testid=workspace-pane-0]')"),
+  "dev 문서 초기화",
+);
 async function until(check, message) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
@@ -100,26 +107,51 @@ let workspaceId;
 let browser;
 let leaseId;
 const results = [];
+const startDir = process.env.LAYMUX_PROFILE_START_DIR ?? root;
+const expectedInheritedDir = process.env.LAYMUX_PROFILE_EXPECT_CWD ?? startDir;
+const mainCwd = process.env.LAYMUX_MAIN_WORKTREE_CWD === "1";
 async function screenshot() {
   const { dataUrl: _dataUrl, ...metadata } = await api("/screenshot", {});
   return metadata;
 }
-async function setting(enabled) {
+async function clickPaneControl(sourceId, testId) {
+  const source = `[data-layer-id="${sourceId}"]`;
+  const button = `[data-testid="${testId}"]`;
+  const floating = `[data-testid="pane-control-floating-menu"] ${button}`;
+  if (
+    !(await evaluate(
+      `!!document.querySelector(${JSON.stringify(source + " " + button)})`,
+    ))
+  ) {
+    if (
+      !(await evaluate(`!!document.querySelector(${JSON.stringify(floating)})`))
+    ) {
+      await evaluate(
+        `(()=>{const button=document.querySelector(${JSON.stringify(source + ' [data-testid="pane-control-menu-btn"]')});if(!button)throw Error('pane 메뉴 없음');button.click();return true})()`,
+      );
+    }
+    await until(
+      () => evaluate(`!!document.querySelector(${JSON.stringify(floating)})`),
+      "좁은 pane의 분할 메뉴",
+    );
+  }
+  await evaluate(
+    `(document.querySelector(${JSON.stringify(source + " " + button)})??document.querySelector(${JSON.stringify(floating)})).click();true`,
+  );
+}
+async function setting(enabled, testId = "inherit-profile-on-split-toggle") {
   await api("/ui/settings", {});
   await api("/ui/settings/navigate", { section: "terminal" });
   await until(
-    () =>
-      evaluate(
-        `!!document.querySelector('[data-testid="inherit-profile-on-split-toggle"]')`,
-      ),
+    () => evaluate(`!!document.querySelector('[data-testid="${testId}"]')`),
     "설정 토글",
   );
   const initial = await evaluate(
-    `document.querySelector('[data-testid="inherit-profile-on-split-toggle"]').getAttribute('aria-checked')`,
+    `document.querySelector('[data-testid="${testId}"]').getAttribute('aria-checked')`,
   );
   if (initial !== String(enabled))
     await evaluate(
-      `document.querySelector('[data-testid="inherit-profile-on-split-toggle"]').click();true`,
+      `document.querySelector('[data-testid="${testId}"]').click();true`,
     );
   await evaluate(
     `document.querySelector('[data-testid="save-settings-btn"]').click();true`,
@@ -127,14 +159,24 @@ async function setting(enabled) {
   await until(
     () =>
       evaluate(
-        `profileCheck.settings.getState().terminal.inheritProfileOnSplit === ${enabled}`,
+        `profileCheck.settings.getState().terminal[${JSON.stringify(testId === "inherit-profile-on-split-toggle" ? "inheritProfileOnSplit" : "useMainWorktreeCwdOnSplit")}] === ${enabled}`,
       ),
     "설정 저장",
   );
-  results.push({ kind: "settings", enabled, screenshot: await screenshot() });
+  results.push({
+    kind: "settings",
+    testId,
+    enabled,
+    screenshot: await screenshot(),
+  });
   await evaluate(`profileCheck.ui.getState().closeSettingsModal();true`);
 }
-async function ready(id, expectedProfile, verifyCwd = true) {
+async function ready(
+  id,
+  expectedProfile,
+  verifyCwd = true,
+  expectedDir = expectedInheritedDir,
+) {
   await until(
     () =>
       evaluate(
@@ -162,15 +204,16 @@ async function ready(id, expectedProfile, verifyCwd = true) {
     .replaceAll("\\", "/")
     .replace(/^([A-Za-z]):/, (_, drive) => "/mnt/" + drive.toLowerCase())
     .replace(/\/$/, "");
-  const expected = root
+  const expected = expectedDir
     .replaceAll("\\", "/")
     .replace(/^([A-Za-z]):/, (_, drive) => "/mnt/" + drive.toLowerCase())
     .replace(/\/$/, "");
+
   if (verifyCwd) assert.equal(normalized, expected);
 }
 try {
   await evaluate(
-    `(()=>{const s=profileCheck.settings.getState();s.addProfile({...s.profiles[0],name:${JSON.stringify(profileName)},commandLine:${JSON.stringify(process.env.LAYMUX_PROFILE_COMMAND ?? "powershell.exe -NoLogo -NoProfile")},startupCommand:'',startingDirectory:${JSON.stringify(root)},restoreCwd:false,restoreOutput:false,hidden:false});return true})()`,
+    `(()=>{const s=profileCheck.settings.getState();s.addProfile({...s.profiles[0],name:${JSON.stringify(profileName)},commandLine:${JSON.stringify(process.env.LAYMUX_PROFILE_COMMAND ?? "powershell.exe -NoLogo -NoProfile")},startupCommand:'',startingDirectory:${JSON.stringify(startDir)},restoreCwd:false,restoreOutput:false,hidden:false});return true})()`,
   );
   await evaluate(
     `(async()=>{await(await import('/src/lib/persist-session.ts')).persistSession();return true})()`,
@@ -191,7 +234,8 @@ try {
   await evaluate(
     `(async()=>{(await import('/src/stores/overrides-store.ts')).useOverridesStore.getState().setPaneOverride(${JSON.stringify(sourceId)},{controlBarMode:'pinned'});return true})()`,
   );
-  await ready(sourceId, profileName);
+  await ready(sourceId, profileName, true, startDir);
+  await setting(mainCwd, "use-main-worktree-cwd-on-split-toggle");
   await setting(true);
   for (const [action, testId] of [
     ["horizontal", "pane-control-split-h"],
@@ -201,9 +245,7 @@ try {
     const before = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers.map(l=>l.id))`,
     );
-    await evaluate(
-      `(()=>{const node=document.querySelector('[data-layer-id="${sourceId}"] [data-testid="${testId}"]');if(!node)throw Error('분할 버튼 없음: ${testId}');node.click();return true})()`,
-    );
+    await clickPaneControl(sourceId, testId);
     const layers = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers)`,
     );
@@ -212,9 +254,19 @@ try {
       type: "TerminalView",
       profile: profileName,
     });
+
     await ready(layer.id, profileName);
     results.push({ kind: "desktop", enabled: true, action, id: layer.id });
   }
+  const explicit = await api("/panes/split", {
+    paneId: sourceId,
+    direction: "vertical",
+    profile: profileName,
+    cwd: startDir,
+  });
+  assert.ok(explicit.newPane?.id, JSON.stringify(explicit));
+  await ready(explicit.newPane.id, profileName, true, startDir);
+  results.push({ kind: "explicit-cwd", id: explicit.newPane.id });
   results.push({ kind: "desktop-screenshot", screenshot: await screenshot() });
   await setting(false);
   // stack 후 숨겨진 원본을 다시 표시한다.
@@ -227,9 +279,7 @@ try {
     const before = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers.map(l=>l.id))`,
     );
-    await evaluate(
-      `document.querySelector('[data-layer-id="${sourceId}"] [data-testid="${testId}"]').click();true`,
-    );
+    await clickPaneControl(sourceId, testId);
     const layers = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers)`,
     );

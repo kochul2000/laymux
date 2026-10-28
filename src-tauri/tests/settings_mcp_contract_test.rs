@@ -7,6 +7,47 @@ use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
+fn main_worktree_cwd_defaults_on_and_false_survives_persistence_and_schema_patch() {
+    let current = Settings::default();
+    assert!(current.terminal.use_main_worktree_cwd_on_split);
+    let mut legacy = serde_json::to_value(&current).unwrap();
+    legacy["terminal"]
+        .as_object_mut()
+        .unwrap()
+        .remove("useMainWorktreeCwdOnSplit");
+    assert!(
+        serde_json::from_value::<Settings>(legacy)
+            .unwrap()
+            .terminal
+            .use_main_worktree_cwd_on_split
+    );
+    let prepared = prepare_settings_update(
+        &current,
+        &json!({"terminal":{"useMainWorktreeCwdOnSplit":false}}),
+    );
+    assert!(prepared.valid, "{:?}", prepared.errors);
+    assert!(prepared.next_use_required);
+    let candidate = prepared.candidate.unwrap();
+    assert!(
+        !serde_json::from_str::<Settings>(&serde_json::to_string(&candidate).unwrap())
+            .unwrap()
+            .terminal
+            .use_main_worktree_cwd_on_split
+    );
+    assert!(
+        !prepare_settings_update(
+            &current,
+            &json!({"terminal":{"useMainWorktreeCwdOnSplit":"true"}})
+        )
+        .valid
+    );
+    assert_eq!(
+        metadata_for_path("/terminal/useMainWorktreeCwdOnSplit").apply_mode,
+        ApplyMode::NextUse
+    );
+}
+
+#[test]
 fn inherit_profile_defaults_on_roundtrips_false_and_validates_type() {
     let current = Settings::default();
     assert!(current.terminal.inherit_profile_on_split);

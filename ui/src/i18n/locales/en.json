@@ -450,6 +450,8 @@
       "composerAutocomplete": "Composer Autocomplete",
       "composerAutocompleteDesc": "In Composer mode, suggest matching past inputs as you type; press Tab (or arrow keys then Enter) to fill one in.",
       "inheritProfileOnSplit": "Inherit profile on split and stack",
+      "useMainWorktreeCwdOnSplit": "Use the main worktree directory on split and stack",
+      "useMainWorktreeCwdOnSplitDesc": "When splitting or stacking inside a linked worktree, start in the main worktree's matching subdirectory, or its root if that subdirectory is missing. Turn off to keep the current worktree directory. Independent of profile inheritance; explicit start paths and session restore are unchanged.",
       "inheritProfileOnSplitDesc": "Open horizontal/vertical splits and new stack layers with the source terminal profile. Turn off to start with an empty pane. Remote still opens a terminal with the default profile when off.",
       "composerStarredEntries": "Starred Composer Inputs",
       "composerStarredEntriesDesc": "Permanent inputs shared by every workspace and Remote on this host.",

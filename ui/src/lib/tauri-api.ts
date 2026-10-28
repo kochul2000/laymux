@@ -74,6 +74,7 @@ export async function createTerminalSession(
   cwdReceive: boolean = true,
   cwd?: string,
   startup?: TerminalStartupRequest,
+  inheritCwdFromProfile?: string,
 ): Promise<TerminalSessionResult> {
   const startupCommandOverride = typeof startup === "string" ? startup : null;
   const viewer = startup && typeof startup === "object" ? startup : null;
@@ -89,6 +90,7 @@ export async function createTerminalSession(
       cwd: cwd ?? null,
       startupCommandOverride,
       viewer,
+      ...(inheritCwdFromProfile ? { inheritCwdFromProfile } : {}),
     }),
   );
 }

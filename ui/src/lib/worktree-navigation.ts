@@ -4,7 +4,6 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
-import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { worktreeTerminalCwd, worktreeTerminalProfile } from "./worktree-terminal-profile";
@@ -66,7 +65,6 @@ export function openWorktreeTerminal(path: string, sourcePaneId?: string): strin
     { activate: false },
   );
   if (!id) return null;
-  useTerminalRestartStore.getState().requestRestart(id, cwd);
   useUiStore.getState().setWorkspaceHidden(workspace.id, false);
   return activatePaneLayer(workspace.id, id) ? id : null;
 }

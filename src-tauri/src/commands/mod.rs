@@ -26,6 +26,7 @@ mod spreadsheet_viewer;
 mod terminal;
 mod terminal_display_context;
 mod terminal_home;
+mod terminal_inherited_cwd;
 mod terminal_output_delivery;
 mod terminal_output_surface;
 mod terminal_reconnect;

@@ -731,6 +731,7 @@ interface TerminalViewProps {
   lastCwd?: string;
   /** Explicit CWD for a user-requested restart. This overrides restoreCwd settings. */
   restartCwd?: string;
+  restartCwdSourceProfile?: string;
   /** A restart skips cached output and uses the explicit restart CWD. */
   isUserRestart?: boolean;
   /** Restart View allows the existing app-startup agent restore policy. */
@@ -769,6 +770,7 @@ export function TerminalView({
   onKeyboardActivity,
   lastCwd,
   restartCwd,
+  restartCwdSourceProfile,
   isUserRestart = false,
   restoreSessionOnRestart = false,
   onUserRestartConsumed,
@@ -6148,7 +6150,6 @@ export function TerminalView({
     // checkpoint model both work before terminal.open() (ADR-0161).
     const isRestartStart = isUserRestart && firstSessionStartRef.current;
     const allowSessionRestore = !isRestartStart || restoreSessionOnRestart;
-    firstSessionStartRef.current = false;
     const shouldRestoreCwd = profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
     const shouldRestoreOutput =
       profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
@@ -6238,12 +6239,14 @@ export function TerminalView({
         cwdReceiveRef.current,
         isRestartStart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
         viewerStartup ?? startupOverride,
+        ...(isRestartStart && restartCwdSourceProfile ? [restartCwdSourceProfile] : []),
       )
         .then((createdSession) => {
           initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          firstSessionStartRef.current = false;
           if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
@@ -6263,12 +6266,13 @@ export function TerminalView({
         })
         .catch((err) => {
           if (cancelled) return;
+          firstSessionStartRef.current = false;
           console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
           trackedTerminalWrite(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
           settleFailedStartup();
         })
         .finally(() => {
-          if (isRestartStart) onUserRestartConsumed?.();
+          if (isRestartStart && !cancelled) onUserRestartConsumed?.();
         });
     }
 

@@ -12,7 +12,7 @@ import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { useTerminalRestartStore } from "./terminal-restart-store";
-import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { seedInheritedPaneCwd } from "@/lib/pane-cwd";
 import { resolveNewPaneView } from "@/lib/pane-profile";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 import {
@@ -193,6 +193,7 @@ interface WorkspaceState {
     paneIndex: number,
     direction: "horizontal" | "vertical",
     workspaceId?: string,
+    initialView?: ViewInstanceConfig,
   ) => void;
   /**
    * Close one layer of the slot: `layerId`, or the active layer. Closing the
@@ -215,7 +216,7 @@ interface WorkspaceState {
   stackPane: (
     paneIndex: number,
     view?: ViewInstanceConfig,
-    options?: { activate?: boolean },
+    options?: { activate?: boolean; sourceLayerId?: string },
     workspaceId?: string,
   ) => string | null;
   /**
@@ -447,7 +448,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ workspaceDisplayOrder: order });
   },
 
-  splitPane: (paneIndex, direction, workspaceId) => {
+  splitPane: (paneIndex, direction, workspaceId, initialView) => {
     const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
@@ -455,7 +456,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const pane = ws.panes[paneIndex];
     let updatedPane: WorkspacePane;
     let newPane: WorkspacePane;
-    const view = resolveNewPaneView(activeLayer(pane));
+    const view = resolveNewPaneView(activeLayer(pane), initialView);
 
     if (direction === "horizontal") {
       const halfH = pane.h / 2;
@@ -479,19 +480,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     newPanes[paneIndex] = updatedPane;
     newPanes.splice(paneIndex + 1, 0, newPane);
 
+    // 요청은 새 TerminalView가 관측되기 전에 준비한다. 명시 경로는 변환 표식이 없다.
+    if (typeof view.lastCwd === "string" && view.lastCwd) {
+      useTerminalRestartStore.getState().requestRestart(newPane.id, view.lastCwd);
+    } else seedInheritedPaneCwd(newPane.id, activeLayer(pane));
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),
     }));
-
-    // 새 pane 의 첫 터미널 세션은 **분할한 그 pane** 의 CWD 에서 시작한다(ADR-0140).
-    // 시드는 재시작 요청 버스에 실린다 — "이 pane 의 다음 세션을 이 CWD 로 새로
-    // 시작하라"는 payload·수명이 재시작과 같기 때문이다. 프로필 상속을 끄면
-    // 시드는 사용자가 터미널을 고를 때까지 기다렸다가 소비된다.
-    // 스택 슬롯이면 기준은 그 슬롯의 활성 레이어다(ADR-0297).
-    const seedCwd = resolvePaneCwd(activeLayer(pane));
-    if (seedCwd) {
-      useTerminalRestartStore.getState().requestRestart(newPane.id, seedCwd);
-    }
   },
 
   stackPane: (paneIndex, view, options = {}, workspaceId) => {
@@ -499,20 +494,22 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (!ws) return null;
     const pane = ws.panes[paneIndex];
     if (!pane) return null;
+    const source = options.sourceLayerId
+      ? pane.layers.find((layer) => layer.id === options.sourceLayerId)
+      : activeLayer(pane);
+    if (!source) return null;
 
     const layer: PaneLayer = {
       id: generateId("pane"),
       view: view ?? resolveNewPaneView(activeLayer(pane)),
     };
     const updated = insertLayer(pane, layer, options);
+    if (typeof layer.view.lastCwd === "string" && layer.view.lastCwd) {
+      useTerminalRestartStore.getState().requestRestart(layer.id, layer.view.lastCwd);
+    } else seedInheritedPaneCwd(layer.id, source, !!options.sourceLayerId);
     set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, updated) }));
 
-    // 새 레이어의 첫 터미널 세션은 누른 슬롯의 활성 레이어 CWD 에서 시작한다
-    // (ADR-0140 을 ADR-0297 가 확장). 분할과 같은 재시작 요청 버스를 쓴다.
-    const seedCwd = resolvePaneCwd(activeLayer(pane));
-    if (seedCwd) {
-      useTerminalRestartStore.getState().requestRestart(layer.id, seedCwd);
-    }
+    // Remote는 sourceLayerId, 일반 UI는 활성 레이어가 기준이다(ADR-0363).
     return layer.id;
   },
 
