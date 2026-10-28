@@ -1,3 +1,4 @@
+import { getAgentHookStates, type HookProvider } from "./agent-hooks-api";
 import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
 import { prepareAgentClear } from "./agent-clear-composer";
 import { agentClearInput, beginAgentClear } from "./agent-clear-input-api";
@@ -281,6 +282,28 @@ export async function clearPane(
   let instance = useTerminalStore
     .getState()
     .instances.find((candidate) => candidate.id === terminalId);
+  if (
+    instance?.agentHook?.snapshot.verifiedAtMs !== undefined &&
+    Date.now() - instance.agentHook.verifiedAt >= 6000 &&
+    isTaskObservedAgent(instance)
+  ) {
+    const before = instance;
+    const provider = instance.agentHook.snapshot.provider as HookProvider;
+    try {
+      const snapshots = await getAgentHookStates([provider], [terminalId]);
+      const current = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+      if (
+        current &&
+        current.generation === before.generation &&
+        current.taskEpoch === before.taskEpoch &&
+        current.lastUserInputAt === before.lastUserInputAt
+      )
+        useTerminalStore.getState().observeAgentHook(terminalId, snapshots[terminalId]);
+    } catch {
+      /* A failed check keeps the old state stale and input protected. */
+    }
+    instance = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+  }
   // The non-integrated shell exception requires a successful current liveness lookup.
   if (
     instance?.sessionReady === true &&

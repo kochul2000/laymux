@@ -6,8 +6,10 @@ use tauri::State;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::GuestObservation;
 
-use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
-use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
+use super::session_attribution::{provider_terminal_domains_scoped, ProviderSessionLookup};
+use super::wsl_agent_session::{
+    resolve_wsl_agent_processes_scoped, WslAgentProcess, WslAgentProvider,
+};
 
 /// Resolve Claude Code session IDs for live Claude processes under owned PTYs.
 ///
@@ -38,7 +40,16 @@ pub(crate) fn get_claude_session_lookup_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, String> {
-    Ok(get_claude_session_records_impl(session_max_age_hours, state, observation)?.lookup)
+    get_claude_session_lookup_scoped(session_max_age_hours, state, observation, None)
+}
+
+pub(crate) fn get_claude_session_lookup_scoped(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<ProviderSessionLookup, String> {
+    Ok(get_claude_session_records_scoped(session_max_age_hours, state, observation, scope)?.lookup)
 }
 
 /// Session attribution plus each attributed session's self-reported status.
@@ -57,7 +68,16 @@ pub(crate) fn get_claude_session_records_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<ClaudeSessionRecords, String> {
-    let domains = provider_terminal_domains(state)?;
+    get_claude_session_records_scoped(session_max_age_hours, state, observation, None)
+}
+
+pub(crate) fn get_claude_session_records_scoped(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<ClaudeSessionRecords, String> {
+    let domains = provider_terminal_domains_scoped(state, scope)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
         .iter()
@@ -67,7 +87,7 @@ pub(crate) fn get_claude_session_records_impl(
     let native_descendants = if terminal_roots.is_empty() {
         Vec::new()
     } else {
-        match crate::process_tree::try_snapshot_processes() {
+        match crate::process_tree::session_processes(state, observation) {
             Ok(snapshot) => native_claude_candidates(&snapshot, terminal_roots),
             Err(error) => {
                 failed_terminal_ids.extend(native_terminal_ids);
@@ -118,7 +138,7 @@ pub(crate) fn get_claude_session_records_impl(
         &observed,
         remove_duplicate_attributions(candidates),
     );
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude, observation) {
+    match resolve_wsl_agent_processes_scoped(state, WslAgentProvider::Claude, observation, scope) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {

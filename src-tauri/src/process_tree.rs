@@ -29,6 +29,9 @@ use crate::state::AppState;
 const SNAPSHOT_TTL: Duration = Duration::from_millis(1000);
 
 mod roles;
+mod session_snapshot;
+pub(crate) use session_snapshot::read as session_processes;
+pub use session_snapshot::SessionProcessCache;
 
 /// One process in a system snapshot.
 #[derive(Debug, Clone)]
@@ -106,7 +109,7 @@ pub(crate) fn reject_duplicate_session_attributions(
 
 /// Map an executable file name to the interactive app it represents, or `None`.
 /// Case-insensitive; a trailing `.exe` (Windows) is ignored.
-fn name_to_app(name: &str) -> Option<&'static str> {
+pub(crate) fn name_to_app(name: &str) -> Option<&'static str> {
     let lowered = name.trim().to_ascii_lowercase();
     let stem = lowered.strip_suffix(".exe").unwrap_or(&lowered);
     match stem {
@@ -324,16 +327,24 @@ pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> PtyA
 }
 
 fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppLiveness {
-    let (child_pid, wsl_target) = match state.pty_handles.lock_or_err() {
+    let (child_pid, wsl_target, generation) = match state.pty_handles.lock_or_err() {
         Ok(handles) => match handles.get(terminal_id) {
             Some(handle) => (
                 handle.child_pid(),
                 handle.is_wsl_backed().then(|| handle.terminal_generation()),
+                Some(handle.terminal_generation()),
             ),
-            None => (None, None),
+            None => (None, None, None),
         },
-        Err(_) => (None, None),
+        Err(_) => (None, None, None),
     };
+    if !force_fresh {
+        if let Some(app) =
+            generation.and_then(|g| crate::commands::cached_liveness(state, terminal_id, g))
+        {
+            return PtyAppLiveness::Running(app);
+        }
+    }
     // A WSL pane's agent is a Linux process inside the guest, which no Windows
     // snapshot enumerates — the local tree would only ever find `wsl.exe` and
     // report the authoritative negative `NoneAlive`, silently suppressing the
@@ -366,6 +377,7 @@ pub fn snapshot_processes() -> Vec<ProcessEntry> {
 /// and an OS enumeration failure. Session attribution uses this checked form
 /// because failure must preserve the previous resume id.
 pub fn try_snapshot_processes() -> Result<Vec<ProcessEntry>, String> {
+    crate::activity_reconcile::metrics::native();
     #[cfg(windows)]
     let mut entries = snapshot_processes_windows()?;
     #[cfg(not(windows))]

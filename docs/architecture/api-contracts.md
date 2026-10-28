@@ -623,7 +623,15 @@ root `settings.confirmDestructiveActions`(boolean, 기본 `true`)는 desktop 클
 
 helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종료 등의 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. provider·session ID·이벤트 스키마, 32KiB 크기와 30초 수신 기한을 확인한다. 앱의 leaf lock 레지스트리는 최대 256개 대화 관찰을 보관하고 오래된 turn·subagent는 제외한다. `GET /api/v1/agent-hooks/connections`/`get_agent_hook_connections`는 최근 5분의 수신 진단이다. `terminalId`는 서버가 보고한 과거 pane일 수 있으므로 `paneIdentity: reported`로 표시하며 현재 실행의 증거로 사용하지 않는다. 토큰·대화 내용은 조회에 노출하지 않는다. 무관한 Notification이나 resume 수신이 이전 작업 상태의 60초 기한을 갱신하지 않는다.
 
-`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판과 캐시된 설치·활성 증거를 검증한 작업 snapshot만 반환한다. 설치가 미검사·검사 중·실패인 대상은 기존 상태 감지로 돌아간다. 이 경로에서 설치 status, helper 바이트 비교, WSL 설치 검사 프로세스를 실행하지 않는다. 현재 프로세스·대화·generation·제목 revision 검증은 매번 유지하며 검사 캐시가 이벤트 60초 기한을 연장하지 않는다. REST는 저장된 hooks 설정의 provider만 조회한다. 프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. Codex 공유 서버는 live 제목 식별자와 훅 전체 ID의 유일한 대조를 대체 귀속으로 사용한다. snapshot의 `bindingSource: process|title`은 검증 경로를 나타낸다. 모호한 축약 ID·다른 설정 루트·제목 설정 해제·제목 revision 변경은 연결하지 않는다. 이 snapshot은 활동 상태용이다. 복원점은 ADR-0295의 공통 귀속과 checkpoint에서 검증하며, 작업 상태용 설치 검사와 phase 기한을 복원 증거의 조건으로 사용하지 않는다.
+`get_agent_hook_states(providers, refreshTerminalIds?)`와 `GET /api/v1/agent-hooks/states`는 검증된 같은 PTY 세대·앱 epoch·session/config/domain·root PID/생성 시각의 훅 연결을 메모리에서 조회한다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)). 새 연결은 대상 worker가 실제 귀속과 root를 확인한다. 같은 root의 새 훅 이벤트만 확인 시각을 갱신하며 단순 캐시 읽기는 갱신하지 않는다. snapshot은 선택적 `verifiedAtMs`를 추가한다. 6초 이후 마지막 상태를 stale로 보존하고 clear 권한은 주지 않는다. 명시적 `refreshTerminalIds`는 요청 이후 시작한 해당 대상의 관측을 수행한다. 설치 비활성·SessionEnd·root/session/config/title 충돌·세대/epoch 교체는 연결을 거부한다. REST는 저장된 hooks 설정 provider만 반환한다. 레지스트리/연결 캐시 락을 I/O 중 보유하지 않는다.
+
+훅 event의 `ancestors[]`는 Linux/WSL에서 선택적 `startTicks`를 추가한다. 같은 PID의 절대 생성 시각이 시간 보정으로 변해도 커널 tick이 같으면 같은 root다. 필드가 없는 helper도 수용하며 기존 helper는 업데이트 안내로 갱신한다. 표시 캐시를 보존하는 LRU 접근 시각은 run의 관측 시작 시각 및 6초 입력 lease와 분리한다. 명시적 저장/종료와 `begin_agent_clear`는 항상 요청 이후의 실제 관측을 요구한다.
+
+공유 app-server의 producer와 실제 TUI owner는 서로 다른 PID일 수 있다. producer fingerprint가 같으면 작업 이벤트를 적용하지만 같은 owner가 실제 조상에 있을 때만 owner 확인 lease를 연장한다. 조상에 owner가 없으면 저빈도 대상 확인을 유지하고 서버 이벤트만으로 shell을 agent로 바꾸지 않는다.
+
+표시에서 만료된 훅은 더 새롭고 아직 유효한 확정 기록/휴리스틱 관측이 있으면 그 관측에 우선권을 넘긴다. 새 근거가 없으면 마지막 훅 상태를 stale로 보존한다. provider 조회 필터는 응답만 제한하며 다른 provider의 검증된 연결과 생존 증거를 비활성화하지 않는다.
+
+Codex 기록으로 전환할 때 알려진 훅의 generation·session·turn과 다른 완료 기록은 배제한다. 미해결 waiting은 단순 running/idle 기록으로 해제하지 않는다.
 
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 
@@ -2527,9 +2535,11 @@ Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(AD
 
 Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
+Dev 전용 GET `/api/v1/dev/activity-metrics`는 실제 native OS snapshot 횟수, 배포판/프로브별 guest 실행 횟수와 최근 대상 검사 목록을 반환한다. release에서는 403이다. 입력·설정·프로세스를 변경하지 않는다.
+
 ### 에이전트 상태 재확인 (ADR-0358)
 
-기존 `get_codex_turn_states`·`get_agent_session_states`·`get_agent_hook_states` 응답 스키마를 유지한다. 호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀에서 기존 조회를 앞당긴다. 진행 중 요청은 겹치지 않고 완료 뒤 재확인한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다. [ADR-0360](../adr/0360-unknown-activity-and-event-recovery.md)에 따라 60초 전체 task 재조회와 activity 전체 재발행은 없다. 최초 task 복구와 foreground 복귀는 현재 workspace만 조회하고 3초 생존 감지·변경분 발행은 유지한다.
+호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀에서 대상 ID만 `request_terminal_activity_refresh({ids})`로 요청한다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)). 60초 전체 재조회·전량 재발행과 3초 전체 생존 검사는 없다. 250ms 메모리 확인 뒤 domain별 요청을 합치고 실제 검사 사이를 최소 2초 띄운다. 정상 훅 외의 대상만 120~150초에 분산 fallback한다. 일반 턴/기록/훅 조회는 새 OS/guest scan을 시작하지 않는다. `HookStateSnapshot.verifiedAtMs` 외의 기존 응답은 유지한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다.
 
 기존 terminal activity tagged union은 `unknown | shell | running | interactiveApp`이다. 버퍼/lifecycle 근거가 없는 activity는 `{type:"unknown"}`이며 agent 부재만으로 shell을 반환하지 않는다. unknown은 자동 CWD·MCP shell 실행·clear를 허용하지 않는다. 제목의 앱 종료/리셋만으로 frontend shell을 만들지 않고 OSC 133 또는 backend 판정을 기다린다.
 
@@ -2541,11 +2551,11 @@ Codex 턴 조회는 프로세스 선택 키가 없는 경우에 한해 현재 PT
 
 ### 에이전트 상태·clear 보완 (ADR-0355)
 
-검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 훅은 현재 귀속의 6초 lease 안에서 유지하며, 진행·입력 대기는 기존 60초 기한을 유지한다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex 및 ADR-0356이 추가한 Grok의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.
+검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 입력 권한은 실제 귀속 증거의 6초 lease를 사용하고, 진행·입력 대기 phase는 60초 기한을 사용한다. 이후 마지막 훅 상태를 stale로 표시하며 캐시 읽기로 신선도를 연장하지 않는다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex 및 ADR-0356이 추가한 Grok의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.
 
 `POST /api/v1/panes/{paneId}/clear` 및 Remote clear는 Claude·Codex·Grok에서 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 화면의 지원하는 텍스트 입력창을 확인한다. 과거 응답·초안 문구는 모드 판정에서 제외하고 footer 앞의 모든 연속 행을 검사한다. Grok은 둥근 테두리와 입력 prompt, 취소·확인 footer를 검사한다. 초안을 제한된 Backspace/Delete 배치로 삭제하고 180ms 동안 빈 입력창을 확인한 뒤 제출한다. 최대 32회·3초이며 bridge hard deadline을 우선한다. 지원하지 않는 화면·미확인 작업·세대 교체·삭제 실패는 기존 `failed` 배열로 반환하고 `/clear`를 제출하지 않는다.
 
-- `begin_agent_clear({id,generation,remoteLeaseId?})`는 현재 입력 소유권과 PTY 세대를 검증하고 `{generation,inputRevision}`을 반환한다.
+- `begin_agent_clear({id,generation,remoteLeaseId?})`는 현재 입력 소유권·PTY 세대와 요청 이후의 해당 대상 에이전트 생존 귀속을 검증하고 `{generation,inputRevision}`을 반환한다. 검증 중 다른 입력이나 세대 변경은 거부한다. 표시의 오래된 positive는 이 입력 허가의 근거가 아니다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)).
 - PTY별 `input_enqueue_gate`는 revision 비교·증가와 FIFO enqueue를 직렬화하는 leaf mutex다. human-control 게이트 밖의 Automation·MCP 직접 쓰기도 공유하며 이 게이트 안에서는 AppState 락이나 물리 I/O 완료를 기다리지 않는다. clear의 입력 receipt는 이 게이트 안에서 자신의 enqueue 직후 읽는다.
 - `agent_clear_input({id,expected,step,remainingMs,remoteLeaseId?})`는 고정된 `deleteDraft`(Backspace/Delete 128쌍) 또는 `submitClear`(`/clear`의 bracketed-paste 인코딩과 별도 CR)만 허용한다. 기존 human-control enqueue 게이트 안에서 `expected.inputRevision`을 현재 PTY revision과 비교한 뒤 같은 FIFO에 enqueue하며 자신의 쓰기로 증가한 revision을 반환한다. 완료를 기다린 뒤 revision을 다시 읽어 다른 입력을 흡수하지 않는다. Local·Remote·Automation의 중간 입력·Remote lease 변경·기한 초과는 후속 쓰기를 거부한다. 물리 I/O 실패는 기존 quarantine·소유권 barrier 처리를 공유한다.
 

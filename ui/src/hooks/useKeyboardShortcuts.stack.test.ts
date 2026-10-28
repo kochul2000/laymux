@@ -104,7 +104,7 @@ describe("useKeyboardShortcuts — pane stacks", () => {
     const left = useWorkspaceStore.getState().workspaces[0].panes[0];
     expect(left.layers).toHaveLength(2);
     expect(left.activeLayerId).toBe(left.layers[1].id);
-    expect(left.layers[1].view).toEqual({ type: "EmptyView" });
+    expect(left.layers[1].view).toEqual(term);
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 

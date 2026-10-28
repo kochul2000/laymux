@@ -375,6 +375,7 @@ pub fn run() {
             commands::automation_response,
             commands::report_frontend_health,
             commands::get_terminal_states,
+            commands::request_terminal_activity_refresh,
             commands::get_terminal_cwds,
             commands::get_terminal_summaries,
             commands::mark_notifications_read,

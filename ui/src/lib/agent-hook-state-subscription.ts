@@ -45,9 +45,7 @@ export function subscribeAgentHookStates(): () => void {
         useTerminalStore.getState().observeAgentHook(current.id, enabled ? snapshot : undefined);
       }
     } catch {
-      if (!disposed)
-        for (const instance of useTerminalStore.getState().instances)
-          useTerminalStore.getState().observeAgentHook(instance.id, undefined);
+      if (!disposed) useTerminalStore.getState().refreshTaskDetection();
     } finally {
       inFlight = false;
       schedule(refreshPending ? 0 : 2000);

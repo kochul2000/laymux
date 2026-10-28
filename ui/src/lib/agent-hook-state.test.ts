@@ -3,6 +3,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { HookStateSnapshot } from "./agent-hooks-api";
 import { observeTaskTitle } from "./terminal-task-observers";
+import { terminalTaskPolicy } from "./terminal-task";
 
 const snapshot = (provider: "claude" | "codex", sequence = 1): HookStateSnapshot => ({
   generation: 7,
@@ -33,6 +34,135 @@ beforeEach(() => {
   store.observeTask("pane", { source: "heuristic", taskId: "1", sequence: 1, state: "running" });
 });
 afterEach(() => vi.useRealTimers());
+it("cached reads preserve the last hook state without renewing input permission", () => {
+  const store = useTerminalStore.getState();
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  const ended = { ...snapshot("claude"), state: "ended" as const, verifiedAtMs: Date.now() };
+  store.observeAgentHook("pane", ended);
+  expect(terminalTaskPolicy(useTerminalStore.getState().instances[0]).clearAllowed).toBe(true);
+  vi.advanceTimersByTime(7000);
+  store.observeAgentHook("pane", ended);
+  const current = useTerminalStore.getState().instances[0];
+  expect(current.agentHook?.verifiedAt).toBe(ended.verifiedAtMs);
+  expect(current.taskDetectionSource).toBe("hooks");
+  expect(current.task?.state).toBe("ended");
+  expect(terminalTaskPolicy(current).observation).toBe("stale");
+  expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+});
+
+it("fresh ownership alone cannot renew an expired running task phase", () => {
+  const store = useTerminalStore.getState();
+  store.updateInstanceInfo("pane", { heuristicTask: undefined, task: undefined });
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", {
+    ...snapshot("claude"),
+    state: "running",
+    observedAtMs: Date.now() - 61000,
+    verifiedAtMs: Date.now(),
+  });
+  const current = useTerminalStore.getState().instances[0];
+  expect(current.task?.state).toBe("running");
+  expect(terminalTaskPolicy(current).observation).toBe("stale");
+});
+
+it.each(["claude", "codex"] as const)(
+  "%s stale running hooks yield to a newer confirmed completion",
+  (provider) => {
+    const store = useTerminalStore.getState();
+    store.updateInstanceInfo("pane", {
+      activity: { type: "interactiveApp", name: provider === "claude" ? "Claude" : "Codex" },
+    });
+    useSettingsStore.setState({
+      [provider]: { ...useSettingsStore.getState()[provider], stateDetection: "hooks" },
+    });
+    store.observeAgentHook("pane", {
+      ...snapshot(provider),
+      state: "running",
+      turnId: provider === "codex" ? "current" : undefined,
+      verifiedAtMs: Date.now(),
+    });
+    vi.advanceTimersByTime(7000);
+    if (provider === "codex")
+      store.updateInstanceInfo("pane", {
+        codexTurn: {
+          generation: 7,
+          sessionId: "same-conversation",
+          turnId: "current",
+          state: "completed",
+        },
+      });
+    store.observeTask("pane", {
+      source: "record",
+      taskId: provider === "codex" ? "current" : "1",
+      sequence: 2,
+      state: "ended",
+      result: "success",
+    });
+    const current = useTerminalStore.getState().instances[0];
+    expect(current.taskDetectionSource).toBe("heuristic");
+    expect(current.task?.state).toBe("ended");
+    expect(current.task?.result).toBe("success");
+    expect(current.agentHook?.task.state).toBe("running");
+  },
+);
+
+it("expired hook phases yield to fresh records even with newly verified ownership", () => {
+  const store = useTerminalStore.getState();
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", {
+    ...snapshot("claude"),
+    state: "running",
+    observedAtMs: Date.now() - 61000,
+    verifiedAtMs: Date.now(),
+  });
+  vi.advanceTimersByTime(1);
+  store.observeTask("pane", {
+    source: "record",
+    taskId: "1",
+    sequence: 2,
+    state: "ended",
+    result: "success",
+  });
+  expect(useTerminalStore.getState().instances[0].task?.state).toBe("ended");
+});
+
+it.each([
+  { generation: 7, sessionId: "same-conversation", turnId: "previous" },
+  { generation: 8, sessionId: "same-conversation", turnId: "current" },
+  { generation: 7, sessionId: "other-conversation", turnId: "current" },
+])("stale Codex hooks reject completion from a different scope: %j", (turn) => {
+  const store = useTerminalStore.getState();
+  store.updateInstanceInfo("pane", { activity: { type: "interactiveApp", name: "Codex" } });
+  useSettingsStore.getState().setCodex({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", {
+    ...snapshot("codex"),
+    state: "running",
+    turnId: "current",
+    verifiedAtMs: Date.now(),
+  });
+  vi.advanceTimersByTime(7000);
+  store.updateInstanceInfo("pane", { codexTurn: { ...turn, state: "completed" } });
+  store.observeTask("pane", {
+    source: "record",
+    taskId: turn.turnId,
+    sequence: 2,
+    state: "ended",
+    result: "success",
+  });
+  const current = useTerminalStore.getState().instances[0];
+  expect(current.task?.state).toBe("running");
+  expect(current.taskDetectionSource).toBe("hooks");
+  expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+});
+
+it("an unresolved waiting hook does not yield to a running record", () => {
+  const store = useTerminalStore.getState();
+  useSettingsStore.getState().setClaude({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", { ...snapshot("claude"), verifiedAtMs: Date.now() });
+  vi.advanceTimersByTime(7000);
+  store.observeTask("pane", { source: "record", taskId: "1", sequence: 2, state: "running" });
+  expect(useTerminalStore.getState().instances[0].task?.state).toBe("waiting");
+});
 describe.each(["claude", "codex"] as const)("%s hook selection", (provider) => {
   it("defaults to heuristics, selects hooks explicitly, and keeps the fallback current", () => {
     const store = useTerminalStore.getState();

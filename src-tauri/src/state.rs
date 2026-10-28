@@ -79,6 +79,10 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// mutexes. Callers read `pty_handles` for the catalog and release it before
 /// entering; neither mutex is held across guest I/O, while waiting on the
 /// other, or with any ordered `AppState` lock (ADR-0335).
+/// `session_processes` owns an isolated observation gate and leaf cache. Its
+/// callers hold no AppState lock; it may read the catalog before/after OS I/O.
+/// `agent_hook_bindings` and `activity_reconcile` are leaf memory locks, never
+/// held across I/O or while acquiring another AppState lock (ADR-0362).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
@@ -96,6 +100,10 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// extracted OS resource is terminated; it is never returned to operation and
 /// the mutex poison is not cleared. See ADR-0087 and api-contracts §14.3.
 pub struct AppState {
+    pub session_processes: crate::process_tree::SessionProcessCache,
+    pub(crate) agent_hook_bindings: Mutex<crate::commands::HookStateCache>,
+    pub activity_reconcile: crate::activity_reconcile::Demand,
+
     /// Leaf lock: clone hook observations before any process/filesystem I/O.
     pub agent_hook_observations: Mutex<crate::agent_hooks::observations::HookRegistry>,
     /// Inspection gate precedes AppState locks; cache is a leaf, never held for I/O.
@@ -392,6 +400,9 @@ impl AppState {
         let settings = crate::settings::load_settings();
         Self {
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            session_processes: crate::process_tree::SessionProcessCache::default(),
+            agent_hook_bindings: Mutex::new(crate::commands::HookStateCache::default()),
+            activity_reconcile: crate::activity_reconcile::Demand::default(),
             agent_hook_observations: Mutex::new(
                 crate::agent_hooks::observations::HookRegistry::default(),
             ),

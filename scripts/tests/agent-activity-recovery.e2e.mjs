@@ -557,7 +557,7 @@ try {
           let command;
           if (environment === "Windows") {
             const binary = path.join(artifacts, name + ".exe");
-            await copyFile(path.join(artifacts, "codex.exe"), binary);
+            execFileSync("rustc", [path.join(root, "scripts/tests/fixtures/activity-agent.rs"), "-o", binary], { windowsHide: true });
             command = `& ${quote(binary)} Claude ${id} ${quote(path.join(artifacts, id))}\r`;
           } else {
             const script = path.join(root, "scripts/tests/fixtures/activity-agent.py").replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, drive) => "/mnt/" + drive.toLowerCase());
@@ -565,6 +565,13 @@ try {
             command = `HOME='${directory}' LAYMUX_FIXTURE_PROCESS_NAME=${name} python3 '${script}' Claude ${id} '${directory}'\r`;
           }
           await api(`/terminals/${target.id}/write`, { data: command });
+          await until(() => api(`/terminals/${target.id}/output`),
+            (value) => value.output.includes(`ACTIVITY_FIXTURE_READY:${id}:`),
+            `${environment} ${name} fixture ready`);
+          // Startup emits a second, app-name-free idle title in the same PTY
+          // chunk. Make the explicit-title precondition deterministic before
+          // asserting this opaque-process fallback.
+          await api(`/terminals/${target.id}/write`, { data: "stale-title\r" });
           await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.name === "Claude", `${environment} ${name} 직접 제목`);
           // The ordinary fixture ends with an app-name-free idle title. This
           // case specifically tests the documented explicit title fallback.
@@ -587,6 +594,9 @@ try {
       await api(`/terminals/${target.id}/write`, { data: started });
       await sleep(1000);
       await api(`/terminals/${target.id}/write`, { data: "flood\r" });
+      // No OSC follows this opaque output. Under slow fallback, pane entry is
+      // the explicit trigger for a prompt target-only observation.
+      await invoke("request_terminal_activity_refresh", { ids: [target.id] });
       await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "unknown", "lifecycle 근거 없는 프로세스는 unknown");
       assert.equal((await api("/terminals/states")).states[target.id].activity.type, "unknown");
       const pane = (await api("/workspaces/active")).workspace.panes.find((p) => p.terminalId === target.id);

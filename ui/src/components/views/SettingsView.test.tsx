@@ -73,6 +73,12 @@ describe("SettingsView", () => {
     mockCloudStatus = { connected: false, instanceId: null, lastError: null };
     mockAppUpdateStatus = DEFAULT_APP_UPDATE_STATUS;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (
+        cmd === "manage_agent_hooks" &&
+        (args?.request as { operation?: string } | undefined)?.operation === "agent-status"
+      ) {
+        return Promise.resolve({ status: "missing" });
+      }
       if (cmd === "list_system_monospace_fonts") {
         return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
       }
