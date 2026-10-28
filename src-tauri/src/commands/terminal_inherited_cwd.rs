@@ -1,10 +1,13 @@
 //! Resolve only split/stack CWD seeds; explicit paths and session restore bypass this policy.
-#[cfg(windows)]
 use crate::path_utils;
 use crate::settings::Settings;
 use crate::terminal::{InitialExecutionHost, TerminalSession};
 
-pub(super) async fn resolve(cwd: Option<String>, source_profile: Option<String>) -> Option<String> {
+pub(super) async fn resolve(
+    cwd: Option<String>,
+    source_profile: Option<String>,
+    target_profile: &str,
+) -> Option<String> {
     let (Some(cwd), Some(profile)) = (cwd.as_ref(), source_profile) else {
         return cwd;
     };
@@ -12,6 +15,7 @@ pub(super) async fn resolve(cwd: Option<String>, source_profile: Option<String>)
     if !settings.terminal.use_main_worktree_cwd_on_split {
         return Some(cwd.clone());
     }
+    let target_command = profile_command(target_profile, &settings).to_owned();
     let original = cwd.clone();
     let input = cwd.clone();
     match tokio::task::spawn_blocking(move || resolve_from_profile(&input, &profile, &settings))
@@ -19,7 +23,7 @@ pub(super) async fn resolve(cwd: Option<String>, source_profile: Option<String>)
     {
         Ok(Ok(Some(resolved))) => {
             tracing::debug!(%original, %resolved, "inherited CWD selected the main worktree");
-            Some(resolved)
+            Some(spawn_path(resolved, &target_command, cfg!(windows)))
         }
         Ok(Ok(None)) => Some(original),
         Ok(Err(error)) => {
@@ -38,13 +42,7 @@ fn resolve_from_profile(
     profile: &str,
     settings: &Settings,
 ) -> Result<Option<String>, crate::error::AppError> {
-    let command = settings
-        .profiles
-        .iter()
-        .find(|p| p.name == profile)
-        .map(|p| p.command_line.as_str())
-        .filter(|line| !line.is_empty())
-        .unwrap_or_else(|| TerminalSession::profile_command_line(profile));
+    let command = profile_command(profile, settings);
     let host = InitialExecutionHost::classify_spawn_target(
         command.split_whitespace().next(),
         cfg!(windows),
@@ -67,12 +65,53 @@ fn resolve_from_profile(
         let qualified = format!("//wsl.localhost/{distro}{guest}");
         match crate::worktree::main_worktree_cwd(&qualified) {
             Ok(value) => return Ok(value),
-            Err(_) if guest.starts_with("/mnt/") => {
-                // A mounted Windows checkout may contain native Git absolute metadata.
-                return crate::worktree::main_worktree_cwd(cwd);
-            }
+            Err(_) if guest.starts_with("/mnt/") => return crate::worktree::main_worktree_cwd(cwd),
             Err(error) => return Err(error),
         }
     }
     crate::worktree::main_worktree_cwd(cwd)
+}
+
+fn spawn_path(path: String, target_command: &str, windows: bool) -> String {
+    if InitialExecutionHost::classify_spawn_target(
+        target_command.split_whitespace().next(),
+        windows,
+    ) == InitialExecutionHost::Wsl
+    {
+        path_utils::normalize_wsl_path(&path)
+    } else {
+        path
+    }
+}
+
+fn profile_command<'a>(profile: &'a str, settings: &'a Settings) -> &'a str {
+    settings
+        .profiles
+        .iter()
+        .find(|p| p.name == profile)
+        .map(|p| p.command_line.as_str())
+        .filter(|line| !line.is_empty())
+        .unwrap_or_else(|| TerminalSession::profile_command_line(profile))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn qualified_git_paths_become_guest_paths_only_for_wsl_children() {
+        let cwd = "//wsl.localhost/Debian/tmp/main repo/ui".to_owned();
+        assert_eq!(
+            spawn_path(cwd.clone(), "wsl.exe -d Debian", true),
+            "/tmp/main repo/ui"
+        );
+        assert_eq!(spawn_path(cwd.clone(), "powershell.exe", true), cwd);
+        assert_eq!(
+            spawn_path("D:/main/ui".into(), "wsl.exe", true),
+            "/mnt/d/main/ui"
+        );
+        assert_eq!(
+            spawn_path("/home/main/ui".into(), "bash", false),
+            "/home/main/ui"
+        );
+    }
 }

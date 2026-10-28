@@ -225,7 +225,7 @@ pub async fn create_terminal_session(
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
     tracing::debug!(terminal_id = %id, ?cwd, ?inherit_cwd_from_profile, "planning inherited terminal CWD");
-    let cwd = super::terminal_inherited_cwd::resolve(cwd, inherit_cwd_from_profile).await;
+    let cwd = super::terminal_inherited_cwd::resolve(cwd, inherit_cwd_from_profile, &profile).await;
     create_terminal_session_inner(
         id,
         profile,

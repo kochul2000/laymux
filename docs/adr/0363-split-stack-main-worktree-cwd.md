@@ -17,6 +17,7 @@
 - 가로·세로 split과 stack의 일회성 요청은 캡처한 CWD와 그 CWD를 해석할 원본 프로필을 보유한다. 첫 터미널 생성 IPC에 원본 프로필을 전달하며 요청 소비·제거 수명은 기존 재시작 버스가 소유한다. 일반 재시작·복원에는 이 표식을 넣지 않는다. Automation의 명시 CWD는 표식을 제거하므로 항상 우선한다. Remote stack은 비활성 레이어라도 선택한 레이어의 CWD·프로필을 사용한다.
 - Rust는 첫 PTY 생성 전에 설정과 원본 프로필의 native/WSL 실행 환경을 해석하고, 해당 Git의 worktree 목록으로 원본(main worktree)을 판정한다. 브랜치 이름이나 폴더 이름을 추측하지 않는다. Windows WSL 경로는 배포판을 결합한다. SSH 원격 파일시스템은 로컬 Git으로 조회하지 않는다.
 - linked worktree의 `ui`에서 시작하면 원본의 `ui`를 선택하며, 그 디렉터리가 없으면 원본 루트를 선택한다. 원본 checkout·비저장소·bare 저장소 또는 조회 실패는 기존 CWD를 유지한다. 프로세스 실행은 기존 hidden Git/WSL 경로를 재사용하고 짧은 조회 제한을 적용한다. 조회는 blocking worker에서 수행하며 AppState 락을 잡은 채 실행하지 않는다.
+- 조회용 WSL UNC 경로와 자식 프로세스의 시작 경로를 구분한다. WSL 자식에는 매핑 결과를 guest POSIX 경로로 변환해 전달하며 native 자식에는 호스트가 접근할 경로를 유지한다.
 - 경로 변경은 시작 요청이며 실제 CWD의 SoT는 기존 PTY의 스폰 결과·OSC 관측이다. 새 셸 시작 뒤 `cd`를 주입하지 않는다.
 - 취소된 초기 effect는 첫 생성 표식을 소비하지 않는다. StrictMode의 초기 effect 재실행도 같은 상속 CWD를 보유하며, 살아 있는 생성 시도가 완료된 뒤에만 요청을 소비한다. 새 pane은 CWD 요청을 준비한 뒤 UI 상태에 공개한다.
 

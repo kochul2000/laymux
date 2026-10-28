@@ -46,6 +46,8 @@ Remote는 활성 lease와 선택 terminal을 결합하여 같은 서비스를 �
 
 생성자는 새 pane을 store에 공개하기 전에 CWD 요청을 준비한다. `splitPane`의 선택적 초기 view와 `stackPane`의 명시 `view.lastCwd`는 상속 표식 없이 먼저 시딩하며, WorktreeView에서 직접 여는 터미널도 이 경로를 사용한다. Remote는 내부 `sourceLayerId`로 선택한 레이어를 지정하므로 활성 레이어의 경로를 나중에 덮어쓰는 창이 없다. 취소된 초기 effect는 첫 세션 요청을 소비하지 않으며 StrictMode 재실행도 같은 CWD·프로필 표식을 유지한다.
 
+Git 조회용 WSL UNC 경로는 대상 프로필이 WSL인 경우에만 POSIX 시작 경로로 정규화한다. native 자식은 호스트 경로를 유지하며, PTY의 `wsl --cd`에는 UNC를 넘기지 않는다.
+
 - 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다. 분할한 슬롯이 스택이면 기준은 그 슬롯의 활성 레이어다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
 - 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. `terminal.inheritProfileOnSplit`(기본 true)이 켜져 있고 원본 활성 레이어가 터미널이면 `lib/pane-profile.ts`가 실행 중 인스턴스 → 저장된 view 순으로 프로필을 선택해 즉시 `TerminalView`를 만든다. 프로필만 선택하며 대화·출력 캐시·pane별 override는 복사하지 않는다. 옵션을 끄거나 비터미널에서 분할하면 `EmptyView`에서 선택을 기다린다([ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md)). CWD 경로는 이 옵션과 프로파일의 `restoreCwd` 설정과 무관하다.
 - Automation `split_pane` 은 `cwd` 를 주면 그 값으로 시드를 덮어쓰고(명시값 우선), 주지 않으면 UI 분할과 같은 상속을 받는다. Dock 분할은 상속 대상이 아니다.
