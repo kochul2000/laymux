@@ -43,10 +43,7 @@ fn resolve_from_profile(
     settings: &Settings,
 ) -> Result<Option<String>, crate::error::AppError> {
     let command = profile_command(profile, settings);
-    let host = InitialExecutionHost::classify_spawn_target(
-        command.split_whitespace().next(),
-        cfg!(windows),
-    );
+    let host = classify_cwd_source(command, cfg!(windows));
     if host == InitialExecutionHost::DirectSsh {
         return Ok(None);
     }
@@ -70,6 +67,21 @@ fn resolve_from_profile(
         }
     }
     crate::worktree::main_worktree_cwd(cwd)
+}
+
+fn classify_cwd_source(command: &str, windows: bool) -> InitialExecutionHost {
+    let executable = command.split_whitespace().next();
+    // NonWindows is the generic spawn classification, but remote CWDs must
+    // never be inspected on the local filesystem on any platform.
+    if executable
+        .and_then(|path| path.rsplit(['/', '\\']).next())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("ssh") || name.eq_ignore_ascii_case("ssh.exe")
+        })
+    {
+        return InitialExecutionHost::DirectSsh;
+    }
+    InitialExecutionHost::classify_spawn_target(executable, windows)
 }
 
 fn spawn_path(path: String, target_command: &str, windows: bool) -> String {
@@ -97,6 +109,25 @@ fn profile_command<'a>(profile: &'a str, settings: &'a Settings) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ssh_sources_are_remote_on_linux_and_windows() {
+        for windows in [false, true] {
+            for command in [
+                "ssh user@host",
+                "/usr/bin/ssh user@host",
+                "C:\\OpenSSH\\ssh.exe user@host",
+            ] {
+                assert_eq!(
+                    classify_cwd_source(command, windows),
+                    InitialExecutionHost::DirectSsh
+                );
+            }
+        }
+        assert_eq!(
+            classify_cwd_source("bash", false),
+            InitialExecutionHost::NonWindows
+        );
+    }
     #[test]
     fn qualified_git_paths_become_guest_paths_only_for_wsl_children() {
         let cwd = "//wsl.localhost/Debian/tmp/main repo/ui".to_owned();
