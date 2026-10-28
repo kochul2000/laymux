@@ -189,6 +189,7 @@ describe("WorkspaceStore", () => {
       expect(useTerminalRestartStore.getState().requests[newPane.id]).toEqual({
         epoch: 1,
         cwd: "/home/user/project",
+        cwdSourceProfile: "PowerShell",
         fresh: true,
       });
     });

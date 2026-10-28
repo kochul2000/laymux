@@ -2368,6 +2368,8 @@ pub fn get_terminal_summaries_inner(
 
 ### 분할·stack 프로필 설정 (ADR-0361)
 
+분할 CWD에는 별도 `terminal.useMainWorktreeCwdOnSplit: boolean`(기본 true, 적용 `nextUse`)이 있다([ADR-0363](../adr/0363-split-stack-main-worktree-cwd.md)). `create_terminal_session`의 선택적 `inheritCwdFromProfile`은 원본 프로필 이름이며, 분할·stack의 일회성 CWD 요청에서만 전달한다. Rust는 해당 프로필의 Git 환경에서 linked worktree의 원본과 같은 하위 경로(없으면 원본 루트)를 선택한다. 원본·비저장소·조회 실패·SSH는 원래 CWD를 유지한다. 표식 없는 명시 CWD와 복원·재시작은 변환하지 않는다. 새 설정은 기존 프로필 상속 토글과 독립이다.
+
 `terminal.inheritProfileOnSplit: boolean`은 기본 true이며 설정 화면의 터미널 > 일반에서 편집한다. Rust serde와 UI snapshot은 필드 누락 시 true로 보완하고 명시 false는 유지한다. MCP 설정 스키마의 적용 시점은 `nextUse`이다. 가로·세로 분할과 stack에서 원본 활성 터미널 레이어의 실행 중 프로필(없으면 저장된 프로필)을 선택한다. 프로필 이름만 선택하며 세션과 pane별 override를 복사하지 않는다. CWD 시드는 기존 ADR-0140 경로로 옵션과 독립이다. UI에서 끄면 EmptyView, Automation split·stack과 Remote stack은 기존 계약대로 터미널을 만든다. Automation의 명시 view·profile·cwd가 우선하며 Remote stack은 슬롯 활성 레이어가 달라도 선택한 터미널을 기준으로 한다. Remote에서 끄면 기본 프로필 터미널과 선택 터미널 CWD를 사용한다. [ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md).
 
 ### 15.1 스타일링

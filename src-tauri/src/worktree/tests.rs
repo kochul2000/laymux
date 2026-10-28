@@ -2,6 +2,9 @@ use super::*;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+#[path = "main_cwd_tests.rs"]
+mod main_cwd_tests;
+
 fn git(cwd: &Path, args: &[&str]) -> String {
     let output = crate::process::headless_command("git")
         .args(["-c", "core.hooksPath=", "-c", "commit.gpgSign=false"])

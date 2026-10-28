@@ -142,6 +142,8 @@ export interface PasteSettings {
 
 /** Terminal behavior & rendering. */
 export interface TerminalSettings {
+  /** 분할·stack 시 linked worktree 대신 원본의 같은 하위 폴더를 선택한다. */
+  useMainWorktreeCwdOnSplit: boolean;
   /** 가로·세로 분할과 stack에서 원본 터미널 프로필을 선택한다. */
   inheritProfileOnSplit: boolean;
   /** Checkpoint Worker mode is fixed for each TerminalView lifetime. */
@@ -827,6 +829,7 @@ export const DEFAULT_PASTE: PasteSettings = {
 };
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
+  useMainWorktreeCwdOnSplit: true,
   inheritProfileOnSplit: true,
   checkpointWorker: true,
   outputActivityBurst: {

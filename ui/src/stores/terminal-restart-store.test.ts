@@ -4,6 +4,15 @@ import { useWorkspaceStore } from "./workspace-store";
 import { useDockStore } from "./dock-store";
 
 describe("terminal-restart-store", () => {
+  it("상속 CWD 표식은 첫 생성까지 보존하고 명시 CWD로 덮어쓰면 제거한다", () => {
+    const store = useTerminalRestartStore.getState();
+    store.requestRestart("inherited", "/linked/ui", false, "WSL");
+    expect(useTerminalRestartStore.getState().requests.inherited.cwdSourceProfile).toBe("WSL");
+    store.consumeRestart("inherited");
+    expect(useTerminalRestartStore.getState().requests.inherited.fresh).toBe(false);
+    store.requestRestart("inherited", "/explicit");
+    expect(useTerminalRestartStore.getState().requests.inherited.cwdSourceProfile).toBeUndefined();
+  });
   beforeEach(() => {
     useTerminalRestartStore.setState({ requests: {} });
   });

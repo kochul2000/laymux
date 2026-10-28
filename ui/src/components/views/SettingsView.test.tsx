@@ -1475,6 +1475,21 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("path-link-os-open-confirm-toggle")).toBeChecked();
   });
 
+  it("워크트리 원본 경로 사용은 기본 켜짐이며 저장 후 반영된다", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("use-main-worktree-cwd-on-split-toggle")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByTestId("use-main-worktree-cwd-on-split-toggle"));
+    expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(true);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(false);
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(true);
+  });
+
   it("분할·스택 프로필 상속은 기본 켜짐이며 저장 시 반영한다", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

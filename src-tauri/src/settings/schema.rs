@@ -35,6 +35,12 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 
 const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
+        path: "/terminal/useMainWorktreeCwdOnSplit",
+        description: "분할·stack의 CWD가 linked worktree이면 원본 저장소의 같은 하위 폴더(없으면 원본 루트)에서 시작합니다. 기본 true이며 false는 현재 워크트리 CWD를 유지합니다. 명시 CWD·일반 재시작·복원에는 적용하지 않습니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/terminal/inheritProfileOnSplit",
         description: "가로·세로 분할과 stack에서 원본 터미널의 프로필로 진입합니다(기본 true). 다음 생성부터 적용하며 CWD 상속과 독립입니다. Remote는 끄더라도 선택 가능한 터미널을 생성합니다.",
         sensitive: false,

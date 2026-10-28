@@ -10700,6 +10700,60 @@ describe("TerminalView", () => {
       expect(mockLoadTerminalOutputCache).not.toHaveBeenCalled();
     });
 
+    it("StrictMode 재실행에서도 상속 CWD 표식을 실제 세션까지 보존한다", async () => {
+      const { StrictMode } = await import("react");
+      const consumed = vi.fn();
+      render(
+        <StrictMode>
+          <TerminalView
+            instanceId="strict-inherited"
+            profile="PowerShell"
+            syncGroup="default"
+            isUserRestart
+            restartCwd="/linked/ui"
+            restartCwdSourceProfile="WSL"
+            onUserRestartConsumed={consumed}
+          />
+        </StrictMode>,
+      );
+      await vi.waitFor(() =>
+        expect(mockCreateTerminalSession.mock.calls.length).toBeGreaterThanOrEqual(2),
+      );
+      expect(
+        mockCreateTerminalSession.mock.calls.every(
+          (call: unknown[]) => call[7] === "/linked/ui" && call[9] === "WSL",
+        ),
+      ).toBe(true);
+      await vi.waitFor(() => expect(consumed).toHaveBeenCalledOnce());
+    });
+
+    it("분할 CWD는 원본 프로필 표식을 첫 터미널 생성으로 전달한다", async () => {
+      render(
+        <TerminalView
+          instanceId="inherited-cwd"
+          profile="PowerShell"
+          syncGroup="default"
+          isUserRestart
+          restartCwd="/linked/ui"
+          restartCwdSourceProfile="WSL"
+        />,
+      );
+      await vi.waitFor(() =>
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "inherited-cwd",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          "/linked/ui",
+          undefined,
+          "WSL",
+        ),
+      );
+    });
+
     it("clear restart still skips agent resume", async () => {
       render(
         <TerminalView

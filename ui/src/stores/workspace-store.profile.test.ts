@@ -8,6 +8,20 @@ import { activeLayer } from "@/lib/pane-layers";
 vi.mock("@/lib/persist-session", () => ({ persistSession: vi.fn() }));
 
 describe("분할·stack 프로필 상속", () => {
+  it("명시 CWD는 새 레이어를 공개하는 순간부터 상속 표식 없이 준비된다", () => {
+    let published: unknown;
+    const unsubscribe = useWorkspaceStore.subscribe((state) => {
+      const layers = state.getActiveWorkspace()!.panes[0].layers;
+      if (layers.length > 1)
+        published = useTerminalRestartStore.getState().requests[layers.at(-1)!.id];
+    });
+    try {
+      useWorkspaceStore.getState().stackPane(0, { type: "TerminalView", lastCwd: "/explicit" });
+      expect(published).toEqual({ epoch: 1, cwd: "/explicit", fresh: true });
+    } finally {
+      unsubscribe();
+    }
+  });
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -37,6 +51,7 @@ describe("분할·stack 프로필 상속", () => {
       const layer = activeLayer(slot);
       expect(layer.view).toEqual({ type: "TerminalView", profile: "WSL" });
       expect(useTerminalRestartStore.getState().requests[layer.id]?.cwd).toBe("/repo");
+      expect(useTerminalRestartStore.getState().requests[layer.id]?.cwdSourceProfile).toBe("WSL");
     },
   );
 

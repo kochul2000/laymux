@@ -989,6 +989,9 @@ impl<'de> Deserialize<'de> for ComposerStarredEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
+    /// Use the main worktree's matching subdirectory for inherited split/stack CWDs.
+    #[serde(default = "default_true")]
+    pub use_main_worktree_cwd_on_split: bool,
     /// Select the source terminal profile for splits and new stack layers.
     #[serde(default = "default_true")]
     pub inherit_profile_on_split: bool,
@@ -1070,6 +1073,7 @@ fn default_pty_daemon_grace_minutes() -> u32 {
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
+            use_main_worktree_cwd_on_split: true,
             inherit_profile_on_split: true,
             checkpoint_worker: true,
             output_activity_burst: OutputActivityBurstSettings::default(),

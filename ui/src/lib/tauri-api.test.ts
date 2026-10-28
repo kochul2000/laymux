@@ -71,6 +71,24 @@ beforeEach(() => {
 
 describe("tauri-api", () => {
   describe("createTerminalSession", () => {
+    it("분할 CWD 표식만 별도 IPC 인자로 전달한다", async () => {
+      await createTerminalSession(
+        "inherited",
+        "PowerShell",
+        80,
+        24,
+        "",
+        true,
+        true,
+        "/linked/ui",
+        undefined,
+        "WSL",
+      );
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "create_terminal_session",
+        expect.objectContaining({ cwd: "/linked/ui", inheritCwdFromProfile: "WSL" }),
+      );
+    });
     it("invokes create_terminal_session with correct params", async () => {
       const mockResult = {
         id: "t1",

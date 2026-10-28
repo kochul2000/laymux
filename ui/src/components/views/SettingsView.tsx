@@ -1434,6 +1434,13 @@ function TerminalSection() {
           checked={terminal.inheritProfileOnSplit}
           onChange={(inheritProfileOnSplit) => update({ inheritProfileOnSplit })}
         />
+        <SettingsToggleField
+          label={t("terminal.useMainWorktreeCwdOnSplit")}
+          desc={t("terminal.useMainWorktreeCwdOnSplitDesc")}
+          testId="use-main-worktree-cwd-on-split-toggle"
+          checked={terminal.useMainWorktreeCwdOnSplit}
+          onChange={(useMainWorktreeCwdOnSplit) => update({ useMainWorktreeCwdOnSplit })}
+        />
         <SettingsField
           label={t("terminal.defaultInputMode")}
           desc={t("terminal.defaultInputModeDesc")}

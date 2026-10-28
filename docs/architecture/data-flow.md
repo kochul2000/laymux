@@ -40,7 +40,11 @@ Remote는 활성 lease와 선택 terminal을 결합하여 같은 서비스를 �
 | 툴바 버튼          | 현재 포커스 Pane을 가로/세로 분할 |
 | settings.json      | 직접 비율 정의                    |
 
-**새 Pane 은 분할한 그 Pane 의 CWD 에서 첫 터미널 세션을 시작한다**([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)).
+**새 Pane 은 분할한 그 Pane 의 CWD를 상속하며, linked worktree에서는 기본적으로 원본 저장소의 같은 하위 경로에서 첫 세션을 시작한다**([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md), [ADR-0363](../adr/0363-split-stack-main-worktree-cwd.md)).
+
+`terminal.useMainWorktreeCwdOnSplit`(기본 true)은 터미널 > 일반에서 편집한다. 가로·세로 분할과 stack의 일회성 요청은 원본 프로필 표식을 CWD와 함께 보유하고, 첫 `create_terminal_session` IPC에 전달한다. Rust가 원본 프로필의 native/WSL Git에서 main worktree와 상대 경로를 해석한 뒤 스폰 인자를 결정한다. 원본에 같은 하위 디렉터리가 없으면 원본 루트이며, 옵션 false·원본 checkout·비저장소·조회 실패는 기존 CWD를 보존한다. 명시한 API CWD·일반 재시작·세션 복원에는 표식이 없어 이 변환을 거치지 않는다. Remote stack도 선택한 레이어의 원본 프로필을 전달한다. 실제 CWD는 기존 PTY 응답이 확정한다.
+
+생성자는 새 pane을 store에 공개하기 전에 CWD 요청을 준비한다. `splitPane`의 선택적 초기 view와 `stackPane`의 명시 `view.lastCwd`는 상속 표식 없이 먼저 시딩하며, WorktreeView에서 직접 여는 터미널도 이 경로를 사용한다. Remote는 내부 `sourceLayerId`로 선택한 레이어를 지정하므로 활성 레이어의 경로를 나중에 덮어쓰는 창이 없다. 취소된 초기 effect는 첫 세션 요청을 소비하지 않으며 StrictMode 재실행도 같은 CWD·프로필 표식을 유지한다.
 
 - 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다. 분할한 슬롯이 스택이면 기준은 그 슬롯의 활성 레이어다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
 - 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. `terminal.inheritProfileOnSplit`(기본 true)이 켜져 있고 원본 활성 레이어가 터미널이면 `lib/pane-profile.ts`가 실행 중 인스턴스 → 저장된 view 순으로 프로필을 선택해 즉시 `TerminalView`를 만든다. 프로필만 선택하며 대화·출력 캐시·pane별 override는 복사하지 않는다. 옵션을 끄거나 비터미널에서 분할하면 `EmptyView`에서 선택을 기다린다([ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md)). CWD 경로는 이 옵션과 프로파일의 `restoreCwd` 설정과 무관하다.
