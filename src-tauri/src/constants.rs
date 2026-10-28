@@ -763,21 +763,13 @@ pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 /// `[{ terminalId, activity, activitySequence }]`.
 pub const EVENT_TERMINAL_ACTIVITY_RECONCILED: &str = "terminal-activity-reconciled";
 
-/// How often the worker starts a pass. Fixed, not adaptive: this worker also
-/// refreshes the WSL guest snapshot, and a guest **negative** stays
-/// authoritative only for `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`. Backing the
-/// cadence off past that would let an exited agent's stale banner re-pin the
-/// pane through the heuristics between passes, so the ceiling the cadence could
-/// back off to is barely above this value anyway (ADR-0135).
-///
-/// Measured pass-start to pass-start, not as a sleep between passes: the pass
-/// itself costs up to `WSL_LIVENESS_PASS_BUDGET`, and counting that on top of a
-/// fixed sleep would push the snapshot past the window the invariant below
-/// protects.
-///
-/// Invariant, asserted in `activity_reconcile`:
-/// `ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`.
-pub const ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
+/// Memory-only scheduling wakeup; it does not refresh process snapshots.
+pub const ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_millis(250);
+/// Metadata-only wakeup above; OS/guest observations are demand driven.
+pub const ACTIVITY_FALLBACK_INTERVAL: Duration = Duration::from_secs(120);
+pub const ACTIVITY_DOMAIN_SPACING: Duration = Duration::from_secs(2);
+/// Storage lifetime only. It grants neither negative liveness nor fresh input.
+pub const ACTIVITY_DISPLAY_RETENTION: Duration = Duration::from_secs(180);
 
 // ── WSL interactive-app liveness (ADR-0134) ────────────────────────
 
@@ -806,9 +798,11 @@ pub const WSL_LIVENESS_AUTHORITATIVE_MAX_AGE: Duration = Duration::from_secs(8);
 /// noticing an exit, while a stale negative would suppress live detection.
 pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
 
-/// How long the resolved default WSL distribution is reused. Resolving it is a
-/// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
-pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
+/// On-demand HOME resolution cache; never a periodic default-distro scan.
+pub const WSL_HOME_CACHE_TTL: Duration = Duration::from_secs(60);
+pub const WSL_USER_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss";
+pub const WSL_DEFAULT_DISTRIBUTION_VALUE: &str = "DefaultDistribution";
+pub const WSL_DISTRIBUTION_NAME_VALUE: &str = "DistributionName";
 
 // ── Shared WSL guest observations (ADR-0335) ───────────────────────
 

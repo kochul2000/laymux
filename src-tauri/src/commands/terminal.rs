@@ -1624,6 +1624,7 @@ pub(crate) fn close_terminal_session_inner(
     // Same reason for the guest liveness verdict, which is bound to the PTY
     // generation that produced it (ADR-0134).
     crate::wsl_liveness::forget(id);
+    crate::commands::forget_hook_binding(state, id, "");
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {

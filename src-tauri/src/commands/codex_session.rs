@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::claude_session::is_valid_session_id;
-use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
-use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
+use super::session_attribution::{provider_terminal_domains_scoped, ProviderSessionLookup};
+use super::wsl_agent_session::{resolve_wsl_agent_processes_scoped, WslAgentProvider};
 use crate::process_tree::match_interactive_app_process;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::GuestObservation;
@@ -60,11 +60,21 @@ pub(crate) fn get_codex_session_lookup_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
+    get_codex_session_lookup_scoped(session_max_age_hours, state, observation, None)
+}
+
+pub(crate) fn get_codex_session_lookup_scoped(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    observation: GuestObservation,
+    scope: Option<&HashSet<String>>,
+) -> Result<ProviderSessionLookup, crate::error::AppError> {
     lookup_with_observer(
         session_max_age_hours,
         state,
         observation,
         false,
+        scope,
         |_, _, _| {},
     )
 }
@@ -76,6 +86,7 @@ fn lookup_with_observer(
     state: &AppState,
     observation: GuestObservation,
     task_state: bool,
+    scope: Option<&HashSet<String>>,
     mut observe: impl FnMut(&str, &CodexSessionStore, &store::ResolvedSession),
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
     let conversations = conversation::ConversationLookup::new(
@@ -95,7 +106,7 @@ fn lookup_with_observer(
             conversations.resolve(terminal, store, distro, selected.into_session())
         }
     };
-    let domains = provider_terminal_domains(state)?;
+    let domains = provider_terminal_domains_scoped(state, scope)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
         .iter()
@@ -107,7 +118,7 @@ fn lookup_with_observer(
     let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
-        match crate::process_tree::try_snapshot_processes() {
+        match crate::process_tree::session_processes(state, observation) {
             Ok(snapshot) => terminal_roots
                 .into_iter()
                 .filter_map(|(terminal_id, root_pid)| {
@@ -167,7 +178,7 @@ fn lookup_with_observer(
     let mut result = crate::process_tree::complete_agent_session_attributions(&observed, exact);
     // Native DB I/O must not consume the guest's process + diagnostics budget.
     let deadline = std::time::Instant::now() + crate::constants::WSL_AGENT_PROBE_TIMEOUT;
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Codex, observation) {
+    match resolve_wsl_agent_processes_scoped(state, WslAgentProvider::Codex, observation, scope) {
         Ok(lookup) => {
             let mut process_rows =
                 wsl::read_rows_batch(state, &lookup.attributions, observation, deadline);

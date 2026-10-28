@@ -277,7 +277,7 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
         return selectTask({
           ...inst,
           heuristicTask: heuristicTask(inst),
-          agentHook: { snapshot, task, verifiedAt: Date.now() },
+          agentHook: { snapshot, task, verifiedAt: snapshot.verifiedAtMs ?? Date.now() },
         });
       }),
     }));

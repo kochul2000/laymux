@@ -13,12 +13,17 @@ export interface HookStateSnapshot {
   turnId?: string | null;
   sequence: number;
   observedAtMs: number;
+  /** Last actual ownership proof or new event from its verified root. */
+  verifiedAtMs?: number;
   configDir: string | null;
   distro: string | null;
   bindingSource?: "process" | "title";
 }
-export const getAgentHookStates = (providers: HookProvider[]) =>
-  invoke<Record<string, HookStateSnapshot>>("get_agent_hook_states", { providers });
+export const getAgentHookStates = (providers: HookProvider[], refreshTerminalIds?: string[]) =>
+  invoke<Record<string, HookStateSnapshot>>("get_agent_hook_states", {
+    providers,
+    ...(refreshTerminalIds ? { refreshTerminalIds } : {}),
+  });
 export interface HookEnvironment {
   id: string;
   label: string;

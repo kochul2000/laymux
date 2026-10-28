@@ -31,6 +31,23 @@ fn accepted_top_level_codex_metadata_requests_an_ordinary_checkpoint() {
     assert_eq!(state.session_checkpoint.hints.revision(), after);
 }
 
+#[test]
+fn ordinary_codex_task_hooks_do_not_request_process_checkpoints_again() {
+    let (state, mut event) = fixture();
+    accept(&state, event.clone()).unwrap();
+    let before = state.session_checkpoint.hints.revision();
+    for name in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] {
+        event.event = name.into();
+        event.emitted_at_ms += 1;
+        accept(&state, event.clone()).unwrap();
+        assert_eq!(state.session_checkpoint.hints.revision(), before, "{name}");
+    }
+    event.event = "SessionEnd".into();
+    event.emitted_at_ms += 1;
+    accept(&state, event).unwrap();
+    assert!(state.session_checkpoint.hints.revision() > before);
+}
+
 fn fixture() -> (AppState, HookEvent) {
     let state = AppState::new();
     let session = TerminalSession::new("pane".into(), TerminalConfig::default());

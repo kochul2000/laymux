@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import time
 
@@ -29,10 +30,18 @@ else:
     sessions.mkdir(parents=True, exist_ok=True)
     (sessions / f'{os.getpid()}.json').write_text(json.dumps({'pid':os.getpid(),'sessionId':session_id,'startedAt':int(time.time()*1000),'status':'idle'}))
     print('\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07',end='')
-print(f'ACTIVITY_FIXTURE_READY:{os.getpid()}',flush=True)
+print(f'ACTIVITY_FIXTURE_READY:{session_id}:{os.getpid()}',flush=True)
 for line in sys.stdin:
     command = line.strip()
-    if command == 'flood': print('x'*32768,flush=True)
+    if command in ('hook-start', 'hook-running', 'hook-idle', 'hook-heartbeat', 'hook-end'):
+        event = {'hook-start': 'SessionStart', 'hook-running': 'UserPromptSubmit',
+                 'hook-idle': 'Stop', 'hook-heartbeat': 'PostToolUse', 'hook-end': 'SessionEnd'}[command]
+        subprocess.run([str(root / 'laymux-hooks/laymux-agent-hook'), 'emit', provider.lower()],
+                       input=json.dumps({'session_id': session_id, 'hook_event_name': event,
+                                         'source': 'startup', 'turn_id': 'fixture-turn'}),
+                       text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        print(f'ACTIVITY_HOOK_SENT:{event}', flush=True)
+    elif command == 'flood': print('x'*32768,flush=True)
     elif command == 'title-reset': print('\x1b]0;dev fixture cwd\x07',end='',flush=True)
     elif command == 'stale-title': print('\x1b]0;Claude Code\x07',end='',flush=True)
     elif command == 'restore-title':

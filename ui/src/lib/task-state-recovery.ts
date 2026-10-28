@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { onTaskStateRefresh } from "./task-state-refresh";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { requestTaskStateRefresh } from "./task-state-refresh";
@@ -13,6 +15,9 @@ export function refreshWorkspaceTaskStates(workspaceId: string): void {
 
 /** Desktop and Remote focus both reach the host stores; no periodic whole-app sweep. */
 export function subscribeTaskStateRecovery(): () => void {
+  const stopActivity = onTaskStateRefresh((ids) => {
+    void invoke("request_terminal_activity_refresh", { ids: [...ids] }).catch(() => {});
+  });
   const terminals = useTerminalStore.subscribe((state, before) => {
     const previous = new Map(before.instances.map((i) => [i.id, i]));
     requestTaskStateRefresh(
@@ -38,6 +43,7 @@ export function subscribeTaskStateRecovery(): () => void {
   document.addEventListener("visibilitychange", foreground);
   refresh();
   return () => {
+    stopActivity();
     terminals();
     workspaces();
     document.removeEventListener("visibilitychange", foreground);

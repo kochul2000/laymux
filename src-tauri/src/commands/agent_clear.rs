@@ -64,12 +64,54 @@ fn begin_agent_clear_inner(
     generation: u64,
     origin: HumanControlOrigin,
 ) -> Result<AgentClearInputStamp, String> {
+    begin_agent_clear_verified(state, id, generation, origin, || {
+        let ids = std::collections::HashSet::from([id.to_owned()]);
+        let observation = crate::wsl_probe::snapshot::GuestObservation::starting_now();
+        let attributions = super::session_attribution::get_terminal_session_attributions_scoped(
+            None,
+            None,
+            None,
+            state,
+            observation,
+            Some(&ids),
+        )?;
+        use super::session_attribution::SessionAttributionState;
+        let valid = attributions.get(id).is_some_and(|a| {
+            a.generation == generation
+                && matches!(
+                    a.state,
+                    SessionAttributionState::Identified
+                        | SessionAttributionState::Fresh
+                        | SessionAttributionState::ActiveButUnidentified
+                )
+                && matches!(a.provider, Some("claude" | "codex" | "grok"))
+        });
+        if valid {
+            Ok(())
+        } else {
+            Err("Agent clear requires a fresh live agent observation".into())
+        }
+    })
+}
+
+fn begin_agent_clear_verified(
+    state: &AppState,
+    id: &str,
+    generation: u64,
+    origin: HumanControlOrigin,
+    verify: impl FnOnce() -> Result<(), String>,
+) -> Result<AgentClearInputStamp, String> {
     let permit = begin_human_control_operation(state, origin, id)?;
     let handle = handle_for(state, id, generation)?;
     let stamp = AgentClearInputStamp {
         generation,
         input_revision: handle.checkpoint_input_revision(),
     };
+    verify()?;
+    let current = handle_for(state, id, generation)?;
+    if current.checkpoint_input_revision() != stamp.input_revision {
+        return Err("Agent clear input changed during observation".into());
+    }
     permit.finish()?;
     Ok(stamp)
 }
@@ -182,6 +224,34 @@ mod tests {
     }
     fn local() -> HumanControlOrigin {
         HumanControlOrigin::Local
+    }
+
+    // Queue/protocol tests inject only the ownership oracle. Production always
+    // uses the strict scoped observation, covered separately below.
+    fn begin_agent_clear_inner(
+        state: &AppState,
+        id: &str,
+        generation: u64,
+        origin: HumanControlOrigin,
+    ) -> Result<AgentClearInputStamp, String> {
+        begin_agent_clear_verified(state, id, generation, origin, || Ok(()))
+    }
+
+    #[test]
+    fn input_during_fresh_ownership_observation_invalidates_the_clear_stamp() {
+        let (state, written) = setup();
+        let handle = state.pty_handles.lock_or_err().unwrap()["t"].clone();
+        let result =
+            begin_agent_clear_verified(&state, "t", 7, local(), || handle.write(b"new input"));
+        assert!(result.is_err());
+        assert_eq!(*written.lock().unwrap(), b"new input");
+    }
+
+    #[test]
+    fn stale_display_ownership_cannot_authorize_clearing_a_shell_or_missing_agent() {
+        let (state, written) = setup();
+        assert!(super::begin_agent_clear_inner(&state, "t", 7, local()).is_err());
+        assert!(written.lock().unwrap().is_empty());
     }
 
     #[test]

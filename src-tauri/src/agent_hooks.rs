@@ -256,12 +256,26 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<bool, AppError> {
     // A shared server can keep the launching pane's environment across resume.
     // Recording metadata cannot establish pane ownership: the state consumer
     // separately proves the current process, conversation, domain and generation.
-    let recorded = state
-        .agent_hook_observations
-        .lock_or_err()?
-        .observe(event.clone());
-    if recorded && event.provider == "codex" {
+    let (recorded, identity_changed) = {
+        let mut registry = state.agent_hook_observations.lock_or_err()?;
+        let identity_changed = registry.identity_changed(&event);
+        (registry.observe(event.clone()), identity_changed)
+    };
+    if recorded {
+        crate::commands::receive_hook_observation(state, &event);
+    }
+    if recorded
+        && event.provider == "codex"
+        && (identity_changed || matches!(event.event.as_str(), "SessionStart" | "SessionEnd"))
+    {
         state.session_checkpoint.hints.request();
+    }
+    if recorded
+        && (identity_changed || matches!(event.event.as_str(), "SessionStart" | "SessionEnd"))
+    {
+        state
+            .activity_reconcile
+            .request(std::iter::once(event.terminal_id.clone()));
     }
     let needed = recorded
         && event.agent_id.is_none()

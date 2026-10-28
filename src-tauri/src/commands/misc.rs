@@ -743,6 +743,12 @@ pub fn get_terminal_states(
     activity::detect_all_terminal_states(&state).map_err(String::from)
 }
 
+/// Queue only these panes; the worker coalesces requests by execution domain.
+#[tauri::command]
+pub fn request_terminal_activity_refresh(ids: Vec<String>, state: State<Arc<AppState>>) {
+    state.activity_reconcile.request(ids);
+}
+
 /// Tauri command: get CWD for all terminals from backend (single source of truth).
 /// Returns a map of terminal_id → normalized CWD path.
 #[tauri::command]

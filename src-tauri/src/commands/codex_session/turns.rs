@@ -90,8 +90,13 @@ pub(crate) fn get_codex_turn_states_impl(
         .iter()
         .map(|(id, terminal)| (id.clone(), terminal.codex_hook_title.clone()))
         .collect();
-    let lookup =
-        super::lookup_with_observer(None, state, observation, true, |id, store, session| {
+    let lookup = super::lookup_with_observer(
+        None,
+        state,
+        observation,
+        true,
+        None,
+        |id, store, session| {
             let (Some(generation), Some(selection_key)) =
                 (generations.get(id), &session.selection_key)
             else {
@@ -119,7 +124,8 @@ pub(crate) fn get_codex_turn_states_impl(
                 }
                 _ => {}
             }
-        })?;
+        },
+    )?;
     sources.retain(|id, source| {
         !lookup.failed_terminal_ids.contains(id)
             && lookup.attributions.get(id).and_then(Option::as_ref) == Some(&source.session_id)

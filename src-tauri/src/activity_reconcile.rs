@@ -1,30 +1,7 @@
-//! Periodic activity reconcile (ADR-0135).
-//!
-//! Activity display is event-driven: the PTY callback resolves each OSC 0/2
-//! title and pushes the result to the frontend. That is fast but lossy — the
-//! backend can only report a change when a title arrives, and an interactive app
-//! parked at its prompt emits nothing. Any pane whose classification was missed
-//! (or arrived while the frontend store was empty) therefore stayed wrong until
-//! the user typed something, because the only other sync was a single
-//! `get_terminal_states` call at mount that deliberately skips panes the store
-//! has already classified (ADR-0009).
-//!
-//! This worker closes that hole from the authoritative side: it re-derives every
-//! terminal's activity on a timer, diffs against what it last published, and
-//! emits only the panes that changed. The frontend applies those exactly like a
-//! live event, so no pull-side "is my value fresher?" race exists.
-//!
-//! It is the second writer of that field, though, and emission order is not
-//! derivation order — so every verdict carries the stamp it was derived under
-//! and the frontend ignores anything older (ADR-0136, see
-//! [`crate::activity_order`]).
-//!
-//! It is also the only thing that crosses the WSL boundary — see
-//! [`crate::wsl_liveness`] — so the reconcile cadence is the guest probe
-//! cadence, and the cadence is fixed rather than adaptive: a guest negative
-//! stops being authoritative after `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`, and
-//! detection then falls back to heuristics that an exited agent's still-resident
-//! banner can fool.
+//! Targeted activity reconciliation (ADR-0362), retaining ADR-0136 ordering.
+//! A metadata wakeup coalesces lifecycle/entry requests. Only selected domains
+//! receive OS/guest observations; healthy verified hooks skip slow fallback.
+//! Failed observations preserve the last agent and pending correction revision.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -38,7 +15,26 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::TerminalActivity;
 
+pub(crate) mod metrics;
 mod uncertain;
+
+/// A leaf queue: requests are cloned/drained before any application lock or I/O.
+#[derive(Default)]
+pub struct Demand(std::sync::Mutex<HashSet<String>>);
+
+impl Demand {
+    pub fn request(&self, ids: impl IntoIterator<Item = String>) {
+        if let Ok(mut pending) = self.0.lock_or_err() {
+            pending.extend(ids);
+        }
+    }
+    fn take(&self) -> HashSet<String> {
+        self.0
+            .lock_or_err()
+            .map(|mut p| std::mem::take(&mut *p))
+            .unwrap_or_default()
+    }
+}
 
 /// One pane whose authoritative activity no longer matches what was published.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -104,16 +100,39 @@ fn diff_observed(
     changed
 }
 
-/// How long to wait before starting the next pass.
-///
-/// The cadence is measured pass-start to pass-start, because what has to stay
-/// inside `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE` is the gap between two published
-/// guest snapshots. Sleeping a fixed interval *after* the pass would add the
-/// pass duration to that gap and quietly break the invariant the constants
-/// assert. A pass that overran the interval starts the next one immediately
-/// rather than trying to catch up.
-fn next_pass_delay(pass_duration: Duration) -> Duration {
-    ACTIVITY_RECONCILE_INTERVAL.saturating_sub(pass_duration)
+fn diff_requested(
+    published: &HashMap<String, TerminalActivity>,
+    current: &HashMap<String, TerminalActivity>,
+    previous_observations: &HashMap<String, u64>,
+    observations: &HashMap<String, u64>,
+    requested: &HashSet<String>,
+    sequence: u64,
+) -> Vec<ReconciledActivity> {
+    let mut changed = diff_observed(
+        published,
+        current,
+        previous_observations,
+        observations,
+        sequence,
+    );
+    for id in requested {
+        if !changed.iter().any(|entry| &entry.terminal_id == id) {
+            if let Some(activity) = current.get(id) {
+                changed.push(ReconciledActivity {
+                    terminal_id: id.clone(),
+                    activity: activity.clone(),
+                    activity_sequence: sequence,
+                });
+            }
+        }
+    }
+    changed.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+    changed
+}
+
+/// Always leave an idle metadata interval, including after an overrun.
+fn next_pass_delay(_pass_duration: Duration) -> Duration {
+    ACTIVITY_RECONCILE_INTERVAL
 }
 
 /// Start the reconcile worker. One thread for the whole app.
@@ -123,11 +142,23 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
         let mut published_generations = HashMap::new();
         let mut published_observations = HashMap::new();
         let mut delay = ACTIVITY_RECONCILE_INTERVAL;
+        let started = Instant::now();
+        let mut schedule = schedule::Schedule::default();
         loop {
             std::thread::sleep(delay);
             let pass_start = Instant::now();
+            let targets = targets(&state);
+            let work = schedule.plan(
+                started.elapsed().as_millis() as u64,
+                &targets,
+                &state.activity_reconcile.take(),
+            );
+            if work.inspect.is_empty() {
+                continue;
+            }
             run_pass(
                 &state,
+                &work,
                 &app,
                 &mut published,
                 &mut published_generations,
@@ -145,6 +176,7 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
 /// not now" into an exit. Keep it across passes until replacement/teardown.
 fn run_pass(
     state: &AppState,
+    work: &schedule::Work,
     app: &AppHandle,
     published: &mut HashMap<String, TerminalActivity>,
     published_generations: &mut HashMap<String, u64>,
@@ -152,8 +184,44 @@ fn run_pass(
 ) {
     // The guest probe is refreshed from here so the sweep below reads a snapshot
     // taken for this pass rather than whatever a previous pass left behind.
+    metrics::pass(&work.probe);
+    crate::commands::suspend(state, &work.probe);
     #[cfg(windows)]
-    crate::wsl_liveness::refresh(state);
+    crate::wsl_liveness::refresh_selected(state, &work.probe);
+    if !work.probe.is_empty() {
+        let observation = crate::wsl_probe::snapshot::GuestObservation::starting_now();
+        // Prime display ownership/diagnostics once. Read-only record subscribers
+        // cannot create a process observation of their own.
+        match crate::commands::get_terminal_session_attributions_scoped(
+            None,
+            None,
+            None,
+            state,
+            observation,
+            Some(&work.probe),
+        ) {
+            Ok(_) => {
+                if let Err(error) =
+                    crate::commands::refresh_agent_hook_states(state, &work.probe, observation)
+                {
+                    tracing::debug!(%error, "targeted hook ownership verification failed");
+                }
+            }
+            Err(error) => tracing::debug!(%error, "targeted ownership observation failed"),
+        }
+    }
+
+    // Session attribution and the OSC oracle have separate caches. A fresh
+    // session read must not be followed by a pre-launch cached negative here.
+    let native = state.pty_handles.lock_or_err().ok().and_then(|handles| {
+        work.probe
+            .iter()
+            .find(|id| handles.get(*id).is_some_and(|h| !h.is_wsl_backed()))
+            .cloned()
+    });
+    if let Some(id) = native {
+        crate::process_tree::interactive_app_in_pty_fresh(state, &id);
+    }
 
     let generations_at_snapshot = pty_generations(state);
     // Read with the generations so an exit verdict can be refused if the pane
@@ -166,7 +234,7 @@ fn run_pass(
     // Stamped before deriving, so a title resolved while this pass runs is
     // ordered after it — see the module docs of `activity_order`.
     let activity_sequence = crate::activity_order::next_activity_sequence();
-    let mut current = match crate::activity::detect_all_terminal_states(state) {
+    let mut current = match crate::activity::detect_terminal_states_scoped(state, &work.inspect) {
         Ok(states) => states
             .into_iter()
             .map(|(terminal_id, info)| (terminal_id, info.activity))
@@ -227,11 +295,12 @@ fn run_pass(
         apply_exit_transition(&mut terminals, state, app, &terminal_id, &app_name, epoch);
     }
 
-    let changed = diff_observed(
+    let changed = diff_requested(
         published,
         &current,
         published_observations,
         &observations_at_snapshot,
+        &work.republish,
         activity_sequence,
     );
     // An uncertain pass must not consume a correction request. Recovery may
@@ -244,9 +313,19 @@ fn run_pass(
     // Track the full current view, including panes that vanished, so a pane that
     // closes and reopens with the same id is re-published rather than compared
     // against a verdict about the previous session.
-    *published = current;
-    *published_generations = generations_at_snapshot;
-    *published_observations = observations_at_snapshot;
+    // A partial observation cannot erase baselines belonging to unselected panes.
+    published.retain(|id, _| generations_now.contains_key(id));
+    published_generations.retain(|id, _| generations_now.contains_key(id));
+    published_observations.retain(|id, _| generations_now.contains_key(id));
+    for id in current.keys() {
+        if let Some(generation) = generations_at_snapshot.get(id) {
+            published_generations.insert(id.clone(), *generation);
+        }
+        if let Some(revision) = observations_at_snapshot.get(id) {
+            published_observations.insert(id.clone(), *revision);
+        }
+    }
+    published.extend(current);
 
     // Every replaced pane loses its baseline, not just the ones that happened to
     // differ this pass. A restart into the *same* app produces an identical
@@ -284,6 +363,62 @@ fn run_pass(
         }
     }
     drop(terminals);
+}
+
+fn targets(state: &AppState) -> Vec<schedule::Target> {
+    let observations = crate::activity::observation_sequences(state);
+    let epochs = crate::activity::detection_epochs(state);
+    #[cfg(windows)]
+    let distros: HashMap<_, _> =
+        crate::wsl_probe::wsl_terminal_targets(state, Instant::now() + Duration::from_secs(1))
+            .map(|t| t.targets.into_iter().collect())
+            .unwrap_or_default();
+    #[cfg(not(windows))]
+    let distros: HashMap<String, Option<String>> = HashMap::new();
+    let handles = state
+        .pty_handles
+        .lock_or_err()
+        .map(|h| h.clone())
+        .unwrap_or_default();
+    let Ok(terminals) = state.terminals.lock_or_err() else {
+        return Vec::new();
+    };
+    terminals
+        .iter()
+        .filter_map(|(id, session)| {
+            let handle = handles.get(id)?;
+            let generation = handle.terminal_generation();
+            let hook = crate::commands::cached_liveness(state, id, generation);
+            let title_app = session
+                .osc_title
+                .as_deref()
+                .and_then(crate::activity::detect_interactive_app_from_title);
+            // A cache's suspension/expiry is not a lifecycle event and cannot
+            // feed back into the signature that requests fresh observations.
+            let app = title_app.as_deref();
+            Some(schedule::Target {
+                id: id.clone(),
+                generation,
+                domain: if handle.is_wsl_backed() {
+                    format!(
+                        "wsl:{}",
+                        distros.get(id).and_then(|d| d.as_deref()).unwrap_or("?")
+                    )
+                } else {
+                    "native".into()
+                },
+                signature: format!(
+                    "{}:{}:{:?}:{:?}",
+                    epochs.get(id).copied().unwrap_or(0),
+                    session.command_running,
+                    session.last_command_at,
+                    app
+                ),
+                revision: observations.get(id).copied().unwrap_or(0),
+                healthy_hook: hook.is_some(),
+            })
+        })
+        .collect()
 }
 
 /// The PTY generation backing each terminal right now. A pane with no handle
@@ -410,264 +545,6 @@ fn apply_exit_transition(
     }
 }
 
+mod schedule;
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::constants::{
-        WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_PASS_BUDGET, WSL_LIVENESS_POSITIVE_MAX_AGE,
-    };
-
-    /// Any value; the tests below care about which entries come back, not about
-    /// the stamp itself.
-    const SEQ: u64 = 42;
-
-    fn generations(entries: &[(&str, u64)]) -> HashMap<String, u64> {
-        entries
-            .iter()
-            .map(|(id, generation)| ((*id).to_string(), *generation))
-            .collect()
-    }
-
-    fn shell() -> TerminalActivity {
-        TerminalActivity::Shell
-    }
-
-    fn claude() -> TerminalActivity {
-        TerminalActivity::InteractiveApp {
-            name: "Claude".into(),
-        }
-    }
-
-    fn map(entries: &[(&str, TerminalActivity)]) -> HashMap<String, TerminalActivity> {
-        entries
-            .iter()
-            .map(|(id, activity)| ((*id).to_string(), activity.clone()))
-            .collect()
-    }
-
-    #[test]
-    fn only_changed_panes_are_published() {
-        let published = map(&[("t-a", shell()), ("t-b", claude())]);
-        let current = map(&[("t-a", claude()), ("t-b", claude())]);
-        assert_eq!(
-            diff(&published, &current, SEQ),
-            vec![ReconciledActivity {
-                terminal_id: "t-a".into(),
-                activity: claude(),
-                activity_sequence: SEQ,
-            }]
-        );
-    }
-
-    #[test]
-    fn a_live_title_can_be_corrected_without_backend_activity_changing() {
-        let published = map(&[("late-title", shell()), ("quiet", shell())]);
-        let previous = generations(&[("late-title", 10), ("quiet", 10)]);
-        let observed = generations(&[("late-title", 20), ("quiet", 10)]);
-        let correction = diff_observed(&published, &published, &previous, &observed, 21);
-        assert_eq!(correction.len(), 1);
-        assert_eq!(correction[0].terminal_id, "late-title");
-        assert_eq!(correction[0].activity, TerminalActivity::Shell);
-        assert_eq!(correction[0].activity_sequence, 21);
-        assert!(diff_observed(&published, &published, &observed, &observed, 30).is_empty());
-    }
-
-    #[test]
-    fn an_uncertain_pass_keeps_the_correction_pending_until_recovery() {
-        let published = map(&[("pane", claude())]);
-        let previous = generations(&[("pane", 10)]);
-        let mut observed = generations(&[("pane", 20)]);
-        uncertain::retain_deferred_observations(
-            &previous,
-            &mut observed,
-            &HashSet::from(["pane".into()]),
-        );
-        assert_eq!(observed["pane"], 10);
-        let recovered = generations(&[("pane", 20)]);
-        assert_eq!(
-            diff_observed(&published, &published, &observed, &recovered, 30).len(),
-            1
-        );
-    }
-
-    #[test]
-    fn a_pane_with_no_published_value_yet_is_published() {
-        let current = map(&[("t-new", claude())]);
-        assert_eq!(diff(&HashMap::new(), &current, SEQ).len(), 1);
-    }
-
-    #[test]
-    fn interactive_app_name_changes_are_a_change() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[(
-            "t",
-            TerminalActivity::InteractiveApp {
-                name: "Codex".into(),
-            },
-        )]);
-        assert_eq!(diff(&published, &current, SEQ).len(), 1);
-    }
-
-    #[test]
-    fn a_closed_pane_publishes_nothing() {
-        let published = map(&[("t-gone", claude())]);
-        assert!(diff(&published, &HashMap::new(), SEQ).is_empty());
-    }
-
-    /// Elapsed time never forces an unchanged pane to be published again.
-    #[test]
-    fn unchanged_panes_are_not_republished() {
-        let published = map(&[("t-a", claude()), ("t-b", shell())]);
-        let current = published.clone();
-        assert!(diff(&published, &current, SEQ).is_empty());
-        assert!(diff(&published, &current, SEQ + 1000).is_empty());
-    }
-
-    #[test]
-    fn a_change_still_detects_an_exit_that_happened_this_pass() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[("t", shell())]);
-        assert_eq!(
-            exited_apps(&published, &current),
-            vec![("t".to_string(), "Claude".to_string())]
-        );
-        assert_eq!(diff(&published, &current, SEQ).len(), 1);
-    }
-
-    #[test]
-    fn every_entry_carries_the_pass_stamp() {
-        let current = map(&[("t", claude())]);
-        let published = diff(&HashMap::new(), &current, SEQ);
-        assert_eq!(published[0].activity_sequence, SEQ);
-    }
-
-    /// A pane torn down and respawned mid-pass gets a new PTY generation, and
-    /// the verdict in flight describes the session that is gone.
-    #[test]
-    fn a_replaced_pty_is_superseded() {
-        let superseded = superseded_terminals(
-            &generations(&[("t-same", 1), ("t-restarted", 1)]),
-            &generations(&[("t-same", 1), ("t-restarted", 2)]),
-        );
-        assert_eq!(superseded, HashSet::from(["t-restarted".to_string()]));
-    }
-
-    /// A pane that lost its handle while the pass ran is being torn down; its
-    /// verdict is about a PTY that no longer exists either. A pane that gained
-    /// one is a session this pass never looked at.
-    #[test]
-    fn a_pane_whose_pty_appeared_or_vanished_is_superseded() {
-        assert_eq!(
-            superseded_terminals(&generations(&[("t", 1)]), &generations(&[])),
-            HashSet::from(["t".to_string()])
-        );
-        assert_eq!(
-            superseded_terminals(&generations(&[]), &generations(&[("t", 1)])),
-            HashSet::from(["t".to_string()])
-        );
-    }
-
-    /// Restarting into the *same* app produces the same verdict, so the diff
-    /// never sees it — but the new frontend instance starts with no activity at
-    /// all. Computing this from the pass's findings would leave that pane blank
-    /// until another activity change; computing it from the generations does not.
-    #[test]
-    fn a_restart_into_the_same_app_is_superseded_even_though_the_diff_is_silent() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[("t", claude())]);
-        assert!(diff(&published, &current, SEQ).is_empty());
-        assert!(
-            superseded_terminals(&generations(&[("t", 1)]), &generations(&[("t", 2)]))
-                .contains("t")
-        );
-    }
-
-    /// Without generations to compare — a poisoned handle table — nothing can be
-    /// proven stale, so nothing is dropped.
-    #[test]
-    fn unknown_generations_supersede_nothing() {
-        assert!(superseded_terminals(&generations(&[]), &generations(&[])).is_empty());
-        let unchanged = generations(&[("t", 1)]);
-        assert!(superseded_terminals(&unchanged, &unchanged).is_empty());
-    }
-
-    /// This worker refreshes the guest snapshot, so its cadence decides how
-    /// stale that snapshot gets between passes. A guest **negative** expires
-    /// sooner than a positive, and once it does, detection falls back to the
-    /// title/buffer heuristics — where the exited agent's banner, still resident
-    /// in the 16KB window, can re-pin the pane. The gap between two publishes is
-    /// one cadence plus one whole pass, and the pass — default-distribution
-    /// resolution plus every distribution's probe — is bounded by the pass
-    /// budget, not by a single probe timeout.
-    #[test]
-    fn the_cadence_keeps_guest_verdicts_authoritative_between_passes() {
-        assert!(
-            ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET
-                <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE
-        );
-        assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
-    }
-
-    /// That invariant only holds if the cadence is measured pass-start to
-    /// pass-start. A fixed sleep after the pass would add the pass duration to
-    /// the gap between two published snapshots.
-    #[test]
-    fn the_cadence_absorbs_the_time_the_pass_itself_took() {
-        assert_eq!(
-            next_pass_delay(Duration::from_secs(1)),
-            ACTIVITY_RECONCILE_INTERVAL - Duration::from_secs(1)
-        );
-    }
-
-    /// A pass that overran the interval starts the next one immediately instead
-    /// of trying to make up the lost time with a burst of passes.
-    #[test]
-    fn an_overrunning_pass_does_not_produce_a_negative_delay() {
-        assert_eq!(
-            next_pass_delay(ACTIVITY_RECONCILE_INTERVAL * 3),
-            Duration::ZERO
-        );
-    }
-
-    #[test]
-    fn an_app_that_disappears_is_reported_as_exited() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[("t", shell())]);
-        assert_eq!(
-            exited_apps(&published, &current),
-            vec![("t".to_string(), "Claude".to_string())]
-        );
-    }
-
-    #[test]
-    fn a_still_running_app_is_not_an_exit() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[("t", claude())]);
-        assert!(exited_apps(&published, &current).is_empty());
-    }
-
-    /// Handing a pane from one agent to another is an exit of the first: its
-    /// message and grace-window entry must not survive into the second.
-    #[test]
-    fn a_handover_to_another_agent_still_exits_the_first() {
-        let published = map(&[("t", claude())]);
-        let current = map(&[(
-            "t",
-            TerminalActivity::InteractiveApp {
-                name: "Codex".into(),
-            },
-        )]);
-        assert_eq!(
-            exited_apps(&published, &current),
-            vec![("t".to_string(), "Claude".to_string())]
-        );
-    }
-
-    /// A pane that vanished is being torn down, and teardown already clears this
-    /// state — recording an exit for it would only write to a dead session.
-    #[test]
-    fn a_closed_pane_is_not_reported_as_an_exit() {
-        let published = map(&[("t", claude())]);
-        assert!(exited_apps(&published, &HashMap::new()).is_empty());
-    }
-}
+mod tests;

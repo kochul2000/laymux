@@ -81,6 +81,18 @@ impl GuestObservation {
 pub struct TerminalCatalog(Vec<(String, u64)>);
 
 impl TerminalCatalog {
+    pub(crate) fn for_ids(
+        state: &AppState,
+        ids: &std::collections::HashSet<String>,
+    ) -> Result<Self, AppError> {
+        let mut catalog = Self::of(state)?;
+        catalog.0.retain(|(id, _)| ids.contains(id));
+        Ok(catalog)
+    }
+
+    fn covers(&self, requested: &Self) -> bool {
+        requested.0.iter().all(|entry| self.0.contains(entry))
+    }
     /// Snapshot `pty_handles`. Takes and releases that lock alone, so callers
     /// hold no other `AppState` lock and the run table is never nested in it.
     pub fn of(state: &AppState) -> Result<Self, AppError> {
@@ -124,6 +136,8 @@ struct Run<V> {
 }
 
 struct Slot<V> {
+    /// Storage LRU only; never used by GuestObservation freshness checks.
+    retained_at: Instant,
     /// The most recently started run that has not finished.
     running: Option<Arc<Run<V>>>,
     /// The most recently started run that has finished, with its start time.
@@ -133,6 +147,7 @@ struct Slot<V> {
 impl<V> Default for Slot<V> {
     fn default() -> Self {
         Self {
+            retained_at: Instant::now(),
             running: None,
             completed: None,
         }
@@ -192,6 +207,67 @@ impl<V: Send + Sync + 'static> Default for GuestSnapshots<V> {
 }
 
 impl<V: Send + Sync + 'static> GuestSnapshots<V> {
+    /// A separately verified live root may keep its original ownership metadata
+    /// available for file reads. Its run start time is never changed, so neither
+    /// a strict boundary nor reusable freshness can mistake this for a new run.
+    pub(crate) fn cached_run_for_verified_root(
+        &self,
+        probe: &str,
+        distro: &str,
+        catalog: &TerminalCatalog,
+        member: &[String],
+    ) -> Option<(Vec<String>, Outcome<V>)> {
+        let mut slots = self.slots.lock_or_err().ok()?;
+        let selected = slots
+            .iter()
+            .filter(|((key, observed), slot)| {
+                key.probe == probe
+                    && key.distro == distro
+                    && observed.covers(catalog)
+                    && slot.completed.is_some()
+                    && if member.is_empty() {
+                        key.args.is_empty()
+                    } else {
+                        key.args
+                            .chunks_exact(member.len())
+                            .any(|args| args == member)
+                    }
+            })
+            .max_by_key(|(_, slot)| slot.completed.as_ref().map(|(at, _)| *at))
+            .map(|(key, _)| key.clone())?;
+        let slot = slots.get_mut(&selected)?;
+        slot.retained_at = Instant::now();
+        Some((selected.0.args.clone(), slot.completed.as_ref()?.1.clone()))
+    }
+    /// Display readers never create a run. Each result retains the catalog
+    /// under which it was observed; a partial refresh cannot renew another PID.
+    /// Newest outcomes include failures, so failure never falls back to success.
+    pub(crate) fn cached_runs(
+        &self,
+        probe: &str,
+        distro: &str,
+        catalog: &TerminalCatalog,
+    ) -> Vec<(Vec<String>, Outcome<V>)> {
+        let Ok(slots) = self.slots.lock_or_err() else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        let mut runs: Vec<_> = slots
+            .iter()
+            .filter_map(|((key, observed), slot)| {
+                if key.probe != probe || key.distro != distro || !observed.covers(catalog) {
+                    return None;
+                }
+                let (at, outcome) = slot.completed.as_ref()?;
+                (now.saturating_duration_since(*at) <= crate::constants::ACTIVITY_DISPLAY_RETENTION)
+                    .then(|| (*at, key.args.clone(), outcome.clone()))
+            })
+            .collect();
+        runs.sort_by_key(|(at, _, _)| std::cmp::Reverse(*at));
+        runs.into_iter()
+            .map(|(_, args, outcome)| (args, outcome))
+            .collect()
+    }
     /// `max_age` serves [`GuestObservation::Reusable`]; `run_timeout` is what
     /// every run gets, whoever starts it.
     pub fn new(max_age: Duration, run_timeout: Duration) -> Self {
@@ -239,7 +315,10 @@ impl<V: Send + Sync + 'static> GuestSnapshots<V> {
         slots.retain(|_, slot| {
             slot.running.is_some()
                 || slot.completed.as_ref().is_some_and(|(started_at, _)| {
-                    now.saturating_duration_since(*started_at) <= max_age
+                    now.saturating_duration_since(*started_at)
+                        <= max_age.max(crate::constants::ACTIVITY_DISPLAY_RETENTION)
+                        || slot.retained_at.elapsed()
+                            <= crate::constants::ACTIVITY_DISPLAY_RETENTION
                 })
         });
         let slot_key = (key, catalog.clone());

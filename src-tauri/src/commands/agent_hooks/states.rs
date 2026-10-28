@@ -3,13 +3,19 @@ use crate::agent_hooks::{
     title::TitleBinding,
 };
 use crate::commands::session_attribution::{
-    get_terminal_session_attributions_impl, SessionAttributionState, TerminalSessionAttribution,
+    get_terminal_session_attributions_scoped, SessionAttributionState, TerminalSessionAttribution,
 };
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::GuestObservation;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+mod cache;
+pub(crate) use cache::HookStateCache;
+pub(crate) use cache::{
+    cached_liveness, cached_root_pid, forget as forget_hook_binding, receive_hook_observation,
+    suspend,
+};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -26,6 +32,7 @@ pub struct HookStateSnapshot {
     turn_id: Option<String>,
     sequence: u64,
     observed_at_ms: u64,
+    verified_at_ms: u64,
     config_dir: Option<String>,
     distro: Option<String>,
     binding_source: &'static str,
@@ -34,9 +41,18 @@ pub struct HookStateSnapshot {
 #[tauri::command(async)]
 pub fn get_agent_hook_states(
     providers: Vec<String>,
+    refresh_terminal_ids: Option<Vec<String>>,
     state: State<Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<HashMap<String, HookStateSnapshot>, String> {
+    if let Some(ids) = refresh_terminal_ids {
+        let ids: HashSet<_> = ids.into_iter().collect();
+        let observation = GuestObservation::starting_now();
+        cache::suspend(&state, &ids);
+        #[cfg(windows)]
+        crate::wsl_liveness::refresh_selected(&state, &ids);
+        refresh_agent_hook_states(&state, &ids, observation)?;
+    }
     get_agent_hook_states_impl(&providers, &state, &app)
 }
 
@@ -54,21 +70,38 @@ pub(crate) fn get_agent_hook_states_impl(
     {
         return Err("Unsupported hook provider".into());
     }
-    // Two-second display polling. Both attribution passes below may read the
-    // same shared WSL guest run (scan and Codex diagnostics); the recheck still
-    // re-reads titles, hook bindings, generations, native processes and session
-    // files (ADR-0335).
-    let observation = GuestObservation::Reusable;
+    cache::read(state, providers)
+}
+
+pub(crate) fn refresh_agent_hook_states(
+    state: &AppState,
+    ids: &HashSet<String>,
+    observation: GuestObservation,
+) -> Result<HashMap<String, HookStateSnapshot>, String> {
+    let result = verify_agent_hook_states(state, ids, observation)?;
+    cache::publish(state, ids, &result)?;
+    let mut verified = cache::read(state, &["claude".into(), "codex".into(), "grok".into()])?;
+    verified.retain(|id, _| ids.contains(id));
+    Ok(verified)
+}
+
+fn verify_agent_hook_states(
+    state: &AppState,
+    ids: &HashSet<String>,
+    observation: GuestObservation,
+) -> Result<HashMap<String, HookStateSnapshot>, String> {
+    let providers = ["claude", "codex", "grok"].map(String::from);
     let attributions =
-        get_terminal_session_attributions_impl(None, None, None, state, observation)?;
+        get_terminal_session_attributions_scoped(None, None, None, state, observation, Some(ids))?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
     #[cfg(windows)]
-    let distros: HashMap<_, _> = crate::wsl_probe::wsl_terminal_targets(
+    let distros: HashMap<_, _> = crate::wsl_probe::wsl_terminal_targets_scoped(
         state,
         std::time::Instant::now() + std::time::Duration::from_secs(1),
+        Some(ids),
     )?
     .targets
     .into_iter()
@@ -136,8 +169,9 @@ pub(crate) fn get_agent_hook_states_impl(
             _ => "Codex",
         };
         // A server or stale attribution must never keep a shell marked as an agent.
-        if crate::process_tree::interactive_app_in_pty_fresh(state, &id)
-            != crate::process_tree::PtyAppLiveness::Running(expected)
+        if !domains.get(&id).is_some_and(|(_, wsl)| *wsl)
+            && crate::process_tree::interactive_app_in_pty_fresh(state, &id)
+                != crate::process_tree::PtyAppLiveness::Running(expected)
         {
             continue;
         }
@@ -172,6 +206,7 @@ pub(crate) fn get_agent_hook_states_impl(
                 turn_id: observation.turn.clone(),
                 sequence: observation.sequence,
                 observed_at_ms: observation.phase_at_ms,
+                verified_at_ms: now,
                 config_dir: event.config_dir.clone(),
                 distro: event.distro.clone(),
                 binding_source,
@@ -181,8 +216,14 @@ pub(crate) fn get_agent_hook_states_impl(
     // Process attribution can span a session switch within the same PTY.
     // Recheck exact selection and liveness, not just the generation number.
     if !result.is_empty() {
-        let final_attributions =
-            get_terminal_session_attributions_impl(None, None, None, state, observation)?;
+        let final_attributions = get_terminal_session_attributions_scoped(
+            None,
+            None,
+            None,
+            state,
+            observation,
+            Some(ids),
+        )?;
         let final_titles: HashMap<_, _> = state
             .terminals
             .lock_or_err()?
@@ -216,12 +257,15 @@ pub(crate) fn get_agent_hook_states_impl(
                 } else {
                     same_verified_session(entry, a)
                 }
-            }) && crate::process_tree::interactive_app_in_pty_fresh(state, id)
-                == crate::process_tree::PtyAppLiveness::Running(match entry.provider.as_str() {
-                    "claude" => "Claude",
-                    "grok" => "Grok",
-                    _ => "Codex",
-                })
+            }) && (domains.get(id).is_some_and(|(_, wsl)| *wsl)
+                || crate::process_tree::interactive_app_in_pty_fresh(state, id)
+                    == crate::process_tree::PtyAppLiveness::Running(
+                        match entry.provider.as_str() {
+                            "claude" => "Claude",
+                            "grok" => "Grok",
+                            _ => "Codex",
+                        },
+                    ))
         });
     }
     let terminals = state.terminals.lock_or_err()?;
@@ -323,6 +367,7 @@ mod tests {
                 turn_id: Some("turn-1".into()),
                 sequence: 2,
                 observed_at_ms: 100,
+                verified_at_ms: 100,
                 config_dir: None,
                 distro: None,
                 binding_source: "process",
