@@ -629,6 +629,10 @@ helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종�
 
 공유 app-server의 producer와 실제 TUI owner는 서로 다른 PID일 수 있다. producer fingerprint가 같으면 작업 이벤트를 적용하지만 같은 owner가 실제 조상에 있을 때만 owner 확인 lease를 연장한다. 조상에 owner가 없으면 저빈도 대상 확인을 유지하고 서버 이벤트만으로 shell을 agent로 바꾸지 않는다.
 
+표시에서 만료된 훅은 더 새롭고 아직 유효한 확정 기록/휴리스틱 관측이 있으면 그 관측에 우선권을 넘긴다. 새 근거가 없으면 마지막 훅 상태를 stale로 보존한다. provider 조회 필터는 응답만 제한하며 다른 provider의 검증된 연결과 생존 증거를 비활성화하지 않는다.
+
+Codex 기록으로 전환할 때 알려진 훅의 generation·session·turn과 다른 완료 기록은 배제한다. 미해결 waiting은 단순 running/idle 기록으로 해제하지 않는다.
+
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 
 훅 명령은 읽을 수 있는 평문으로 설치한다([ADR-0285](../adr/0285-readable-agent-hook-commands.md)). Windows Codex는 cmd 실행 경계를 거치는 `powershell.exe ... -Command`, Windows Claude는 `shell: powershell`과 `& '절대 경로' emit claude`, Linux/WSL은 POSIX 인용 명령을 사용한다. 설치·제거는 현재 설정 경로/provider의 신규 명령 및 정확히 일치하는 이전 EncodedCommand를 식별해 중복 등록을 정리한다. shell·args·commandWindows처럼 실행 의미를 바꾼 사용자 항목은 삭제하지 않는다. Settings는 감지 선택과 환경별 설치 패널을 분리하고 `expected`/`registered`를 기준으로 추가·누락 보완·갱신 개수를 버튼 위에 안내한다. 설치·제거의 즉시 적용 안내는 항상 표시하며 사용자 지정 폴더와 수신 진단은 펼칠 수 있는 상세 영역에 둔다.

@@ -72,6 +72,61 @@ fn cached_reads_and_duplicate_event_times_do_not_renew_a_proof() {
 }
 
 #[test]
+fn polling_one_provider_does_not_invalidate_another_verified_provider() {
+    let state = AppState::new();
+    let (mut binding, mut observation) = fixture();
+    observation.event.emitted_at_ms = now_ms().unwrap();
+    binding.snapshot.verified_at_ms = observation.event.emitted_at_ms;
+    binding.event_at = observation.event.emitted_at_ms;
+    let mut session = crate::terminal::TerminalSession::new("pane".into(), Default::default());
+    session.agent_hook = Some(observation.event.clone());
+    state
+        .terminals
+        .lock_or_err()
+        .unwrap()
+        .insert("pane".into(), session);
+    state.pty_handles.lock_or_err().unwrap().insert(
+        "pane".into(),
+        crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7),
+    );
+    state
+        .agent_hook_observations
+        .lock_or_err()
+        .unwrap()
+        .observe(observation.event);
+    let request = crate::agent_hooks::ManageRequest {
+        provider: "codex".into(),
+        operation: "status".into(),
+        distro: None,
+        config_dir: Some("/config".into()),
+    };
+    state.agent_hook_inspections.begin(&request).unwrap();
+    state
+        .agent_hook_inspections
+        .record(
+            &request,
+            &Ok(serde_json::json!({
+                "configDir": "/config", "installed": true, "disabled": false,
+            })),
+        )
+        .unwrap();
+    state
+        .agent_hook_bindings
+        .lock_or_err()
+        .unwrap()
+        .bindings
+        .insert("pane".into(), binding);
+    assert_eq!(cached_liveness(&state, "pane", 7), Some("Codex"));
+    for _ in 0..3 {
+        assert!(read(&state, &["claude".into()]).unwrap().is_empty());
+        assert_eq!(cached_liveness(&state, "pane", 7), Some("Codex"));
+    }
+    assert!(read(&state, &["codex".into()])
+        .unwrap()
+        .contains_key("pane"));
+}
+
+#[test]
 fn changed_root_birth_pid_config_and_session_end_need_new_ownership() {
     for mutate in [
         |o: &mut Observation| o.event.ancestors[0].pid += 1,

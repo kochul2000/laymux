@@ -190,8 +190,10 @@ pub(super) fn read(
                     .get(id)
                     .and_then(Option::as_ref)
                     .is_some_and(|o| advance(binding, o, now));
-            if valid && providers.contains(&binding.snapshot.provider) {
-                result.insert(id.clone(), binding.snapshot.clone());
+            if valid {
+                if providers.contains(&binding.snapshot.provider) {
+                    result.insert(id.clone(), binding.snapshot.clone());
+                }
                 continue;
             }
             binding.live = false;

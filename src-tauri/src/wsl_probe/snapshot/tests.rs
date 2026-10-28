@@ -80,6 +80,39 @@ fn cached_display_reads_never_start_runs_and_cannot_cross_a_generation() {
 }
 
 #[test]
+fn refreshed_fallback_metadata_outlives_the_slots_original_creation_time() {
+    let cache = GuestSnapshots::<usize>::new(LONG, LONG);
+    let c = catalog(&[("a", 1)]);
+    ask(
+        &cache,
+        key("Ubuntu"),
+        &c,
+        GuestObservation::starting_now(),
+        |_| Ok(1),
+    )
+    .unwrap();
+    {
+        let mut slots = cache.slots.lock_or_err().unwrap();
+        let slot = slots.get_mut(&(key("Ubuntu"), c.clone())).unwrap();
+        // The slot was created at t=0, reobserved at t=120, then pruned at
+        // t=181 by an unrelated request. Its latest view is still only 61s old.
+        slot.retained_at = Instant::now() - Duration::from_secs(181);
+        slot.completed.as_mut().unwrap().0 = Instant::now() - Duration::from_secs(61);
+    }
+    ask(
+        &cache,
+        key("Debian"),
+        &c,
+        GuestObservation::starting_now(),
+        |_| Ok(2),
+    )
+    .unwrap();
+    let retained = cache.cached_runs("test-probe", "Ubuntu", &c);
+    assert_eq!(retained.len(), 1);
+    assert_eq!(**retained[0].1.as_ref().unwrap(), 1);
+}
+
+#[test]
 fn a_failed_newer_display_observation_never_falls_back_to_an_older_success() {
     let cache = GuestSnapshots::<usize>::new(LONG, LONG);
     let c = catalog(&[("a", 1)]);

@@ -1680,9 +1680,11 @@ native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 p
 | `get_terminal_session_attributions`(persist-session·종료·업데이트·eviction·watchdog checkpoint) | 명령 시작 이후 시작된 run만. 세 provider가 같은 경계를 공유. critical 두 번째 관측은 새 경계 |
 | Codex 종료 `/status` 확인(`status_probe::targets`) | 대상 수집과 훅 선택은 한 경계를 공유. 끝의 재확인과 단계별 프로세스 확인은 매번 새 경계 |
 | `get_{claude,codex,grok}_session_ids` | 호출 시각 이후 시작된 run만 |
-| `get_codex_turn_states`·`get_agent_hook_states`·`get_agent_session_states`(표시 폴링) | `WSL_GUEST_SNAPSHOT_MAX_AGE`(3초) 안에 시작된 run 재사용(실행 중이면 합류) |
+| activity 대상 worker·명시적 훅 재확인 | 대상 요청 경계 이후 시작된 run만 |
+| `get_codex_turn_states`·`get_agent_session_states`(표시 폴링) | 새 run 없이 완료된 최신 호환 관측만 읽음. 180초 보관하며 검증된 같은 owner의 새 훅은 귀속 metadata 보관만 연장 |
+| `get_agent_hook_states`(일반 표시 폴링) | 검증된 훅 연결을 메모리에서 읽음. cache miss는 대상 worker에 요청하며 조회가 직접 OS/guest 실행을 시작하지 않음 |
 
-재사용 창은 `WSL_AGENT_PROBE_TIMEOUT` 이상(폴링이 실행 중 run에 합류)이고 `ACTIVITY_RECONCILE_INTERVAL` 이하(liveness 판정보다 한 패스 넘게 늦지 않음)다. 실패도 창 안에서 공유하므로 고장 난 guest를 폴링은 창마다 한 번만 묻는다. 재사용된 표시용 조회는 receipt에 NoAgent를 기록하지 않고 Codex proof도 남기지 않는다. 종료 `/status` fallback 증거가 이미 있어도 표시 폴링은 receipt의 rollout 파일 stamp를 추가하거나 갱신하지 않는다. 훅 상태의 재검증은 제목·훅 연결·generation과 native 프로세스·세션 파일을 다시 읽고, WSL 게스트 스캔·Codex 진단은 같은 run일 수 있다. liveness 프로브는 이 테이블을 쓰지 않는다.
+일반 표시 조회는 [ADR-0362](../adr/0362-hook-driven-activity-fallback.md)의 read-only 경로를 사용한다. 최신 실패도 그대로 선택하며 이전 성공으로 돌아가지 않는다. 180초 보관은 마지막 실제 관측 시각을 기준으로 하고 별도의 owner pin LRU와 구분한다. 둘 다 관측 시작 시각이나 제어용 신선도를 바꾸지 않는다. `WSL_GUEST_SNAPSHOT_MAX_AGE`(3초)는 명시적으로 공유 run을 요청한 기존 `Reusable` 호출의 합류 창이며 250ms 메모리 wakeup이나 표시 보관 기한과 무관하다. 표시 조회는 receipt의 NoAgent·Codex proof·rollout stamp를 생성하거나 갱신하지 않는다. 대상별 훅 재검증은 제목·연결·generation과 실제 native/guest 프로세스·세션 파일을 다시 확인한다. liveness 프로브는 이 테이블을 쓰지 않는다.
 
 background 저장 힌트가 critical checkpoint에 합류하면 같은 실패를 받을 수 있다. `persistSession`은 반환 promise에 오류 기록 handler를 즉시 연결하여 대기하지 않는 이벤트 호출의 unhandled rejection을 막고, 반환 promise 자체의 실패는 그대로 유지한다. 명시적으로 기다리는 설정 저장·update·eviction 호출자가 실패를 성공으로 오인하지 않는다.
 

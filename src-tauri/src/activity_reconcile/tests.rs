@@ -20,7 +20,7 @@ fn an_explicit_entry_request_repairs_only_that_panes_equal_backend_baseline() {
     .is_empty());
 }
 use crate::constants::{
-    WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_PASS_BUDGET, WSL_LIVENESS_POSITIVE_MAX_AGE,
+    ACTIVITY_FALLBACK_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_POSITIVE_MAX_AGE,
 };
 
 /// Any value; the tests below care about which entries come back, not about
@@ -196,26 +196,14 @@ fn unknown_generations_supersede_nothing() {
     assert!(superseded_terminals(&unchanged, &unchanged).is_empty());
 }
 
-/// This worker refreshes the guest snapshot, so its cadence decides how
-/// stale that snapshot gets between passes. A guest **negative** expires
-/// sooner than a positive, and once it does, detection falls back to the
-/// title/buffer heuristics — where the exited agent's banner, still resident
-/// in the 16KB window, can re-pin the pane. The gap between two publishes is
-/// one cadence plus one whole pass, and the pass — default-distribution
-/// resolution plus every distribution's probe — is bounded by the pass
-/// budget, not by a single probe timeout.
+/// Display fallback must not extend the lifetime of control-path evidence.
 #[test]
-fn the_cadence_keeps_guest_verdicts_authoritative_between_passes() {
-    assert!(
-        ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET
-            <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE
-    );
+fn slow_fallback_is_independent_of_authoritative_guest_evidence_lifetime() {
+    assert!(ACTIVITY_FALLBACK_INTERVAL > WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
     assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
 }
 
-/// That invariant only holds if the cadence is measured pass-start to
-/// pass-start. A fixed sleep after the pass would add the pass duration to
-/// the gap between two published snapshots.
+/// A metadata wakeup never catches up by starting additional observations.
 #[test]
 fn metadata_wakeup_does_not_trigger_catch_up_after_a_pass() {
     assert_eq!(
@@ -224,8 +212,7 @@ fn metadata_wakeup_does_not_trigger_catch_up_after_a_pass() {
     );
 }
 
-/// A pass that overran the interval starts the next one immediately instead
-/// of trying to make up the lost time with a burst of passes.
+/// An overrun still leaves an idle metadata interval without a catch-up burst.
 #[test]
 fn an_overrunning_pass_still_leaves_a_metadata_idle_delay() {
     assert_eq!(

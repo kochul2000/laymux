@@ -315,7 +315,8 @@ impl<V: Send + Sync + 'static> GuestSnapshots<V> {
         slots.retain(|_, slot| {
             slot.running.is_some()
                 || slot.completed.as_ref().is_some_and(|(started_at, _)| {
-                    now.saturating_duration_since(*started_at) <= max_age
+                    now.saturating_duration_since(*started_at)
+                        <= max_age.max(crate::constants::ACTIVITY_DISPLAY_RETENTION)
                         || slot.retained_at.elapsed()
                             <= crate::constants::ACTIVITY_DISPLAY_RETENTION
                 })
