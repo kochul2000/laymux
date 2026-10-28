@@ -239,39 +239,120 @@ try {
       }),
     );
   } else if (phase === "shared-server") {
-    const target = context.targets.find((t) => t.environment === "Windows" && t.provider === "Codex");
-    const actor = spawn(path.join(artifacts, "codex.exe"), ["app-server", target.sessionId,
-      path.join(target.directory, "shared-server-fixture")], {
-      windowsHide: true, stdio: ["pipe", "ignore", "ignore"],
-      env: { ...process.env, LX_AUTOMATION_PORT: "19281", LX_TERMINAL_ID: "", LX_AGENT_HOOK_TOKEN: "" },
-    });
+    const target = context.targets.find(
+      (t) => t.environment === "Windows" && t.provider === "Codex",
+    );
+    const actor = spawn(
+      path.join(artifacts, "codex.exe"),
+      [
+        "app-server",
+        target.sessionId,
+        path.join(target.directory, "shared-server-fixture"),
+      ],
+      {
+        windowsHide: true,
+        stdio: ["pipe", "ignore", "ignore"],
+        env: {
+          ...process.env,
+          LX_AUTOMATION_PORT: "19281",
+          LX_TERMINAL_ID: "",
+          LX_AGENT_HOOK_TOKEN: "",
+        },
+      },
+    );
     try {
       assert.ok(actor.pid);
-      const birth = Number(execFileSync("powershell.exe", ["-NoProfile", "-Command",
-        `([DateTimeOffset](Get-Process -Id ${actor.pid}).StartTime).ToUnixTimeSeconds()`], { encoding: "utf8", windowsHide: true }).trim());
+      const birth = Number(
+        execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `([DateTimeOffset](Get-Process -Id ${actor.pid}).StartTime).ToUnixTimeSeconds()`,
+          ],
+          { encoding: "utf8", windowsHide: true },
+        ).trim(),
+      );
       assert.ok(Number.isSafeInteger(birth));
-      const event = () => ({ terminalId: "historical-shared-server-pane", token: "historical-token",
-        provider: "codex", sessionId: target.sessionId, event: "PostToolUse", source: null,
-        transcriptPath: null, cwd: null, agentId: null, turnId: "fixture-turn", emittedAtMs: Date.now(),
-        ancestors: [{ pid: actor.pid, parentPid: process.pid, startTime: birth, name: "codex.exe", helper: true }],
-        distro: null, configDir: target.directory, toolName: "fixture", notificationType: null });
+      const event = () => ({
+        terminalId: "historical-shared-server-pane",
+        token: "historical-token",
+        provider: "codex",
+        sessionId: target.sessionId,
+        event: "PostToolUse",
+        source: null,
+        transcriptPath: null,
+        cwd: null,
+        agentId: null,
+        turnId: "fixture-turn",
+        emittedAtMs: Date.now(),
+        ancestors: [
+          {
+            pid: actor.pid,
+            parentPid: process.pid,
+            startTime: birth,
+            name: "codex.exe",
+            helper: true,
+          },
+        ],
+        distro: null,
+        configDir: target.directory,
+        toolName: "fixture",
+        notificationType: null,
+      });
       await api(`/terminals/${target.id}/write`, { data: "busy\r" });
       await api("/agent-hooks/events", event());
-      const initial = await until(states, (values) => values[target.id]?.state === "running", "shared producer with a separately proven TUI");
+      await until(
+        states,
+        (values) => values[target.id]?.state === "running",
+        "shared producer with a separately proven TUI",
+      );
+      // Let a coalesced acquisition finish before measuring event-only renewal.
+      await sleep(3000);
+      const initial = await states();
       await sleep(7000);
       await api("/agent-hooks/events", event());
       const later = await states();
-      assert.equal(later[target.id]?.verifiedAtMs, initial[target.id].verifiedAtMs, "server events cannot renew TUI presence");
+      assert.equal(
+        later[target.id]?.verifiedAtMs,
+        initial[target.id].verifiedAtMs,
+        "server events cannot renew TUI presence",
+      );
       // Keep the actual helper-role process alive while the four real TUI
       // fixtures exit, using the existing quiet-window and shell-return suite.
-      const quiet = execFileSync("node", [path.join(root, "scripts/tests/agent-activity-recovery.e2e.mjs"), "quiet-exit"], { cwd: root, windowsHide: true, encoding: "utf8", timeout: 120000 });
+      const quiet = execFileSync(
+        "node",
+        [
+          path.join(root, "scripts/tests/agent-activity-recovery.e2e.mjs"),
+          "quiet-exit",
+        ],
+        { cwd: root, windowsHide: true, encoding: "utf8", timeout: 120000 },
+      );
       await api("/agent-hooks/events", event());
       assert.equal((await states())[target.id], undefined);
-      assert.equal((await own()).find((v) => v.id === target.id)?.activity?.type, "shell");
-      const generation = (await own()).find((v) => v.id === target.id).generation;
-      await assert.rejects(invoke("begin_agent_clear", { id: target.id, generation }), /fresh live agent/);
-      await writeFile(path.join(artifacts, "hook-shared-server.json"), JSON.stringify({ initial, later, quiet, after: await own() }, null, 2));
-      console.log(JSON.stringify({ phase, producerOutsidePty: true, presenceNotRenewed: true, shellNotPromoted: true }));
+      assert.equal(
+        (await own()).find((v) => v.id === target.id)?.activity?.type,
+        "shell",
+      );
+      const generation = (await own()).find(
+        (v) => v.id === target.id,
+      ).generation;
+      await assert.rejects(
+        invoke("begin_agent_clear", { id: target.id, generation }),
+        /fresh live agent/,
+      );
+      await writeFile(
+        path.join(artifacts, "hook-shared-server.json"),
+        JSON.stringify({ initial, later, quiet, after: await own() }, null, 2),
+      );
+      console.log(
+        JSON.stringify({
+          phase,
+          producerOutsidePty: true,
+          presenceNotRenewed: true,
+          shellNotPromoted: true,
+        }),
+      );
     } finally {
       actor.stdin.end("exit\n");
       await new Promise((resolve) => actor.once("exit", resolve));

@@ -30,7 +30,7 @@ else:
     sessions.mkdir(parents=True, exist_ok=True)
     (sessions / f'{os.getpid()}.json').write_text(json.dumps({'pid':os.getpid(),'sessionId':session_id,'startedAt':int(time.time()*1000),'status':'idle'}))
     print('\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07',end='')
-print(f'ACTIVITY_FIXTURE_READY:{os.getpid()}',flush=True)
+print(f'ACTIVITY_FIXTURE_READY:{session_id}:{os.getpid()}',flush=True)
 for line in sys.stdin:
     command = line.strip()
     if command in ('hook-start', 'hook-running', 'hook-idle', 'hook-heartbeat', 'hook-end'):

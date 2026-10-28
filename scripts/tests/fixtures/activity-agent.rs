@@ -19,7 +19,7 @@ fn main() {
     } else if provider == "Claude" {
         print!("\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07");
     }
-    println!("ACTIVITY_FIXTURE_READY:{}", std::process::id());
+    println!("ACTIVITY_FIXTURE_READY:{id}:{}", std::process::id());
     io::stdout().flush().unwrap();
     let mut owned_session = None;
     for line in io::stdin().lock().lines() {

@@ -625,6 +625,10 @@ helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종�
 
 `get_agent_hook_states(providers, refreshTerminalIds?)`와 `GET /api/v1/agent-hooks/states`는 검증된 같은 PTY 세대·앱 epoch·session/config/domain·root PID/생성 시각의 훅 연결을 메모리에서 조회한다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)). 새 연결은 대상 worker가 실제 귀속과 root를 확인한다. 같은 root의 새 훅 이벤트만 확인 시각을 갱신하며 단순 캐시 읽기는 갱신하지 않는다. snapshot은 선택적 `verifiedAtMs`를 추가한다. 6초 이후 마지막 상태를 stale로 보존하고 clear 권한은 주지 않는다. 명시적 `refreshTerminalIds`는 요청 이후 시작한 해당 대상의 관측을 수행한다. 설치 비활성·SessionEnd·root/session/config/title 충돌·세대/epoch 교체는 연결을 거부한다. REST는 저장된 hooks 설정 provider만 반환한다. 레지스트리/연결 캐시 락을 I/O 중 보유하지 않는다.
 
+훅 event의 `ancestors[]`는 Linux/WSL에서 선택적 `startTicks`를 추가한다. 같은 PID의 절대 생성 시각이 시간 보정으로 변해도 커널 tick이 같으면 같은 root다. 필드가 없는 helper도 수용하며 기존 helper는 업데이트 안내로 갱신한다. 표시 캐시를 보존하는 LRU 접근 시각은 run의 관측 시작 시각 및 6초 입력 lease와 분리한다. 명시적 저장/종료와 `begin_agent_clear`는 항상 요청 이후의 실제 관측을 요구한다.
+
+공유 app-server의 producer와 실제 TUI owner는 서로 다른 PID일 수 있다. producer fingerprint가 같으면 작업 이벤트를 적용하지만 같은 owner가 실제 조상에 있을 때만 owner 확인 lease를 연장한다. 조상에 owner가 없으면 저빈도 대상 확인을 유지하고 서버 이벤트만으로 shell을 agent로 바꾸지 않는다.
+
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 
 훅 명령은 읽을 수 있는 평문으로 설치한다([ADR-0285](../adr/0285-readable-agent-hook-commands.md)). Windows Codex는 cmd 실행 경계를 거치는 `powershell.exe ... -Command`, Windows Claude는 `shell: powershell`과 `& '절대 경로' emit claude`, Linux/WSL은 POSIX 인용 명령을 사용한다. 설치·제거는 현재 설정 경로/provider의 신규 명령 및 정확히 일치하는 이전 EncodedCommand를 식별해 중복 등록을 정리한다. shell·args·commandWindows처럼 실행 의미를 바꾼 사용자 항목은 삭제하지 않는다. Settings는 감지 선택과 환경별 설치 패널을 분리하고 `expected`/`registered`를 기준으로 추가·누락 보완·갱신 개수를 버튼 위에 안내한다. 설치·제거의 즉시 적용 안내는 항상 표시하며 사용자 지정 폴더와 수신 진단은 펼칠 수 있는 상세 영역에 둔다.
@@ -2525,6 +2529,8 @@ Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(AD
 
 Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
+Dev 전용 GET `/api/v1/dev/activity-metrics`는 실제 native OS snapshot 횟수, 배포판/프로브별 guest 실행 횟수와 최근 대상 검사 목록을 반환한다. release에서는 403이다. 입력·설정·프로세스를 변경하지 않는다.
+
 ### 에이전트 상태 재확인 (ADR-0358)
 
 호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀에서 대상 ID만 `request_terminal_activity_refresh({ids})`로 요청한다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)). 60초 전체 재조회·전량 재발행과 3초 전체 생존 검사는 없다. 250ms 메모리 확인 뒤 domain별 요청을 합치고 실제 검사 사이를 최소 2초 띄운다. 정상 훅 외의 대상만 120~150초에 분산 fallback한다. 일반 턴/기록/훅 조회는 새 OS/guest scan을 시작하지 않는다. `HookStateSnapshot.verifiedAtMs` 외의 기존 응답은 유지한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다.
@@ -2562,9 +2568,3 @@ Settings의 명시적 환경별 조회는 `manage_agent_hooks({request:{provider
 installed일 때 기존 훅 status를 조회한다. missing은 에이전트 이름·설치 후 재확인을 표시하고, unknown은 확인 불가·진단을 표시한다. 두 경우 훅 설치 버튼을 비활성화한다. 환경 전환·재확인은 재검사하며 이전 응답은 폐기한다. 이 연산은 훅 설치 캐시·자동 검사·작업 상태·설정 파일을 변경하지 않는다.
 
 dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"wsl:<distribution>"}`는 열린 Settings 훅 패널에서 기존 선택지로 전환하고 같은 change 이벤트 경로로 재검사한다. 미마운트·비활성·없는 선택지는 거부한다. Rust debug와 frontend DEV gate로 release에서는 차단하며 설치·설정 저장을 실행하지 않는다. 이 경로와 기존 Settings 열기·navigate·screenshot을 조합해 환경별 안내를 자율 검증한다.
-
-Dev 전용 GET `/api/v1/dev/activity-metrics`는 실제 native OS snapshot 횟수, 배포판/프로브별 guest 실행 횟수와 최근 대상 검사 목록을 반환한다. release에서는 403이다. 입력·설정·프로세스를 변경하지 않는다.
-
-훅 event의 `ancestors[]`는 Linux/WSL에서 선택적 `startTicks`를 추가한다. 같은 PID의 절대 생성 시각이 시간 보정으로 변해도 커널 tick이 같으면 같은 root다. 필드가 없는 helper도 수용하며 기존 helper는 업데이트 안내로 갱신한다. 표시 캐시를 보존하는 LRU 접근 시각은 run의 관측 시작 시각 및 6초 입력 lease와 분리한다. 명시적 저장/종료와 `begin_agent_clear`는 항상 요청 이후의 실제 관측을 요구한다.
-
-공유 app-server의 producer와 실제 TUI owner는 서로 다른 PID일 수 있다. producer fingerprint가 같으면 작업 이벤트를 적용하지만 같은 owner가 실제 조상에 있을 때만 owner 확인 lease를 연장한다. 조상에 owner가 없으면 저빈도 대상 확인을 유지하고 서버 이벤트만으로 shell을 agent로 바꾸지 않는다.
