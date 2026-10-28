@@ -989,6 +989,9 @@ impl<'de> Deserialize<'de> for ComposerStarredEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
+    /// Select the source terminal profile for splits and new stack layers.
+    #[serde(default = "default_true")]
+    pub inherit_profile_on_split: bool,
     /// Run checkpoint parsing in a Worker. Applies to newly created surfaces.
     #[serde(default = "default_true")]
     pub checkpoint_worker: bool,
@@ -1067,6 +1070,7 @@ fn default_pty_daemon_grace_minutes() -> u32 {
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
+            inherit_profile_on_split: true,
             checkpoint_worker: true,
             output_activity_burst: OutputActivityBurstSettings::default(),
             parser_admission: ParserAdmissionSettings::default(),

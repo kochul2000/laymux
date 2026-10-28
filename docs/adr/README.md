@@ -384,6 +384,7 @@ ADR 이 필요한 대표 기준:
 | [0358](0358-agent-task-state-entry-and-periodic-recovery.md) | 작업 상태를 진입·60초 재확인으로 복구하고 Codex live 제목과 유일한 기록을 대조한다 | Accepted |
 | [0359](0359-agent-reconcile-requires-exit-evidence.md) | 에이전트 재판정은 관측 실패를 종료로 발행하지 않는다 | Accepted |
 | [0360](0360-unknown-activity-and-event-recovery.md) | 미관측 activity는 셸이 아니며 전체 복구 sweep을 하지 않는다 | Accepted |
+| [0361](0361-split-stack-inherit-terminal-profile.md) | 분할·스택은 기본적으로 원본 터미널 프로필을 선택한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

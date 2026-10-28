@@ -449,6 +449,8 @@
       "composerHistoryPopupDesc": "In Composer mode, press Tab in an empty focused input to list your recent inputs and pick one.",
       "composerAutocomplete": "Composer Autocomplete",
       "composerAutocompleteDesc": "In Composer mode, suggest matching past inputs as you type; press Tab (or arrow keys then Enter) to fill one in.",
+      "inheritProfileOnSplit": "Inherit profile on split and stack",
+      "inheritProfileOnSplitDesc": "Open horizontal/vertical splits and new stack layers with the source terminal profile. Turn off to start with an empty pane. Remote still opens a terminal with the default profile when off.",
       "composerStarredEntries": "Starred Composer Inputs",
       "composerStarredEntriesDesc": "Permanent inputs shared by every workspace and Remote on this host.",
       "composerStarredEntryPlaceholder": "Input to star",

@@ -7,6 +7,45 @@ use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
+fn inherit_profile_defaults_on_roundtrips_false_and_validates_type() {
+    let current = Settings::default();
+    assert!(current.terminal.inherit_profile_on_split);
+    let mut legacy = serde_json::to_value(&current).unwrap();
+    legacy["terminal"]
+        .as_object_mut()
+        .unwrap()
+        .remove("inheritProfileOnSplit");
+    assert!(
+        serde_json::from_value::<Settings>(legacy)
+            .unwrap()
+            .terminal
+            .inherit_profile_on_split
+    );
+    let prepared = prepare_settings_update(
+        &current,
+        &json!({"terminal":{"inheritProfileOnSplit":false}}),
+    );
+    assert!(prepared.valid, "{:?}", prepared.errors);
+    assert!(prepared.next_use_required);
+    let candidate = prepared.candidate.unwrap();
+    assert!(
+        !serde_json::from_str::<Settings>(&serde_json::to_string(&candidate).unwrap())
+            .unwrap()
+            .terminal
+            .inherit_profile_on_split
+    );
+    assert!(
+        !prepare_settings_update(
+            &current,
+            &json!({"terminal":{"inheritProfileOnSplit":"false"}})
+        )
+        .valid
+    );
+    let described = describe_settings(&["/terminal/inheritProfileOnSplit".to_string()]).unwrap();
+    assert!(described.to_string().contains("inheritProfileOnSplit"));
+}
+
+#[test]
 fn checkpoint_worker_defaults_on_roundtrips_false_and_applies_next_use() {
     let current = Settings::default();
     assert!(current.terminal.checkpoint_worker);

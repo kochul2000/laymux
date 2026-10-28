@@ -35,12 +35,12 @@ describe("WorkspaceStore pane stacks", () => {
     localStorage.clear();
   });
 
-  it("stackPane adds an EmptyView layer after the active one and activates it", () => {
+  it("stackPane adds a terminal with the source profile after the active layer and activates it", () => {
     const layerId = useWorkspaceStore.getState().stackPane(0)!;
     const slot = active().panes[0];
     expect(slot.id).toBe("p0");
     expect(slot.layers.map((l) => l.id)).toEqual(["p0", layerId]);
-    expect(slot.layers[1].view).toEqual({ type: "EmptyView" });
+    expect(slot.layers[1].view).toEqual(term);
     expect(slot.activeLayerId).toBe(layerId);
     // geometry is untouched — stacking never resizes
     expect([slot.x, slot.y, slot.w, slot.h]).toEqual([0, 0, 1, 1]);
