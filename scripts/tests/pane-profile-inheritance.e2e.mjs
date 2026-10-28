@@ -114,6 +114,31 @@ async function screenshot() {
   const { dataUrl: _dataUrl, ...metadata } = await api("/screenshot", {});
   return metadata;
 }
+async function clickPaneControl(sourceId, testId) {
+  const source = `[data-layer-id="${sourceId}"]`;
+  const button = `[data-testid="${testId}"]`;
+  const floating = `[data-testid="pane-control-floating-menu"] ${button}`;
+  if (
+    !(await evaluate(
+      `!!document.querySelector(${JSON.stringify(source + " " + button)})`,
+    ))
+  ) {
+    if (
+      !(await evaluate(`!!document.querySelector(${JSON.stringify(floating)})`))
+    ) {
+      await evaluate(
+        `(()=>{const button=document.querySelector(${JSON.stringify(source + ' [data-testid="pane-control-menu-btn"]')});if(!button)throw Error('pane 메뉴 없음');button.click();return true})()`,
+      );
+    }
+    await until(
+      () => evaluate(`!!document.querySelector(${JSON.stringify(floating)})`),
+      "좁은 pane의 분할 메뉴",
+    );
+  }
+  await evaluate(
+    `(document.querySelector(${JSON.stringify(source + " " + button)})??document.querySelector(${JSON.stringify(floating)})).click();true`,
+  );
+}
 async function setting(enabled, testId = "inherit-profile-on-split-toggle") {
   await api("/ui/settings", {});
   await api("/ui/settings/navigate", { section: "terminal" });
@@ -220,9 +245,7 @@ try {
     const before = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers.map(l=>l.id))`,
     );
-    await evaluate(
-      `(()=>{const node=document.querySelector('[data-layer-id="${sourceId}"] [data-testid="${testId}"]');if(!node)throw Error('분할 버튼 없음: ${testId}');node.click();return true})()`,
-    );
+    await clickPaneControl(sourceId, testId);
     const layers = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers)`,
     );
@@ -256,9 +279,7 @@ try {
     const before = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers.map(l=>l.id))`,
     );
-    await evaluate(
-      `document.querySelector('[data-layer-id="${sourceId}"] [data-testid="${testId}"]').click();true`,
-    );
+    await clickPaneControl(sourceId, testId);
     const layers = await evaluate(
       `profileCheck.workspace.getState().getActiveWorkspace().panes.flatMap(s=>s.layers)`,
     );
