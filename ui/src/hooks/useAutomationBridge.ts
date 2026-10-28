@@ -69,6 +69,7 @@ import {
 } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { stackPaneAt } from "@/lib/pane-stack-actions";
+import { resolveNewPaneView } from "@/lib/pane-profile";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
@@ -839,7 +840,7 @@ const handlers: HandlerMap = {
       const newSlotBefore = wsBeforeConvert?.panes[newPaneIndex];
       const newPaneBefore = newSlotBefore ? activeLayer(newSlotBefore) : undefined;
       if (newPaneBefore) {
-        if (newPaneBefore.view.type !== "TerminalView") {
+        if (newPaneBefore.view.type !== "TerminalView" || p.profile) {
           const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
           if (p.profile) viewConfig.profile = p.profile as string;
           if (p.cwd) viewConfig.lastCwd = p.cwd as string;
@@ -922,8 +923,8 @@ const handlers: HandlerMap = {
       }
       return ok({ closed: paneId });
     },
-    // ADR-0339: Remote has no EmptyView picker. Start a usable terminal in the
-    // selected terminal's environment, including when that layer is inactive.
+    // ADR-0339·0361: Remote has no EmptyView picker. Always create a terminal;
+    // the host setting gates profile inheritance from the selected layer.
     stackById: (p) => {
       const paneId = p.paneId;
       if (typeof paneId !== "string" || !paneId.trim()) return err("paneId required");
@@ -932,12 +933,11 @@ const handlers: HandlerMap = {
       if (!entry) return err(`Pane '${paneId}' is not in the active workspace`);
       const source = entry.layer;
       if (source.view.type !== "TerminalView") return err(`Pane '${paneId}' is not a terminal`);
-      const profile = findTerminalInstance(toTerminalId(paneId))?.profile ?? source.view.profile;
       const cwd = resolvePaneCwd(source);
-      const layerId = stackPaneAt(entry.slotIndex, {
-        type: "TerminalView",
-        ...(profile ? { profile } : {}),
-      });
+      const layerId = stackPaneAt(
+        entry.slotIndex,
+        resolveNewPaneView(source, { type: "TerminalView" }),
+      );
       // The common store seeds from the slot's active layer. Remote may still
       // be connected to another layer, whose CWD must win for this action.
       if (layerId) useTerminalRestartStore.getState().requestRestart(layerId, cwd);
@@ -960,7 +960,12 @@ const handlers: HandlerMap = {
       // restoring it later would expose a navigation/focus change to the user.
       const layerId = useWorkspaceStore
         .getState()
-        .stackPane(ctx.paneIndex, view, { activate: false }, ctx.ws.id);
+        .stackPane(
+          ctx.paneIndex,
+          resolveNewPaneView(activeLayer(ctx.pane), view),
+          { activate: false },
+          ctx.ws.id,
+        );
       if (!layerId) return err(`Pane ${ctx.paneIndex} could not be stacked`);
       if (p.cwd && viewType === "TerminalView") {
         useTerminalRestartStore.getState().requestRestart(layerId, p.cwd as string);

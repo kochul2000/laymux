@@ -13,6 +13,7 @@ import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { useTerminalRestartStore } from "./terminal-restart-store";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { resolveNewPaneView } from "@/lib/pane-profile";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 import {
   activeLayer,
@@ -454,6 +455,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const pane = ws.panes[paneIndex];
     let updatedPane: WorkspacePane;
     let newPane: WorkspacePane;
+    const view = resolveNewPaneView(activeLayer(pane));
 
     if (direction === "horizontal") {
       const halfH = pane.h / 2;
@@ -461,7 +463,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       newPane = makeSlot(
         generateId("pane"),
         { x: pane.x, y: pane.y + halfH, w: pane.w, h: halfH },
-        { type: "EmptyView" },
+        view,
       );
     } else {
       const halfW = pane.w / 2;
@@ -469,7 +471,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       newPane = makeSlot(
         generateId("pane"),
         { x: pane.x + halfW, y: pane.y, w: halfW, h: pane.h },
-        { type: "EmptyView" },
+        view,
       );
     }
 
@@ -483,8 +485,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     // 새 pane 의 첫 터미널 세션은 **분할한 그 pane** 의 CWD 에서 시작한다(ADR-0140).
     // 시드는 재시작 요청 버스에 실린다 — "이 pane 의 다음 세션을 이 CWD 로 새로
-    // 시작하라"는 payload·수명이 재시작과 같기 때문이다. 새 pane 은 EmptyView 로
-    // 태어나므로 시드는 사용자가 터미널을 고를 때까지 기다렸다가 소비된다.
+    // 시작하라"는 payload·수명이 재시작과 같기 때문이다. 프로필 상속을 끄면
+    // 시드는 사용자가 터미널을 고를 때까지 기다렸다가 소비된다.
     // 스택 슬롯이면 기준은 그 슬롯의 활성 레이어다(ADR-0297).
     const seedCwd = resolvePaneCwd(activeLayer(pane));
     if (seedCwd) {
@@ -492,13 +494,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
 
-  stackPane: (paneIndex, view = { type: "EmptyView" }, options = {}, workspaceId) => {
+  stackPane: (paneIndex, view, options = {}, workspaceId) => {
     const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return null;
     const pane = ws.panes[paneIndex];
     if (!pane) return null;
 
-    const layer: PaneLayer = { id: generateId("pane"), view };
+    const layer: PaneLayer = {
+      id: generateId("pane"),
+      view: view ?? resolveNewPaneView(activeLayer(pane)),
+    };
     const updated = insertLayer(pane, layer, options);
     set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, updated) }));
 

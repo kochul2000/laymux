@@ -43,7 +43,7 @@ Remote는 활성 lease와 선택 terminal을 결합하여 같은 서비스를 �
 **새 Pane 은 분할한 그 Pane 의 CWD 에서 첫 터미널 세션을 시작한다**([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)).
 
 - 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다. 분할한 슬롯이 스택이면 기준은 그 슬롯의 활성 레이어다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
-- 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 새 Pane 은 `EmptyView` 로 태어나므로 사용자가 터미널을 고를 때까지 기다렸다가 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. 이 경로는 프로파일의 `restoreCwd` 설정과 무관하게 적용된다 — 상속은 복원이 아니다.
+- 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. `terminal.inheritProfileOnSplit`(기본 true)이 켜져 있고 원본 활성 레이어가 터미널이면 `lib/pane-profile.ts`가 실행 중 인스턴스 → 저장된 view 순으로 프로필을 선택해 즉시 `TerminalView`를 만든다. 프로필만 선택하며 대화·출력 캐시·pane별 override는 복사하지 않는다. 옵션을 끄거나 비터미널에서 분할하면 `EmptyView`에서 선택을 기다린다([ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md)). CWD 경로는 이 옵션과 프로파일의 `restoreCwd` 설정과 무관하다.
 - Automation `split_pane` 은 `cwd` 를 주면 그 값으로 시드를 덮어쓰고(명시값 우선), 주지 않으면 UI 분할과 같은 상속을 받는다. Dock 분할은 상속 대상이 아니다.
 - Automation의 split·stack·삭제·resize·swap·재배치·view 변경은 비활성 workspace도 직접 대상으로 삼는다([ADR-0350](../adr/0350-automation-targets-background-workspaces.md)). 단일 슬롯은 `pane_id`(슬롯 또는 그 슬롯의 레이어 ID) 또는 `workspace_id` + `pane_index`로 해석한다. 명시 대상이 없을 때만 기존 활성 workspace 기본값을 사용하며, 지정이 잘못되거나 서로 불일치하면 변경 전에 거부한다. store의 인덱스 기반 액션은 선택적 workspace ID를 받고, 레이어 이동·꺼내기·슬롯 합치기는 안정적인 ID의 소유 workspace를 직접 찾아 갱신한다. bridge는 작업 전후 활성 workspace를 임시 전환하지 않는다. source workspace 이동은 `source_workspace_id`와 목적지 `workspace_id`를 분리한다.
 
@@ -55,8 +55,8 @@ Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자�
 
 | 방법 | 동작 |
 | --- | --- |
-| 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 표시·포커스 |
-| Remote Stack 키 | 열린 터미널의 프로필·CWD를 이어받는 `TerminalView`를 쌓고 표시·포커스한 뒤 Remote 출력을 새 터미널에 연결. 대상이 비활성 레이어여도 그 레이어에서 상속 ([ADR-0339](../adr/0339-remote-stack-creates-enterable-terminal.md)) |
+| 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 프로필 상속 설정에 따른 새 레이어를 추가하고 표시·포커스 |
+| Remote Stack 키 | 열린 터미널의 프로필·CWD를 이어받는 `TerminalView`를 쌓고 표시·포커스한 뒤 Remote 출력을 새 터미널에 연결. 대상이 비활성 레이어여도 그 레이어에서 상속하며 프로필 상속을 끄면 기본 프로필을 선택 ([ADR-0339](../adr/0339-remote-stack-creates-enterable-terminal.md), [ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md)) |
 | Automation `stack_pane` · REST `/api/v1/panes/stack` | 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 추가하되 기존 표시·포커스를 유지. 생성 도중에도 새 레이어를 활성화하지 않음 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
 | 전환 줄 × · 탭 가운데 클릭 · 컨트롤 바 Delete · `pane.delete` | 그 레이어(컨트롤 바·단축키는 활성 레이어) 하나 닫기. 마지막 레이어면 슬롯이 사라지고 공간 재분배 |

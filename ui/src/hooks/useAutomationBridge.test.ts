@@ -4676,6 +4676,7 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
   }
 
   beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
@@ -4697,6 +4698,60 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(useTerminalRestartStore.getState().requests[layerId]).toBeUndefined();
     expect(act("closeById", { paneId: layerId }).success).toBe(false);
   });
+
+  it("Remote stack은 상속을 꺼도 기본 프로필 터미널을 만들고 선택 레이어 CWD를 유지한다", () => {
+    useSettingsStore.getState().setTerminal({ inheritProfileOnSplit: false });
+    const store = useWorkspaceStore.getState();
+    const sourceId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.setPaneView(0, { type: "TerminalView", profile: "WSL", lastCwd: "/selected" });
+    store.stackPane(0, { type: "TerminalView", profile: "PowerShell", lastCwd: "C:\\other" });
+    const result = act("stackById", { paneId: sourceId });
+    expect(result.success).toBe(true);
+    const layerId = (result.data as { layerId: string }).layerId;
+    expect(store.getActiveWorkspace()!.panes[0].layers.find((l) => l.id === layerId)!.view).toEqual(
+      { type: "TerminalView" },
+    );
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/selected");
+  });
+
+  it("Remote에서 프로필이 없는 비활성 원본을 선택해도 활성 레이어의 프로필을 상속하지 않는다", () => {
+    const store = useWorkspaceStore.getState();
+    const sourceId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.setPaneView(0, { type: "TerminalView", lastCwd: "/selected" });
+    store.stackPane(0, { type: "TerminalView", profile: "WSL", lastCwd: "/other" });
+    const result = act("stackById", { paneId: sourceId });
+    expect(result.success).toBe(true);
+    const layerId = (result.data as { layerId: string }).layerId;
+    expect(store.getActiveWorkspace()!.panes[0].layers.find((l) => l.id === layerId)!.view).toEqual(
+      { type: "TerminalView" },
+    );
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/selected");
+  });
+
+  it.each(["split", "stack"])(
+    "Automation %s는 프로필 생략 시 상속하고 명시값을 우선한다",
+    (method) => {
+      const store = useWorkspaceStore.getState();
+      store.setPaneView(0, { type: "TerminalView", profile: "WSL", lastCwd: "/source" });
+      const inherited = act(method, { paneIndex: 0, direction: "vertical" });
+      const inheritedId = (inherited.data as { newPane: { id: string } }).newPane.id;
+      const find = (id: string) =>
+        store
+          .getActiveWorkspace()!
+          .panes.flatMap((slot) => slot.layers)
+          .find((l) => l.id === id)!;
+      expect(find(inheritedId).view.profile).toBe("WSL");
+      const explicit = act(method, {
+        paneIndex: 0,
+        direction: "horizontal",
+        profile: "PowerShell",
+        cwd: "C:\\explicit",
+      });
+      const explicitId = (explicit.data as { newPane: { id: string } }).newPane.id;
+      expect(find(explicitId).view.profile).toBe("PowerShell");
+      expect(useTerminalRestartStore.getState().requests[explicitId]?.cwd).toBe("C:\\explicit");
+    },
+  );
 
   it("stackById creates an enterable terminal with the selected layer's profile and CWD", () => {
     const store = useWorkspaceStore.getState();

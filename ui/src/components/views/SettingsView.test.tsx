@@ -1475,6 +1475,20 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("path-link-os-open-confirm-toggle")).toBeChecked();
   });
 
+  it("분할·스택 프로필 상속은 기본 켜짐이며 저장 시 반영한다", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("inherit-profile-on-split-toggle")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByTestId("inherit-profile-on-split-toggle"));
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(true);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(false);
+  });
+
   it("persists the path-link OS open toggles on Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

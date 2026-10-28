@@ -3,6 +3,17 @@ import { useSettingsStore, makeDefaultColorScheme, type TerminalSettings } from 
 import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
+  it("프로필 상속은 기본 true이며 false 저장과 누락 필드 기본값을 보존한다", () => {
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(true);
+    const legacy: Partial<TerminalSettings> = { ...useSettingsStore.getState().terminal };
+    delete legacy.inheritProfileOnSplit;
+    useSettingsStore.getState().loadFromSettings({ terminal: legacy as TerminalSettings });
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(true);
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { ...useSettingsStore.getState().terminal, inheritProfileOnSplit: false },
+    });
+    expect(useSettingsStore.getState().terminal.inheritProfileOnSplit).toBe(false);
+  });
   it("defaults checkpoint Worker on, preserves false, and fills omitted snapshots", () => {
     expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(true);
     useSettingsStore.getState().setTerminal({ checkpointWorker: false });
