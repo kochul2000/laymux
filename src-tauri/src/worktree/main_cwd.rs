@@ -16,16 +16,22 @@ pub fn main_worktree_cwd(working_dir: &str) -> Result<Option<String>, AppError> 
     if git.same_path(&root, &main.path) {
         return Ok(None);
     }
+    // Absorbed submodules can report .git/modules/<name> as their main entry.
+    // Ask that repository for its real worktree root before treating it as a CWD.
+    let main_root = git.text(&main.path, &["rev-parse", "--show-toplevel"])?;
+    if git.same_path(&root, &main_root) {
+        return Ok(None);
+    }
     let prefix = git.text(&git.cwd, &["rev-parse", "--show-prefix"])?;
     let candidate = format!(
         "{}/{}",
-        main.path.trim_end_matches('/'),
+        main_root.trim_end_matches('/'),
         prefix.trim_end_matches('/')
     );
     if git.directory_exists(&candidate)? {
         Ok(Some(git.host_path(&candidate)))
-    } else if git.directory_exists(&main.path)? {
-        Ok(Some(git.host_path(&main.path)))
+    } else if git.directory_exists(&main_root)? {
+        Ok(Some(git.host_path(&main_root)))
     } else {
         Ok(None)
     }
