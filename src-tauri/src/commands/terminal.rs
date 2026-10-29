@@ -579,7 +579,7 @@ pub(crate) async fn create_terminal_session_inner(
         // master reads without re-locking poisoned protocol state or emitting
         // repeated fatal diagnostics during that cleanup window.
         if pty_output_session.is_terminal_output_retired() {
-            return pty::PtyOutputControl::Stop;
+            return crate::terminal_shutdown::retired_output_control(&pty_output_session);
         }
         // An adopted terminal's first bytes may be the backlog it missed
         // while detached: OSC facts only, never shown (ADR-0309).
@@ -650,9 +650,12 @@ pub(crate) async fn create_terminal_session_inner(
                     generation = pty_output_session.generation(),
                     "dropped PTY output from retired terminal generation"
                 );
-                return pty::PtyOutputControl::Stop;
+                return crate::terminal_shutdown::retired_output_control(&pty_output_session);
             }
             Err(err) => {
+                if pty_output_session.is_terminal_output_retired() {
+                    return crate::terminal_shutdown::retired_output_control(&pty_output_session);
+                }
                 // These bytes never reached the ring, so no sequence gap will
                 // ever expose them and no repair can recover them. Continuing
                 // with legacy events/OSC would make both producer boundedness
@@ -1555,7 +1558,7 @@ pub(crate) fn close_terminal_session_inner(
     let mut terminals = state
         .terminals
         .lock_or_recover_for_discard("closing terminal catalog entry");
-    let output_retirement = terminal_output::begin_terminal_output_retirement_for_close(
+    let output_retirement = terminal_output::begin_terminal_output_retirement_for_graceful_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
         id,

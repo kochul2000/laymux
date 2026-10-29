@@ -135,6 +135,9 @@ pub struct TerminalOutputSession {
     /// Generation-local, exactly-once handoff from the PTY reader callback to
     /// the asynchronous catalog/OS-resource teardown worker.
     fatal_teardown_requested: AtomicBool,
+    /// Explicit close discards retired bytes while the child finishes cleanup.
+    /// Fault retirement/reconnect never arms this generation-local exception.
+    graceful_close_drain: AtomicBool,
 }
 
 /// Rollback guard for the create path. Until committed, every error (including

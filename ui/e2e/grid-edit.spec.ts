@@ -62,7 +62,7 @@ test.describe("Pane Split", () => {
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(3);
   });
 
-  test("new panes default to EmptyView", async ({ appPage: page }) => {
+  test("profile inheritance disabled creates EmptyView", async ({ appPage: page }) => {
     await hoverPane(page, 0);
     await page.getByTestId("pane-control-split-v").click();
 

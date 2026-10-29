@@ -15,6 +15,25 @@ fn flow_test_session() -> Arc<TerminalOutputSession> {
     session
 }
 
+#[test]
+fn graceful_retirement_drains_without_publishing_but_raw_retirement_stops() {
+    let session = flow_test_session();
+    session.begin_graceful_close_drain();
+    session.retire(false).unwrap();
+    assert!(session.is_terminal_output_retired());
+    assert!(session.record_desktop_output(b"cleanup OSC bytes").is_err());
+    assert!(matches!(
+        crate::terminal_shutdown::retired_output_control(&session),
+        crate::pty::PtyOutputControl::Continue
+    ));
+    let raw = flow_test_session();
+    raw.retire(false).unwrap();
+    assert!(matches!(
+        crate::terminal_shutdown::retired_output_control(&raw),
+        crate::pty::PtyOutputControl::Stop
+    ));
+}
+
 fn spawn_capacity_waiter(
     session: &Arc<TerminalOutputSession>,
     produced_seq: u64,

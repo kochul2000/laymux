@@ -5,6 +5,16 @@ use std::sync::{Arc, OnceLock};
 
 use crate::terminal::TerminalSession;
 
+pub(crate) fn retired_output_control(
+    session: &crate::terminal_output::TerminalOutputSession,
+) -> crate::pty::PtyOutputControl {
+    if session.drain_retired_pty_output() {
+        crate::pty::PtyOutputControl::Continue
+    } else {
+        crate::pty::PtyOutputControl::Stop
+    }
+}
+
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]

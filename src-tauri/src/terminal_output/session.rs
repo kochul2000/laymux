@@ -24,6 +24,7 @@ impl TerminalOutputSession {
             delivery_failure: Mutex::new(None),
             fail_stop_notice_sent: AtomicBool::new(false),
             fatal_teardown_requested: AtomicBool::new(false),
+            graceful_close_drain: AtomicBool::new(false),
         }
     }
 
@@ -58,6 +59,16 @@ impl TerminalOutputSession {
     /// Cheap fail-stop guard for a PTY callback racing generation close.
     pub fn is_terminal_output_retired(&self) -> bool {
         self.desktop_flow.is_retired()
+    }
+
+    pub(crate) fn begin_graceful_close_drain(&self) {
+        self.graceful_close_drain.store(true, Ordering::Release);
+    }
+
+    /// Retired output never reaches UI/OSC, but a graceful close must keep
+    /// consuming it until the existing PTY teardown stops the physical reader.
+    pub(crate) fn drain_retired_pty_output(&self) -> bool {
+        self.graceful_close_drain.load(Ordering::Acquire)
     }
 
     /// Claim the one automatic teardown request owned by this generation.

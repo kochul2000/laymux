@@ -18,7 +18,7 @@ WSL의 foreground `docker compose up`은 Ctrl+C 이후 컨테이너를 중지하
 - 정상 종료 요청의 주체는 GUI이고, OS PTY와 최종 강제 종료의 소유자는 기존 backend다. GUI는 daemon 소유 PID를 직접 강제 종료하지 않는다. 이전 데몬에 재결합한 경우도 GUI가 정상 종료 단계를 수행한 뒤 기존 terminate 프로토콜을 사용한다.
 - Linux와 WSL은 현재 PTY foreground process group에 SIGTERM을 보낸다. WSL은 배포판·실행 사용자·terminal ID·기존 agent hook token으로 실제 PTY session leader를 검증한다. 모호하거나 검증할 수 없는 대상에는 신호를 보내지 않는다. 정상 종료는 저장된 앱 이름이나 표시 캐시를 근거로 실행하지 않는다.
 - Native Windows는 별도 headless helper가 해당 자식의 생성 식별자를 검증하고 그 콘솔에만 연결해 CTRL_C_EVENT를 보낸다. 프로세스 전체의 GUI 콘솔 상태를 변경하지 않는다. Unix SIGTERM이 있는 것처럼 취급하지 않는다.
-- 신호를 보내는 동안 PTY 입력·출력 연결을 유지한다. 대기 대상은 foreground 작업이며, 작업이 끝난 뒤 프롬프트로 돌아온 셸 자체가 종료되기를 무한히 기다리지 않는다. 대상 확인 실패·권한 부족·시간 초과는 경고를 남기고 기존 종료 fallback으로 진행한다.
+- 신호를 보내는 동안 물리적 PTY 연결을 유지한다. 명시적 종료는 출력 세대를 논리적으로 retire하기 전에 해당 세대의 discard-drain을 설정한다. 이후 바이트는 UI·OSC·활동 상태에 발행하지 않고 계속 읽어 버리며, 정상 종료 완료 또는 제한 시간 뒤 기존 PTY teardown이 실제 reader를 끝낸다. fault retirement와 reconnect에는 이 예외를 적용하지 않는다. 대기 대상은 foreground 작업이며, 작업이 끝난 뒤 프롬프트로 돌아온 셸 자체가 종료되기를 무한히 기다리지 않는다. 대상 확인 실패·권한 부족·시간 초과는 경고를 남기고 기존 종료 fallback으로 진행한다.
 - 명시적 pane·workspace 종료와 정상 앱 종료에 적용한다. 재시작·checkpoint 후 숨김 eviction처럼 같은 PTY close transaction을 쓰는 경로에도 적용하며, 입력 fault 등 raw retirement에는 적용하지 않는다. 앱 종료의 등록된 여러 대상은 병렬 처리하고 전체 종료 대기에도 상한을 둔다. 반복 종료 요청은 같은 handle의 정상 종료 단계를 중복 실행하지 않는다.
 - 업데이트·WebView 복구의 handoff가 시작되면 이 단계를 실행하지 않는다. daemon 세션은 신호·terminate 없이 유지하며, 기존 in-process·probe 정리는 기존 방식으로 수행한다. 업데이트 실패로 handoff를 취소하면 다음 정상 종료에 다시 적용한다.
 - Docker 전용 탐색·전역 정리·detached container 종료·공유 Codex daemon 종료는 하지 않는다. PTY 밖으로 분리된 작업의 수명 관리와 이번 종료 정책은 별개다.

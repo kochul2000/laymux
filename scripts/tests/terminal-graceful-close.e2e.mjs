@@ -116,13 +116,13 @@ async function newPane(native = false) {
 const send = (pane, data) => api(`/terminals/${pane.terminal}/write`, { data });
 const closePane = (pane) => closeDevPane(evaluate, pane);
 
-async function actor(ignore = false) {
+async function actor(ignore = false, flood = false) {
   const pane = await newPane();
   const name = `actor-${context.panes.length}`;
   const log = path.join(context.directory, name + ".jsonl");
   await send(
     pane,
-    `python3 '${context.guest}/exit_actor.py' '${context.guest}/${name}.jsonl' ${ignore ? "ignore" : "normal"}\r`,
+    `python3 '${context.guest}/exit_actor.py' '${context.guest}/${name}.jsonl' ${ignore ? "ignore" : flood ? "flood" : "normal"}\r`,
   );
   const ready = await until(
     async () => (await events(log)).find((e) => e.kind === "ready"),
@@ -315,13 +315,15 @@ try {
       path.join(directory, "exit_actor.py"),
       String.raw`import os,sys,json,signal,time
 from pathlib import Path
-file=Path(sys.argv[1]); ignore=sys.argv[2]=='ignore'
+file=Path(sys.argv[1]); ignore=sys.argv[2]=='ignore'; flood=sys.argv[2]=='flood'
 birth=Path('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19]
 def log(kind):
  with file.open('a') as f: f.write(json.dumps({'kind':kind,'pid':os.getpid(),'birth':birth,'at':time.time(),'hasProof':bool(os.environ.get('LX_AGENT_HOOK_TOKEN'))})+'\n')
 def handler(sig,frame):
  log(signal.Signals(sig).name)
  if ignore and sig==signal.SIGTERM: return
+ if flood:
+  for i in range(64): os.write(1,b'X'*65536)
  time.sleep(1); log('cleanup-complete'); sys.exit(0)
 for sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM): signal.signal(sig,handler)
 log('ready'); print('GRACEFUL_ACTOR_READY',flush=True)
@@ -334,6 +336,12 @@ while True:
       const closing = await actor();
       await closePane(closing.pane);
       checks.push({ kind: "SIGTERM", events: await verifyActorEnded(closing) });
+      const noisy = await actor(false, true);
+      await closePane(noisy.pane);
+      checks.push({
+        kind: "cleanup-output-drain",
+        events: await verifyActorEnded(noisy),
+      });
       assert.ok(await alive(peer));
       assert.deepEqual(
         (await events(peer.log)).map((e) => e.kind),
@@ -380,7 +388,7 @@ while True:
       await verifyActorEnded(peer);
       checks.push({ kind: "peer-isolation", passed: true });
     } else {
-      context.actor = await actor();
+      context.actor = await actor(false, true);
       context.compose = await compose();
       context.savedSessions = (await api("/pty-sessions")).data.sessions.filter(
         (s) =>

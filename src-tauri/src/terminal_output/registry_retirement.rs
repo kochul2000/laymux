@@ -158,6 +158,25 @@ pub fn begin_terminal_output_retirement_for_close(
     output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
     terminal_id: &str,
 ) -> Result<Option<TerminalOutputRetirement>, String> {
+    begin_close_retirement(protocol_states, output_buffers, terminal_id, false)
+}
+
+/// Explicit cooperative close: arm drain before waking retired credit waiters.
+/// Fault/reconnect callers keep the raw retirement entry point above.
+pub fn begin_terminal_output_retirement_for_graceful_close(
+    protocol_states: &SharedTerminalProtocolStates,
+    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
+    terminal_id: &str,
+) -> Result<Option<TerminalOutputRetirement>, String> {
+    begin_close_retirement(protocol_states, output_buffers, terminal_id, true)
+}
+
+fn begin_close_retirement(
+    protocol_states: &SharedTerminalProtocolStates,
+    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
+    terminal_id: &str,
+    graceful: bool,
+) -> Result<Option<TerminalOutputRetirement>, String> {
     let current = {
         let mut registry = protocol_states
             .sessions
@@ -168,6 +187,9 @@ pub fn begin_terminal_output_retirement_for_close(
             return Ok(None);
         };
 
+        if graceful {
+            current.begin_graceful_close_drain();
+        }
         current.begin_retirement(false);
         remove_compatibility_projections(
             protocol_states,

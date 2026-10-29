@@ -1012,6 +1012,8 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 명시적 pane·workspace·정상 앱 종료는 [ADR-0364](../adr/0364-graceful-terminal-close-before-pty-hangup.md)에 따라 GUI의 `PtyHandle::terminate_gracefully`가 PTY 단절 전에 foreground 작업에 정상 종료를 요청한다. Linux/WSL은 SIGTERM, native Windows는 생성 식별자를 검증한 해당 콘솔의 CTRL_C_EVENT를 사용한다. foreground 작업이 끝날 때까지 최대 12초 대기한 뒤 기존 PTY 단절·강제 종료 fallback을 수행한다. 대기와 외부 프로세스 실행은 모든 AppState guard 밖에서 수행하며, 같은 handle의 정상 종료 요청은 한 번만 실행한다. 이전 세대 데몬을 채택한 GUI도 이 단계를 먼저 수행하므로 daemon protocol 변경에 의존하지 않는다. 앱 종료는 대상들을 병렬로 정리하고, UI의 기존 종료 예산에도 PTY 정리 예산 18초를 더한다. 업데이트·WebView 복구 handoff에서는 이 정상 종료 단계를 실행하지 않고 기존 daemon 인계를 유지한다. detached Docker·공유 Codex 서버처럼 PTY 밖에서 수명이 분리된 자원은 이 경로가 정리하지 않는다.
 
+명시적 종료는 출력 세대의 논리적 retirement 전에 generation-local discard-drain을 설정한다. retired callback은 UI·OSC·활동 갱신 없이 계속 읽어 버리므로 정리 로그가 PTY 버퍼를 채워 작업을 막지 않는다. 기존 PTY teardown이 최종 reader 종료를 담당한다. raw fault retirement·reconnect는 계속 `Stop`이며 이 예외를 사용하지 않는다.
+
 GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame이 4 KiB 이하이면 받은 `Vec`의 소유권을 추가 복사 없이 queue에 넘기고, 더 큰 redraw frame만 4 KiB chunk로 나눈다. 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
 
 **수명 규칙:**

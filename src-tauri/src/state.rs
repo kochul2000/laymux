@@ -498,6 +498,9 @@ impl AppState {
             let result = if hand_off {
                 handle.terminate()
             } else {
+                if let Some(retirement) = self.retire_graceful_close_output(&terminal_id) {
+                    retirement.finish();
+                }
                 handle.terminate_gracefully()
             };
             if let Err(err) = result {
@@ -526,6 +529,23 @@ impl AppState {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
+    fn retire_graceful_close_output(
+        &self,
+        terminal_id: &str,
+    ) -> Option<crate::terminal_output::TerminalOutputRetirement> {
+        match crate::terminal_output::begin_terminal_output_retirement_for_graceful_close(
+            &self.terminal_protocol_states,
+            &self.output_buffers,
+            terminal_id,
+        ) {
+            Ok(retirement) => retirement,
+            Err(error) => {
+                tracing::warn!(terminal_id, %error, "graceful close output retirement failed");
+                None
+            }
+        }
+    }
+
     /// App exit runs no `Drop` for this state. Give every backend the same
     /// cooperative foreground shutdown, then invoke its existing PTY teardown.
     /// An update/recovery handoff bypasses both steps (ADR-0364).
@@ -550,8 +570,12 @@ impl AppState {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let pending = handles.len();
         for (terminal_id, handle) in handles {
+            let retirement = self.retire_graceful_close_output(&terminal_id);
             let done_tx = done_tx.clone();
             std::thread::spawn(move || {
+                if let Some(retirement) = retirement {
+                    retirement.finish();
+                }
                 let _ = done_tx.send((terminal_id, handle.terminate_gracefully()));
             });
         }
