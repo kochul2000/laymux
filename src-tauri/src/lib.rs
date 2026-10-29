@@ -54,6 +54,7 @@ pub mod terminal;
 mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
+pub mod terminal_shutdown;
 pub mod update_install_guard;
 pub mod update_title_handoff;
 pub mod usage_probe;

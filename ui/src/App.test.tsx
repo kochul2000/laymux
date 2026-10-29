@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
@@ -7,10 +7,14 @@ import {
   loadSettingsValidated,
   reportFileViewerSignal,
 } from "@/lib/tauri-api";
-import { setBlockPersist } from "@/lib/persist-session";
+import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useLifecycleStore } from "@/stores/lifecycle-store";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
+
+vi.mock("@/components/layout/LifecycleModal", () => ({ LifecycleModal: () => null }));
 
 // Mock @tauri-apps/api/window for useWindowGeometry hook
 vi.mock("@tauri-apps/api/window", () => {
@@ -76,6 +80,8 @@ vi.mock("@/lib/tauri-api", () => {
     writeToTerminal: vi.fn().mockResolvedValue(undefined),
     resizeTerminal: vi.fn().mockResolvedValue(undefined),
     closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+    beginAppClose: vi.fn().mockResolvedValue(undefined),
+    cancelAppClose: vi.fn().mockResolvedValue(undefined),
     onTerminalOutput: vi.fn().mockResolvedValue(unlisten),
     loadSettings: vi.fn().mockResolvedValue({
       defaultProfile: "PowerShell",
@@ -182,6 +188,7 @@ function loadedSettings(remote?: Partial<ReturnType<typeof useSettingsStore.getS
 
 describe("App", () => {
   beforeEach(() => {
+    useLifecycleStore.setState(useLifecycleStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useLocalMobileModeStore.setState(useLocalMobileModeStore.getInitialState());
@@ -199,6 +206,43 @@ describe("App", () => {
   it("renders the app root", () => {
     render(<App />);
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
+  });
+
+  it("allows foreground cleanup to finish after the old five-second close deadline", async () => {
+    const appWindow = getCurrentWindow();
+    vi.mocked(appWindow.onCloseRequested).mockClear();
+    vi.mocked(appWindow.destroy).mockClear();
+    useLifecycleStore.setState({ error: null });
+    render(<App />);
+    await waitFor(() => expect(appWindow.onCloseRequested).toHaveBeenCalled());
+    await screen.findByTestId("workspace-area");
+    useSettingsStore.setState({
+      codex: { ...useSettingsStore.getState().codex, verifySessionOnExit: false },
+      exit: { ...useSettingsStore.getState().exit, interruptTerminals: false },
+    });
+    const handler = vi.mocked(appWindow.onCloseRequested).mock.calls.at(-1)![0];
+    vi.useFakeTimers();
+    try {
+      vi.mocked(saveBeforeClose).mockImplementationOnce(
+        () => new Promise((resolve) => setTimeout(resolve, 12_000)),
+      );
+      let closing: Promise<void>;
+      await act(async () => {
+        closing = Promise.resolve(
+          handler({ preventDefault: vi.fn() } as Parameters<typeof handler>[0]),
+        );
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(useLifecycleStore.getState().error).toBeNull();
+      expect(appWindow.destroy).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(7000);
+        await closing!;
+      });
+      expect(appWindow.destroy).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("mirrors the desktop viewer signal before the session finishes loading (ADR-0291)", () => {
@@ -257,7 +301,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByTestId("settings-recovery-dismiss"));
+    await user.click(await screen.findByTestId("settings-recovery-dismiss", {}, { timeout: 3000 }));
 
     expect(useSettingsStore.getState().defaultProfile).toBe("Command Prompt");
     expect(setBlockPersist).toHaveBeenLastCalledWith(false);

@@ -235,7 +235,7 @@ where
                         endpoint.clone(),
                         crate::pty_daemon::session_key(&session.id, terminal_generation),
                         session.id.clone(),
-                        daemon_session_metadata(session, is_wsl),
+                        daemon_session_metadata(session, is_wsl, command_line),
                     );
                     match open_and_spawn(&system, size, cmd.clone()) {
                         Ok(opened) => {
@@ -278,6 +278,19 @@ where
 
     handle.display_context_owner = display_context_owner;
     handle.daemon_reconnect_control = daemon_reconnect_control;
+    handle.graceful_close = match crate::terminal_shutdown::Target::for_session(
+        session,
+        command_line,
+        adopted.as_ref(),
+        handle.child_pid,
+        handle.wsl_backed,
+    ) {
+        Ok(target) => target,
+        Err(error) => {
+            tracing::warn!(terminal_id = %session.id, %error, "cooperative shutdown target is unavailable");
+            None
+        }
+    };
     Ok(SpawnedPty {
         handle,
         initial_execution_host,
@@ -294,8 +307,9 @@ where
 fn daemon_session_metadata(
     session: &TerminalSession,
     wsl_backed: bool,
+    command_line: &str,
 ) -> BTreeMap<String, String> {
-    BTreeMap::from([
+    let mut metadata = BTreeMap::from([
         (
             PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN.to_owned(),
             session.agent_hook_token.clone(),
@@ -308,7 +322,14 @@ fn daemon_session_metadata(
             PTY_DAEMON_METADATA_WSL_BACKED.to_owned(),
             wsl_backed.to_string(),
         ),
-    ])
+    ]);
+    if wsl_backed {
+        metadata.extend(crate::terminal_shutdown::session_metadata(
+            session,
+            command_line,
+        ));
+    }
+    metadata
 }
 
 /// Who may kill the direct child's process tree by PID.
@@ -492,6 +513,7 @@ where
         codex_startup_color_probe: None,
         bootstrap_da_reply: None,
         wsl_backed: options.wsl_backed,
+        graceful_close: None,
         kill_owner: options.kill_owner,
     };
 

@@ -1010,6 +1010,10 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 **데몬은 PTY와 그 출력에서 도출한 터미널 모드만 소유한다.** 데몬 세션(`pty_daemon/server.rs`)은 받은 명령을 native PTY에 그대로 spawn하고, 자식 대기·출력 중계·입력·resize·terminate와 재결합용 모드 추적(`pty_daemon/modes.rs`, ADR-0303)만 수행한다. 출력 바이트는 변형하지 않는다. OSC, protocol reply, 출력 ring, 설정, DB는 계속 GUI의 PTY 콜백이 처리한다.
 
+명시적 pane·workspace·정상 앱 종료는 [ADR-0364](../adr/0364-graceful-terminal-close-before-pty-hangup.md)에 따라 GUI의 `PtyHandle::terminate_gracefully`가 PTY 단절 전에 foreground 작업에 정상 종료를 요청한다. Linux/WSL은 SIGTERM, native Windows는 생성 식별자를 검증한 해당 콘솔의 CTRL_C_EVENT를 사용한다. foreground 작업이 끝날 때까지 최대 12초 대기한 뒤 기존 PTY 단절·강제 종료 fallback을 수행한다. 대기와 외부 프로세스 실행은 모든 AppState guard 밖에서 수행하며, 같은 handle의 정상 종료 요청은 한 번만 실행한다. 이전 세대 데몬을 채택한 GUI도 이 단계를 먼저 수행하므로 daemon protocol 변경에 의존하지 않는다. 앱 종료는 대상들을 병렬로 정리하고, UI의 기존 종료 예산에도 PTY 정리 예산 18초를 더한다. 업데이트·WebView 복구 handoff에서는 이 정상 종료 단계를 실행하지 않고 기존 daemon 인계를 유지한다. detached Docker·공유 Codex 서버처럼 PTY 밖에서 수명이 분리된 자원은 이 경로가 정리하지 않는다.
+
+명시적 종료는 출력 세대의 논리적 retirement 전에 generation-local discard-drain을 설정한다. retired callback은 UI·OSC·활동 갱신 없이 계속 읽어 버리므로 정리 로그가 PTY 버퍼를 채워 작업을 막지 않는다. 기존 PTY teardown이 최종 reader 종료를 담당한다. raw fault retirement·reconnect는 계속 `Stop`이며 이 예외를 사용하지 않는다.
+
 GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame이 4 KiB 이하이면 받은 `Vec`의 소유권을 추가 복사 없이 queue에 넘기고, 더 큰 redraw frame만 4 KiB chunk로 나눈다. 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
 
 **수명 규칙:**
@@ -1018,8 +1022,8 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | --- | --- |
 | 연결 종료(GUI crash·강제 종료 포함) | detach. 계속 실행하며 최근 1 MiB 출력을 backlog로 유지한다(초과분은 `droppedBytes`로 센다) |
 | GUI 없음이 유예 시간 지속 | 세션이 있고 열린 연결(터미널·presence)이 하나도 없는 상태가 `terminal.ptyDaemonGraceMinutes`(기본 10분) 이어지면 새 세션을 거절하고 세션을 모두 끝낸 뒤 종료한다([ADR-0312](../adr/0312-pty-daemon-grace-without-gui.md)). GUI는 시작하자마자 살아 있는 데몬마다 presence 연결(`presence { graceMs }`)을 열고 2분마다 다시 확인하므로, 아직 열지 않은 워크스페이스의 세션은 GUI가 떠 있는 동안 남는다. 세션이 없을 때의 idle 종료는 presence 연결을 세지 않는다 |
-| `PtyHandle` teardown(터미널 삭제·재시작) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
-| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort). 업데이트로 재시작하는 종료는 예외다(아래) |
+| 명시적 `PtyHandle` teardown(터미널 삭제·재시작·checkpoint 후 eviction) | GUI의 정상 종료 단계 후 master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 기존 PTY close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다. 입력 fault 등 raw PTY retirement에는 정상 종료 단계를 추가하지 않는다 |
+| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 등록된 daemon·in-process 터미널에 정상 종료와 기존 teardown을 병렬로 수행한다. 작업 대기는 12초, helper는 14초, 앱 전체는 18초 deadline으로 묶는다(best-effort). 업데이트·WebView 복구 handoff 종료는 이 단계를 건너뛴다(아래) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 버리고 `droppedBytes`에 센 뒤 `Attached` → 화면 redraw와 모드 단언(ADR-0303·0307) → live 순서로 받는다. 선택 필드 `missedOutput`이면 backlog를 세지 않고 `Attached` 다음 표지 사이로 넘긴다(ADR-0309). 선택 필드 `size`가 있으면 그 전에 PTY를 그 크기로 바꾼다 |
 | 업데이트 설치 | 데몬 세션은 끝내지 않고 업데이트된 GUI에 넘긴다(ADR-0308). 설치 guard와 Linux 재시작 경로가 `AppState::begin_update_handoff()`를 표시하면, in-process PTY·probe만 끝내고 데몬 터미널의 handle은 terminate 없이 놓는다(master drop이 종료 요청을 보내지 않도록 leak). 앱 종료 경로도 데몬 세션 종료를 건너뛴다. 설치가 실패하면 표시를 지운다. 프로세스가 끝나면 연결이 닫혀 세션은 detach되고, 재시작한 GUI가 재결합한다. Windows 설치기는 `laymux.exe`를 이미지 이름으로 찾아 끝내므로 데몬은 다른 이름의 사본으로 실행한다(아래 기동) |

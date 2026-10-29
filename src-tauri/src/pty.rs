@@ -218,6 +218,8 @@ pub struct PtyHandle {
     /// guest. The liveness oracle needs this to know that a Windows process
     /// snapshot has no standing over this pane at all (ADR-0134).
     wsl_backed: bool,
+    /// GUI-owned cooperative close phase; daemon/raw retirement never invokes it.
+    graceful_close: Option<crate::terminal_shutdown::Target>,
     /// Whether this process may PID-kill the child tree (see
     /// [`ChildKillOwner`]).
     kill_owner: ChildKillOwner,
@@ -312,6 +314,7 @@ impl PtyHandle {
             codex_startup_color_probe: None,
             bootstrap_da_reply: None,
             wsl_backed: false,
+            graceful_close: None,
             kill_owner: ChildKillOwner::Local,
         }
     }
@@ -320,6 +323,26 @@ impl PtyHandle {
     pub(crate) fn with_wsl_backed(mut self, wsl_backed: bool) -> Self {
         self.wsl_backed = wsl_backed;
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_graceful_close_probe(
+        mut self,
+        count: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Self {
+        self.graceful_close = Some(crate::terminal_shutdown::Target::probe(count));
+        self
+    }
+
+    /// Explicit user close only. Updates and raw PTY fault recovery bypass this
+    /// method so the former can hand live daemon sessions to the next GUI.
+    pub fn terminate_gracefully(&self) -> Result<(), String> {
+        if let Some(target) = &self.graceful_close {
+            if let Err(error) = target.request() {
+                tracing::warn!(%error, "cooperative foreground shutdown fell back to PTY termination");
+            }
+        }
+        self.terminate()
     }
 
     #[cfg(test)]

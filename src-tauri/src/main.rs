@@ -3,6 +3,18 @@
 fn main() {
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
+    #[cfg(windows)]
+    if first
+        .as_deref()
+        .is_some_and(|arg| arg == laymux_lib::constants::TERMINAL_CLOSE_CONSOLE_CLI_FLAG)
+    {
+        let pid = args.next();
+        let birth = args.next();
+        std::process::exit(laymux_lib::terminal_shutdown::run_console_helper(
+            pid.as_deref(),
+            birth.as_deref(),
+        ));
+    }
     // The PTY daemon shares this binary but must start before any GUI/Tauri
     // initialization (ADR-0300).
     if first

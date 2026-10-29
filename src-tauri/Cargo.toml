@@ -71,6 +71,9 @@ windows-core = "0.62.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 cargo_metadata = "0.19"
 tempfile = "3"
@@ -92,4 +95,9 @@ path = "src/bin/lx.rs"
 [[test]]
 name = "ctrl_c_inheritance"
 path = "tests/ctrl_c_inheritance.rs"
+harness = false
+
+[[test]]
+name = "graceful_console_close"
+path = "tests/graceful_console_close.rs"
 harness = false

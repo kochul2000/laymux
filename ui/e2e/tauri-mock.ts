@@ -14,6 +14,9 @@ export const TAURI_MOCK_SCRIPT = `
   var SETTINGS_DATA = {
     appearance: { themeId: 'catppuccin-mocha', font: { face: 'Consolas', size: 14, weight: 'normal' } },
     defaultProfile: 'PowerShell',
+    // Legacy view-switch/grid fixtures explicitly exercise empty split panes.
+    // The product default (true) is covered by settings-store/profile tests.
+    terminal: { inheritProfileOnSplit: false },
     controlBar: { hoverIdleSeconds: 2, defaultMode: 'hover' },
     profiles: [
       { name: 'PowerShell', commandLine: 'powershell.exe', colorScheme: '', startingDirectory: '', hidden: false },

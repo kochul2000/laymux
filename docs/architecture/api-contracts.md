@@ -2527,6 +2527,8 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 ### 종료·업데이트 진행 계약 (ADR-0264)
 
+명시적 pane·정상 앱 종료는 [ADR-0364](../adr/0364-graceful-terminal-close-before-pty-hangup.md)에 따라 PTY를 끊기 전에 foreground 작업에 정상 종료를 요청한다. Linux/WSL은 SIGTERM, Windows는 해당 PTY 전용 콘솔에만 연결한 별도 helper의 CTRL_C_EVENT를 사용한다. GUI가 이 단계를 소유하므로 이전 daemon에 재연결한 경우에도 적용된다. 최대 12초 후 기존 teardown으로 진행하며, 업데이트·WebView 복구 handoff에서는 이 단계를 건너뛴다. Docker detached 자원이나 공유 서버의 수명은 관리하지 않는다. 내부 `--terminal-close-console <pid> <creation-time>` helper는 Tauri 초기화 전에 실행하고 PID 생성 시각이 다르면 신호를 보내지 않는다.
+
 `UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|caching, completed, total: number|null, warning: string|null}`이다. 업데이트는 터미널을 인터럽트하지 않으므로 종료 설정(`exit`)을 싣지 않는다([ADR-0314](../adr/0314-update-never-interrupts-terminals.md)). Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
 
 Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. `interrupting`·`settling`과 `cleanup`은 close에만 적용되며 update preview에 주면 거부한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.

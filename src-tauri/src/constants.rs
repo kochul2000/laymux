@@ -357,8 +357,14 @@ pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
 /// nothing can report a failure for (dropping a PTY master).
 pub const PTY_DAEMON_TERMINATE_ATTEMPTS: u32 = 3;
 pub const PTY_DAEMON_TERMINATE_RETRY_MS: u64 = 200;
-/// Overall budget for asking the daemon to end every terminal at app exit.
-pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
+/// Explicit close gets a bounded cooperative phase before the existing PTY kill.
+pub const TERMINAL_CLOSE_GRACE_MS: u64 = 12_000;
+pub const TERMINAL_CLOSE_HELPER_TIMEOUT_MS: u64 = 14_000;
+pub const TERMINAL_CLOSE_APP_EXIT_TIMEOUT_MS: u64 = 18_000;
+pub const TERMINAL_CLOSE_CONSOLE_CLI_FLAG: &str = "--terminal-close-console";
+pub const ENV_TERMINAL_CLOSE_TOKEN: &str = "LAYMUX_PTY_CLOSE_TOKEN";
+pub const PTY_DAEMON_METADATA_CLOSE_DISTRO: &str = "closeWslDistro";
+pub const PTY_DAEMON_METADATA_CLOSE_USER: &str = "closeWslUser";
 /// How long an installing GUI waits for the daemon to end its sessions and
 /// exit (each session teardown is bounded by the PTY terminate grace).
 pub const PTY_DAEMON_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
