@@ -1655,7 +1655,7 @@ pub(crate) fn close_terminal_session_inner(
         let quarantine_result = state
             .session_checkpoint
             .quarantine_retired_pty_completion(handle.control_completion());
-        let terminate_result = handle.terminate();
+        let terminate_result = handle.terminate_gracefully();
         match (terminate_result, quarantine_result) {
             (Err(terminate), Err(quarantine)) => {
                 return Err(format!("{terminate}; {quarantine}"));

@@ -1,3 +1,7 @@
+// ADR-0364: parallel PTY cleanup includes the native helper and raw teardown.
+// Keep in sync with TERMINAL_CLOSE_APP_EXIT_TIMEOUT_MS in Rust constants.rs.
+export const TERMINAL_CLOSE_BUDGET_MS = 18_000;
+
 export interface CloseHandlerDeps {
   destroy: () => Promise<void>;
   close: () => Promise<void>;

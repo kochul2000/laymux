@@ -495,7 +495,12 @@ impl AppState {
                 std::mem::forget(handle);
                 continue;
             }
-            if let Err(err) = handle.terminate() {
+            let result = if hand_off {
+                handle.terminate()
+            } else {
+                handle.terminate_gracefully()
+            };
+            if let Err(err) = result {
                 tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
             }
         }
@@ -521,10 +526,9 @@ impl AppState {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// App exit runs no `Drop` for this state. In-process PTYs still end with
-    /// the process, but a daemon-owned PTY would merely detach, so send each
-    /// one its terminate request before the process goes away. This only
-    /// enqueues the request; it does not wait for the children (ADR-0300).
+    /// App exit runs no `Drop` for this state. Give every backend the same
+    /// cooperative foreground shutdown, then invoke its existing PTY teardown.
+    /// An update/recovery handoff bypasses both steps (ADR-0364).
     pub fn terminate_daemon_sessions_on_exit(&self) {
         // Restarting into an update or out of a failed WebView hands the
         // sessions over instead (ADR-0308, ADR-0336).
@@ -548,23 +552,23 @@ impl AppState {
         for (terminal_id, handle) in handles {
             let done_tx = done_tx.clone();
             std::thread::spawn(move || {
-                let _ = done_tx.send((terminal_id, handle.request_backend_termination()));
+                let _ = done_tx.send((terminal_id, handle.terminate_gracefully()));
             });
         }
         drop(done_tx);
         let deadline = std::time::Instant::now()
             + std::time::Duration::from_millis(
-                crate::constants::PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS,
+                crate::constants::TERMINAL_CLOSE_APP_EXIT_TIMEOUT_MS,
             );
         for _ in 0..pending {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             match done_rx.recv_timeout(remaining) {
                 Ok((_, Ok(()))) => {}
                 Ok((terminal_id, Err(err))) => {
-                    tracing::warn!(terminal_id, error = %err, "daemon PTY terminate request failed at exit");
+                    tracing::warn!(terminal_id, error = %err, "PTY termination failed at exit");
                 }
                 Err(_) => {
-                    tracing::warn!("daemon PTY terminate requests did not finish before exit");
+                    tracing::warn!("PTY termination did not finish before exit");
                     break;
                 }
             }

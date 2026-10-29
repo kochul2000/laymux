@@ -7,7 +7,7 @@ import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { useRemoteFileViewerSignal } from "@/hooks/useRemoteFileViewerSignal";
 import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { applySettingsSnapshot } from "@/lib/settings-snapshot";
-import { createCloseHandler } from "@/lib/window-close-handler";
+import { createCloseHandler, TERMINAL_CLOSE_BUDGET_MS } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
 import { beginAppClose, cancelAppClose } from "@/lib/tauri-api";
 import { LifecycleModal } from "@/components/layout/LifecycleModal";
@@ -114,6 +114,7 @@ export function App() {
           // time to reflect current settings.
           timeoutMs: () =>
             5000 +
+            TERMINAL_CLOSE_BUDGET_MS +
             exitInterruptBudgetMs(useSettingsStore.getState().exit) +
             (useSettingsStore.getState().codex.verifySessionOnExit ? 30_000 : 0),
         });
