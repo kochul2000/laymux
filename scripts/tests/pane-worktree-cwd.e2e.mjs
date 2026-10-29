@@ -12,6 +12,7 @@ const artifacts = path.join(root, ".screenshots/pane-worktree-cwd");
 await mkdir(artifacts, { recursive: true });
 await mkdir(path.join(root, ".tmp"), { recursive: true });
 const guest = process.env.LAYMUX_WORKTREE_GUEST;
+const submodule = process.env.LAYMUX_WORKTREE_SUBMODULE === "1";
 let main;
 let linked;
 if (guest) {
@@ -26,6 +27,14 @@ git -C "$main" config user.email 'cwd@example.invalid'
 printf 'initial\n' > "$main/tracked.txt"
 git -C "$main" add tracked.txt
 git -C "$main" -c core.hooksPath= -c commit.gpgSign=false commit -m initial >/dev/null
+${
+  submodule
+    ? `parent="$base/parent repo"
+git init -b main "$parent" >/dev/null
+git -C "$parent" -c protocol.file.allow=always submodule add "$main" v3_be >/dev/null
+main="$parent/v3_be"`
+    : ""
+}
 git -C "$main" worktree add -b linked "$linked" >/dev/null
 mkdir -p "$main/ui" "$linked/ui" "$linked/linked-only"
 printf '%s\n' "$base"
@@ -38,7 +47,7 @@ printf '%s\n' "$base"
   assert.equal(result.status, 0, result.stderr);
   const base = result.stdout.trim();
   assert.ok(base.startsWith("/tmp/laymux-cwd-"));
-  main = `${base}/main repo`;
+  main = submodule ? `${base}/parent repo/v3_be` : `${base}/main repo`;
   linked = `${base}/linked checkout`;
 } else {
   const fixture = await mkdtemp(path.join(root, ".tmp/cwd-"));
@@ -65,6 +74,25 @@ printf '%s\n' "$base"
   await writeFile(path.join(main, "tracked.txt"), "initial\n");
   git("add", "tracked.txt");
   git("commit", "-m", "initial");
+  if (submodule) {
+    const parent = path.join(fixture, "parent repo");
+    execFileSync("git", ["init", "-b", "main", parent], { windowsHide: true });
+    execFileSync(
+      "git",
+      [
+        "-C",
+        parent,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        main,
+        "v3_be",
+      ],
+      { windowsHide: true },
+    );
+    main = path.join(parent, "v3_be");
+  }
   git("worktree", "add", "-b", "linked", linked);
   await mkdir(path.join(main, "ui"));
   await mkdir(path.join(linked, "ui"));
@@ -72,6 +100,9 @@ printf '%s\n' "$base"
 }
 const join = (base, sub) => (guest ? `${base}/${sub}` : path.join(base, sub));
 for (const [name, enabled, source, expected] of [
+  ...(submodule
+    ? [["submodule-original", true, join(main, "ui"), join(main, "ui")]]
+    : []),
   ["same-subdirectory", true, join(linked, "ui"), join(main, "ui")],
   ["keep-worktree", false, join(linked, "ui"), join(linked, "ui")],
   ["missing-subdirectory", true, join(linked, "linked-only"), main],
