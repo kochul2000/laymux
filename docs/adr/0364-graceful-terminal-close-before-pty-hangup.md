@@ -1,6 +1,6 @@
 # 0364. 명시적 터미널 종료는 PTY 단절 전에 foreground 작업에 정상 종료를 요청한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-29
 - Source: 사용자의 pane·앱 창 종료 시 SIGTERM 요청과 업데이트 인계 보존 요구, dev의 foreground Compose·신호 관측 실기, [data-flow.md §8.23](../architecture/data-flow.md#823-pty-소유자와-pty-데몬), ADR-0300·0308·0336
 - Amends: ADR-0300의 명시적 종료 절차. ADR-0308의 업데이트 인계와 ADR-0336의 WebView 복구 인계는 유지한다.
