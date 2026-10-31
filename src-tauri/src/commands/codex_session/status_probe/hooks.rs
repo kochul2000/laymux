@@ -239,7 +239,18 @@ fn verified_with_processes(
             let fresh = if target.hook_binding.is_some() {
                 lookup.fresh_sessions.get(&terminal) == Some(&id)
             } else {
-                targets::verify_session(&target.process, &id)?
+                if super::status_title(state, &terminal, &id)? != target.status_title {
+                    return Err(format!(
+                        "[{terminal}] Codex title changed after status verification"
+                    ));
+                }
+                let fresh = targets::verify_session(&target.process, &id)?;
+                if super::status_title(state, &terminal, &id)? != target.status_title {
+                    return Err(format!(
+                        "[{terminal}] Codex title changed during proof revalidation"
+                    ));
+                }
+                fresh
             };
             // Hook display polling may reuse a guest view taken before this
             // capture. Only a boundary-bound lookup may update its receipt.

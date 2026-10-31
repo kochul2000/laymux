@@ -42,11 +42,16 @@ pub(crate) struct CodexStatusTarget {
     pub output_start: Option<u64>,
     pub proof: Option<(String, bool)>,
     pub hook_binding: Option<CodexHookBinding>,
+    /// The live title captured alongside the current `/status` screen.
+    pub status_title: Option<crate::agent_hooks::title::TitleBinding>,
 }
 
 pub(crate) struct CodexStatusCheckpoint {
     pub token: String,
     pub deadline: Instant,
+    /// Acquisition is bounded; verified evidence then lives with the fence
+    /// through persistence and exit cleanup (ADR-0366).
+    pub sealed: bool,
     pub owns_fence: bool,
     pub completed: bool,
     pub update_request_id: Option<u64>,
@@ -55,8 +60,16 @@ pub(crate) struct CodexStatusCheckpoint {
 
 impl CodexStatusCheckpoint {
     pub fn check(&self, token: &str) -> Result<(), String> {
-        if self.token != token || Instant::now() >= self.deadline {
+        if self.token != token || (!self.sealed && Instant::now() >= self.deadline) {
             return Err("Codex status checkpoint expired or was cancelled".into());
+        }
+        Ok(())
+    }
+
+    pub fn check_acquisition(&self, token: &str) -> Result<(), String> {
+        self.check(token)?;
+        if self.sealed {
+            return Err("Codex status acquisition is already sealed for saving".into());
         }
         Ok(())
     }

@@ -342,6 +342,7 @@ pub fn run() {
             commands::begin_codex_status_checkpoint,
             commands::codex_status_checkpoint_input,
             commands::read_codex_status_checkpoint,
+            commands::seal_codex_status_checkpoint,
             commands::finish_codex_status_checkpoint,
             commands::complete_codex_status_checkpoint,
             commands::get_sync_group_terminals,

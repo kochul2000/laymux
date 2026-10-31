@@ -237,9 +237,11 @@ export async function withCodexStatusCheckpoint<T>(
         : [],
     );
     if (failures.length) throw formatCodexCheckpointError(failures.join("\n"));
+    // Once acquisition succeeded, keep its evidence under the same fence
+    // through saving and exit cleanup, even if they outlast acquisition's TTL.
+    await invoke("seal_codex_status_checkpoint", { token });
     const result = await checkpoint(Boolean(reusedCheckpoint));
-    // A delayed save must not succeed after the proof's deadline. Successful
-    // close keeps native admission fenced until the window is destroyed.
+    // Completion still requires the same token and native input fence.
     await invoke("complete_codex_status_checkpoint", { token });
     return result;
   } finally {
