@@ -6,6 +6,7 @@ use std::path::Path;
 
 const MAX_HELPER_BYTES: u64 = 64 * 1024 * 1024;
 const COMPARE_CHUNK_BYTES: usize = 16 * 1024;
+mod pe;
 
 fn same_helper(installed: &Path, bundled: &Path) -> Result<bool, String> {
     let metadata = |path: &Path| -> Result<fs::Metadata, String> {
@@ -17,28 +18,47 @@ fn same_helper(installed: &Path, bundled: &Path) -> Result<bool, String> {
         Ok(meta)
     };
     let installed_meta = metadata(installed)?;
-    if installed_meta.len() != metadata(bundled)?.len() {
+    let bundled_meta = metadata(bundled)?;
+    if installed_meta.len() != bundled_meta.len() {
         return Ok(false);
     }
     let mut installed =
         fs::File::open(installed).map_err(|e| format!("Could not read hook helper: {e}"))?;
-    let mut bundled =
-        fs::File::open(bundled).map_err(|e| format!("Could not read bundled hook helper: {e}"))?;
+    let mut source = Vec::new();
+    fs::File::open(bundled)
+        .map_err(|e| format!("Could not read bundled hook helper: {e}"))?
+        .take(MAX_HELPER_BYTES + 1)
+        .read_to_end(&mut source)
+        .map_err(|e| e.to_string())?;
+    if source.len() as u64 != bundled_meta.len() {
+        return Err("Bundled hook helper changed while being inspected".into());
+    }
+    let ignored = pe::build_metadata_ranges(&source).unwrap_or_default();
     let mut left = [0; COMPARE_CHUNK_BYTES];
-    let mut right = [0; COMPARE_CHUNK_BYTES];
-    let mut remaining = installed_meta.len();
-    while remaining > 0 {
-        let count = remaining.min(COMPARE_CHUNK_BYTES as u64) as usize;
+    for (chunk, right) in source.chunks(COMPARE_CHUNK_BYTES).enumerate() {
+        let count = right.len();
         installed
             .read_exact(&mut left[..count])
             .map_err(|e| e.to_string())?;
-        bundled
-            .read_exact(&mut right[..count])
-            .map_err(|e| e.to_string())?;
-        if left[..count] != right[..count] {
+        if left[..count] == *right {
+            continue;
+        }
+        if !left[..count]
+            .iter()
+            .zip(right)
+            .enumerate()
+            .all(|(offset, (a, b))| {
+                a == b
+                    || ignored
+                        .iter()
+                        .any(|range| range.contains(&(chunk * COMPARE_CHUNK_BYTES + offset)))
+            })
+        {
             return Ok(false);
         }
-        remaining -= count as u64;
+    }
+    if installed.read(&mut left[..1]).map_err(|e| e.to_string())? != 0 {
+        return Err("Installed hook helper changed while being inspected".into());
     }
     Ok(true)
 }
