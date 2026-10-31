@@ -181,7 +181,7 @@ test("APK·체크섬의 원본 바이트를 복사하고 버전·원본·SHA 안
   assert.equal(source.androidVersion, "3.1.0");
   assert.equal(source.sourceManifest.releaseUrl, manifest().releaseUrl);
   assert.match(f.target.body, /Existing release notes/);
-  assert.match(f.target.body, /Android \*\*3.1.0\*\*/);
+  assert.match(f.target.body, /Android용 Laymux 앱 \*\*3.1.0\*\*/);
   assert(f.target.body.includes(hash(f.apk)));
   assert(
     f.calls.every(
