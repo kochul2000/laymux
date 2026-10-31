@@ -1,7 +1,7 @@
 # 0289. 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다
 
 - Status: Accepted
-- Superseded by: [0324](0324-agent-hook-inspection-on-discovery.md) (검사 시점과 결과 재사용 정책)
+- Superseded by: [0324](0324-agent-hook-inspection-on-discovery.md) (검사 시점과 결과 재사용 정책), [0368](0368-hook-helper-pe-build-metadata-comparison.md) (Windows PE 빌드 식별 메타데이터 비교)
 - Date: 2026-10-01
 - Source: 사용자 요구(훅 재설치 필요 자동 감지와 알림), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0285](0285-readable-agent-hook-commands.md), architecture/api-contracts.md 에이전트 훅 관리
 - 관계: ADR-0282의 선택 설치 정책을 유지하고 상태 조회·갱신 안내를 확장한다.

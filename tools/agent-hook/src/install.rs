@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 mod command;
 mod grok;
+#[cfg(test)]
+mod rebuild_tests;
 mod title;
 #[cfg(test)]
 mod update_tests;
