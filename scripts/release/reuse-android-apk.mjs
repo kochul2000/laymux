@@ -15,6 +15,26 @@ const provenanceName = "android-apk-source.json";
 const noteMarker = "<!-- laymux-android-apk-reuse -->";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
+export function formatAndroidReuseNote({ repository, tag, manifest, hash }) {
+  const plan = planAndroidReuse(manifest, { repository, tag });
+  const pcVersion = parseReleaseVersion(tag).version;
+  const assets = `https://github.com/${repository}/releases/download/${tag}/`;
+  return [
+    noteMarker,
+    "### Android용 Laymux 앱 설치 안내",
+    "",
+    `이번 **PC용 Laymux ${pcVersion}** 릴리스에는 Android용 Laymux 앱 자체의 변경이 없어 APK를 새로 빌드하지 않았습니다. 최신 릴리스에서도 설치 파일을 쉽게 찾을 수 있도록, 현재 Android용 Laymux 앱 **${manifest.version}**의 APK를 함께 제공합니다.`,
+    "",
+    `첨부된 APK는 [원본 ${plan.sourceTag}](${manifest.releaseUrl})에서 배포한 것과 동일한 파일입니다. PC용 Laymux와 Android용 Laymux 앱의 버전은 다를 수 있으며, 이 APK를 설치한 뒤 Laymux 앱 버전이 **${manifest.version}**으로 표시되는 것이 정상입니다.`,
+    "",
+    `- **이미 Android용 Laymux 앱 ${manifest.version} 또는 더 최신 Laymux 앱 버전을 사용 중이라면 재설치할 필요가 없습니다.** 이번 PC용 Laymux 업데이트를 적용하기 위해 APK를 다시 설치하지 않아도 됩니다.`,
+    `- **Laymux 앱을 처음 설치하거나 더 오래된 Laymux 앱을 업데이트하려면** [Android용 Laymux 앱 ${manifest.version} APK 다운로드](${assets}${plan.apkName})를 사용하세요.`,
+    "",
+    `<details>\n<summary>다운로드 파일 검증 정보</summary>\n\n[SHA-256 체크섬 다운로드](${assets}${plan.checksumName})\n\nSHA-256: \`${hash}\`\n\n</details>`,
+    "",
+  ].join("\n");
+}
+
 export function planAndroidReuse(manifest, { repository, tag }) {
   if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository))
     throw new Error("잘못된 저장소 이름");
@@ -159,7 +179,7 @@ export function reuseAndroidApk(
     }
   }
   if (!(current.body ?? "").includes(noteMarker)) {
-    const notes = `${current.body ?? ""}\n\n${noteMarker}\n### Android APK\n\nAndroid **${manifest.version}** APK를 재빌드 없이 원본 그대로 재첨부했습니다.\n원본: [${plan.sourceTag}](${manifest.releaseUrl}) · SHA-256: \`${hash}\`\n`;
+    const notes = `${current.body ?? ""}\n\n${formatAndroidReuseNote({ repository, tag, manifest, hash })}`;
     const notesPath = path.join(dir, "release-notes.md");
     fs.writeFileSync(notesPath, notes);
     run([

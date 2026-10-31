@@ -29,6 +29,8 @@ PR 본문에 `버전 영향: major | minor | patch | 없음 — <구체적 이�
 
 Android 미변경(`publish_android=false`)이면 새 APK 빌드를 생략하고, 입력 변경 검사에 사용한 Android 채널의 APK·체크섬을 새 릴리스에 원래 파일명으로 복사한다([ADR-0367](adr/0367-reuse-unchanged-android-apk-assets.md)). `scripts/release/reuse-android-apk.mjs`가 원본 매니페스트·SHA-256·동명 충돌을 검증하며 `android-apk-source.json`과 릴리스 설명에 실제 APK 버전과 원본을 남긴다. 대상은 생성 응답의 `--release-id`로 조회한다. Android 버전과 채널 파일은 전진하지 않는다. 공개 릴리스에 수동 보충할 때도 해당 태그의 Android 입력 변경이 없음을 다시 확인한 뒤 해당 공개 릴리스의 ID와 명시적 `--allow-published`로 같은 도구를 사용한다.
 
+재사용 APK의 릴리스 안내는 Android 앱 자체가 변경되지 않은 이유, PC와 APK 버전이 다른 이유, 기존 사용자에게 재설치가 필요하지 않다는 점, 처음 설치하거나 구버전을 업데이트할 사용자의 APK 다운로드 링크를 설명한다. 체크섬과 원본 정보는 함께 제공한다.
+
 ## v2.1.0 Ubuntu 설치 패키지 추가
 
 [ADR-0349](adr/0349-v210-supplemental-ubuntu-deb.md)에 따라 공개된 `v2.1.0` 태그에 MCP 초기화 목록의 Linux 타입 명시 패치만 적용해 Ubuntu 22.04 x86_64용 release deb를 추가한다. 정기 Release workflow의 Windows·Android 범위는 유지한다.
