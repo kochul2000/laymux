@@ -58,24 +58,28 @@ function gh(args) {
 
 // 호출자는 이 매니페스트의 원본 태그 이후 Android 입력이 바뀌지 않았음을 먼저 검사한다.
 export function reuseAndroidApk(
-  { repository, tag, manifest, outputDir, allowPublished = false },
+  { repository, tag, releaseId, manifest, outputDir, allowPublished = false },
   run = gh,
 ) {
   const plan = planAndroidReuse(manifest, { repository, tag });
+  if (!/^[1-9][0-9]*$/.test(String(releaseId)))
+    throw new Error("생성 응답의 유효한 release ID가 필요하다");
   const apiPath = `repos/${repository}/releases/tags/`;
+  // Draft는 REST tag 조회에 나타나지 않는다. 생성 응답의 ID를 계속 사용한다.
+  const targetPath = `repos/${repository}/releases/${releaseId}`;
   const source = JSON.parse(
     run(["api", `${apiPath}${encodeURIComponent(plan.sourceTag)}`]),
   );
-  const target = JSON.parse(
-    run(["api", `${apiPath}${encodeURIComponent(tag)}`]),
-  );
+  const target = JSON.parse(run(["api", targetPath]));
   if (
     source.draft ||
     source.tag_name !== plan.sourceTag ||
     (plan.channel === "stable" && source.prerelease)
   )
     throw new Error("APK 원본은 공개된 릴리스여야 한다");
-  if (target.tag_name !== tag || (!target.draft && !allowPublished))
+  if (String(target.id) !== String(releaseId) || target.tag_name !== tag)
+    throw new Error("대상 릴리스 ID 또는 태그가 요청과 다르다");
+  if (!target.draft && !allowPublished)
     throw new Error("공개 릴리스 보충에는 --allow-published가 필요하다");
   const dir =
     outputDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "laymux-apk-reuse-"));
@@ -142,9 +146,7 @@ export function reuseAndroidApk(
   }
   if (pending.length)
     run(["release", "upload", tag, "--repo", repository, ...pending]);
-  const current = JSON.parse(
-    run(["api", `${apiPath}${encodeURIComponent(tag)}`]),
-  );
+  const current = JSON.parse(run(["api", targetPath]));
   for (const name of [plan.apkName, plan.checksumName, provenanceName]) {
     const bytes = fs.readFileSync(path.join(dir, name));
     const uploaded = current.assets?.find((asset) => asset.name === name);
@@ -188,7 +190,13 @@ if (
     const key = args.shift();
     if (key === "--allow-published") options.allowPublished = true;
     else if (
-      ["--tag", "--repository", "--manifest", "--output-dir"].includes(key) &&
+      [
+        "--tag",
+        "--release-id",
+        "--repository",
+        "--manifest",
+        "--output-dir",
+      ].includes(key) &&
       args.length
     )
       options[key.slice(2)] = args.shift();
@@ -200,6 +208,7 @@ if (
       reuseAndroidApk({
         repository: options.repository,
         tag: options.tag,
+        releaseId: options["release-id"],
         manifest,
         outputDir: options["output-dir"],
         allowPublished: options.allowPublished,

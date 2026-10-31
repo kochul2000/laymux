@@ -197,9 +197,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
         run: |
           node scripts/release/reuse-android-apk.mjs \
             --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --release-id "$RELEASE_ID" \
             --manifest "$RUNNER_TEMP/laymux-android-reuse.json"
 
   wsl-probe:

@@ -35,6 +35,7 @@ function fixture(t) {
     calls: [],
     source: { tag_name: "v3.1.0", draft: false, prerelease: false, assets: [] },
     target: {
+      id: 42,
       tag_name: "v3.8.2",
       draft: true,
       body: "Existing release notes",
@@ -55,7 +56,12 @@ function fixture(t) {
   f.run = (args) => {
     f.calls.push(args);
     if (args[0] === "api") {
-      return JSON.stringify(args[1].endsWith("/v3.1.0") ? f.source : f.target);
+      if (args[1].endsWith("/tags/v3.8.2") && f.target.draft) {
+        throw new Error("HTTP 404: draft는 tag REST 조회를 지원하지 않는다");
+      }
+      if (args[1].endsWith("/tags/v3.1.0")) return JSON.stringify(f.source);
+      assert.equal(args[1], `repos/${repository}/releases/42`);
+      return JSON.stringify(f.target);
     }
     if (args[1] === "download") {
       assert.equal(args[2], "v3.1.0");
@@ -89,6 +95,7 @@ function fixture(t) {
     throw Error(`예상하지 않은 gh 명령: ${args}`);
   };
   f.options = {
+    releaseId: "42",
     repository,
     tag: "v3.8.2",
     manifest: manifest(),
@@ -184,6 +191,36 @@ test("APK·체크섬의 원본 바이트를 복사하고 버전·원본·SHA 안
   );
 });
 
+test("tag REST 조회가 404인 draft도 생성 응답 ID로 복사와 최종 검증을 한다", (t) => {
+  const f = fixture(t);
+  assert.equal(reuseAndroidApk(f.options, f.run).uploaded.length, 3);
+  assert.equal(
+    f.calls.filter(
+      (args) =>
+        args[0] === "api" && args[1] === `repos/${repository}/releases/42`,
+    ).length,
+    2,
+  );
+  assert(
+    !f.calls.some(
+      (args) => args[0] === "api" && args[1].endsWith("/tags/v3.8.2"),
+    ),
+  );
+});
+
+test("잘못된 release ID와 ID·태그가 어긋난 대상은 변경 전에 거부한다", (t) => {
+  const f = fixture(t);
+  for (const releaseId of [undefined, "", "-1", "42/other"]) {
+    assert.throws(
+      () => reuseAndroidApk({ ...f.options, releaseId }, f.run),
+      /release ID/,
+    );
+  }
+  f.target.id = 99;
+  assert.throws(() => reuseAndroidApk(f.options, f.run), /대상 릴리스 ID/);
+  assert(!f.calls.some((args) => args[1] === "upload"));
+});
+
 test("손상된 APK·체크섬은 업로드 전에 거부한다", (t) => {
   const f = fixture(t);
   f.apk = Buffer.from("changed");
@@ -260,6 +297,10 @@ test("Android 미변경 재사용은 기존 입력 변경 검사 뒤 prepare에�
   const reuse = workflow.indexOf("node scripts/release/reuse-android-apk.mjs");
   assert(guard >= 0 && reuse > guard, "입력 검증 뒤 APK 복사 단계가 필요하다");
   assert.match(workflow, /if:.*inputs\.publish_android == false/);
+  assert(
+    workflow.includes("RELEASE_ID: ${{ steps.release.outputs.release_id }}"),
+  );
+  assert(workflow.includes('--release-id "$RELEASE_ID"'));
   assert(
     workflow.includes('"Laymux-Android-" + $version + ".apk"'),
     "bootstrap은 태그와 같은 버전의 원본 APK만 고른다",

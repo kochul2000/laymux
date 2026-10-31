@@ -27,7 +27,7 @@ PR 본문에 `버전 영향: major | minor | patch | 없음 — <구체적 이�
 
 현재 CI는 버전 문법, 앱과 태그의 일치, 채널 전진성을 검사한다. 기능인지 수정인지 의미적으로 자동 판정하지 않으므로 해당 판단은 PR 리뷰와 발행 전 검토에서 수행한다. Remote 호환성 버전은 별도 계약이며 앱 minor 증가와 기계적으로 연결하지 않는다. Android 미발행 시 Android 채널은 기존 버전을 유지한다.
 
-Android 미변경(`publish_android=false`)이면 새 APK 빌드를 생략하고, 입력 변경 검사에 사용한 Android 채널의 APK·체크섬을 새 릴리스에 원래 파일명으로 복사한다([ADR-0367](adr/0367-reuse-unchanged-android-apk-assets.md)). `scripts/release/reuse-android-apk.mjs`가 원본 매니페스트·SHA-256·동명 충돌을 검증하며 `android-apk-source.json`과 릴리스 설명에 실제 APK 버전과 원본을 남긴다. Android 버전과 채널 파일은 전진하지 않는다. 공개 릴리스에 수동 보충할 때도 해당 태그의 Android 입력 변경이 없음을 다시 확인한 뒤 명시적 `--allow-published`로 같은 도구를 사용한다.
+Android 미변경(`publish_android=false`)이면 새 APK 빌드를 생략하고, 입력 변경 검사에 사용한 Android 채널의 APK·체크섬을 새 릴리스에 원래 파일명으로 복사한다([ADR-0367](adr/0367-reuse-unchanged-android-apk-assets.md)). `scripts/release/reuse-android-apk.mjs`가 원본 매니페스트·SHA-256·동명 충돌을 검증하며 `android-apk-source.json`과 릴리스 설명에 실제 APK 버전과 원본을 남긴다. 대상은 생성 응답의 `--release-id`로 조회한다. Android 버전과 채널 파일은 전진하지 않는다. 공개 릴리스에 수동 보충할 때도 해당 태그의 Android 입력 변경이 없음을 다시 확인한 뒤 해당 공개 릴리스의 ID와 명시적 `--allow-published`로 같은 도구를 사용한다.
 
 ## v2.1.0 Ubuntu 설치 패키지 추가
 

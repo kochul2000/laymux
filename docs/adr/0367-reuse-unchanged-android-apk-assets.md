@@ -16,6 +16,7 @@ Android 네이티브 변경이 없으면 서명 APK 빌드와 채널 전진을 �
 **Android 입력이 바뀌지 않은 릴리스에는 현재 Android 채널의 APK·체크섬을 원래 파일명과 바이트 그대로 재첨부하고 원본 정보를 표시한다.**
 
 - 기존 `publish_android=false`의 소스 변경 검사를 유지한다. 이 검사에 사용한 Android 채널 매니페스트를 같은 prepare job의 복사 단계에 전달한다. stable 릴리스는 Android stable, beta 릴리스는 Android beta를 사용한다.
+- 대상은 draft 생성 응답의 release ID로 식별하고 최초·업로드 후 REST 조회도 같은 ID를 사용한다. 아직 공개되지 않은 태그를 대상으로 REST tag 조회를 하지 않는다.
 - 원본 매니페스트의 버전·versionCode·저장소·원본 태그·APK와 체크섬 URL을 기존 검증기로 검사한다. 원본 체크섬과 APK의 SHA-256이 같을 때만 첨부한다. APK·체크섬 이름에 새 데스크톱 버전을 넣지 않으며 다시 서명하지 않는다.
 - 새 릴리스의 원본 안내 JSON과 릴리스 설명에 실제 Android 버전·원본 릴리스·SHA-256을 남긴다. 이미 같은 이름의 첨부가 있으면 내용이 동일한 경우만 재실행을 허용하며 덮어쓰지 않는다. 복사 실패는 prepare 실패로 처리해 정상 자동 발행을 막는다.
 - Android versionName/versionCode와 두 Android 채널 파일은 그대로 유지한다. 부트스트랩은 기존처럼 해당 릴리스 태그의 버전과 APK 파일명이 일치하는 원본 Android 릴리스만 선택한다. 재첨부된 과거 버전 APK는 seed가 아니다.
