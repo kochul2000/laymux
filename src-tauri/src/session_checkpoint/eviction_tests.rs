@@ -2,6 +2,132 @@ use super::*;
 use crate::remote_server::HumanControlOrigin;
 
 #[tokio::test]
+async fn hidden_eviction_does_not_reject_remote_navigation() {
+    let state = AppState::new();
+    let eviction = state
+        .session_checkpoint
+        .begin_eviction_and_drain(&state, &["old-hidden-terminal".into()])
+        .await
+        .unwrap();
+    for (index, (target, method)) in [
+        ("terminals", "setFocus"),
+        ("workspaces", "switchActive"),
+        ("grid", "focusPane"),
+        ("navigation", "spatialStep"),
+        ("navigation", "directionStep"),
+        ("navigation", "notificationStep"),
+        ("notifications", "markRead"),
+        ("notifications", "markTerminalRead"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request_id = format!("remote-navigation-{index}");
+        assert!(
+            crate::automation_server::helpers::admit_bridge_mutation(
+                &state.session_checkpoint,
+                &request_id,
+                "action",
+                target,
+                method,
+            )
+            .unwrap(),
+            "{target}.{method}"
+        );
+        assert!(state
+            .session_checkpoint
+            .finish_detached_mutation(&request_id)
+            .unwrap());
+    }
+    for (target, method) in [
+        ("terminals", "write"),
+        ("workspaces", "create"),
+        ("workspaces", "close"),
+        ("panes", "activateLayer"),
+        ("ui", "setPaneHidden"),
+        ("navigation", "unknownFutureMutation"),
+    ] {
+        assert!(
+            crate::automation_server::helpers::admit_bridge_mutation(
+                &state.session_checkpoint,
+                "structural-action",
+                "action",
+                target,
+                method,
+            )
+            .is_err(),
+            "{target}.{method}"
+        );
+    }
+    drop(eviction);
+}
+
+#[tokio::test]
+async fn remote_navigation_remains_tracked_for_update_but_does_not_delay_eviction() {
+    let state = std::sync::Arc::new(AppState::new());
+    crate::automation_server::helpers::admit_bridge_mutation(
+        &state.session_checkpoint,
+        "pending-focus",
+        "action",
+        "terminals",
+        "setFocus",
+    )
+    .unwrap();
+    assert!(state
+        .session_checkpoint
+        .begin_detached_mutation("pending-focus")
+        .is_err());
+    assert!(state
+        .session_checkpoint
+        .begin_detached_navigation("pending-focus")
+        .is_err());
+    // A delivered focus may still be waiting for readiness after HTTP timeout.
+    let eviction = tokio::time::timeout(
+        Duration::from_millis(200),
+        state
+            .session_checkpoint
+            .begin_eviction_and_drain(&state, &["hidden".into()]),
+    )
+    .await
+    .expect("navigation must not hold background retirement")
+    .unwrap();
+    drop(eviction);
+    let task_state = state.clone();
+    let drain = tokio::spawn(async move {
+        task_state
+            .session_checkpoint
+            .begin_finalization_and_drain(&task_state)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !state.session_checkpoint.is_finalizing() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!drain.is_finished());
+    assert!(crate::automation_server::helpers::admit_bridge_mutation(
+        &state.session_checkpoint,
+        "late-focus",
+        "action",
+        "terminals",
+        "setFocus",
+    )
+    .is_err());
+    assert!(state
+        .session_checkpoint
+        .finish_detached_mutation("pending-focus")
+        .unwrap());
+    assert!(!state
+        .session_checkpoint
+        .finish_detached_mutation("pending-focus")
+        .unwrap());
+    drain.await.unwrap().unwrap();
+    state.session_checkpoint.cancel_finalization();
+}
+
+#[tokio::test]
 async fn restart_checkpoint_fence_blocks_target_input_through_teardown() {
     let state = AppState::new();
     for id in ["restarting", "unrelated"] {
