@@ -1,6 +1,6 @@
 # 0223. Android 릴리스 채널은 APK를 명시적으로 발행할 때만 전진한다
 
-- Status: Accepted
+- Status: APK 재첨부 금지만 Superseded by [0367](0367-reuse-unchanged-android-apk-assets.md). Android 버전·채널·빌드 게이트는 Accepted.
 - Date: 2026-08-31
 - Source: 사용자 요구("버전 릴리즈 때마다 Android 앱은 그대로인데도 버전이 앞으로 가는 것이 불만", Android APK 발행 시점 분리 승인) · [ADR-0190](0190-update-release-channels.md) · [ADR-0197](0197-android-update-channel-release-handoff.md) · [architecture/api-contracts.md §10](../architecture/api-contracts.md)
 - Corrects: ADR-0190 — 모든 데스크톱 릴리스에서 Android job까지 성공해야 게시하는 정책

@@ -240,7 +240,7 @@ ADR 이 필요한 대표 기준:
 | [0220](0220-path-link-stable-frame-lifetime.md) | path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다 (0188 정정) | Accepted |
 | [0221](0221-codex-position-first-in-frame-cursor-park.md) | Codex position-first 인프레임 커서 주차도 권위 tail로 인정한다 (0076·0078 확장) | Accepted |
 | [0222](0222-agent-session-checkpoint-coordinator.md) | Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다 (0118·0120·0195·0201 정정, 0174 확장) | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
-| [0223](0223-android-release-advances-only-with-apk.md) | Android 릴리스 채널은 APK를 명시적으로 발행할 때만 전진한다 (0190 정정, 0197 대체) | Accepted |
+| [0223](0223-android-release-advances-only-with-apk.md) | Android 릴리스 채널은 APK를 명시적으로 발행할 때만 전진한다 (0190 정정, 0197 대체) | APK 재첨부 금지만 [0367](0367-reuse-unchanged-android-apk-assets.md)로 대체 |
 | [0224](0224-link-activation-chip-gate.md) | 링크 실행은 activation 설정으로 게이트하고, deliberate 모드는 액션 칩으로 명시 실행한다 (0188 확장) | Accepted |
 | [0225](0225-android-oauth-loopback-address-family.md) | Android OAuth loopback listener는 redirect 주소 패밀리를 따른다 (0175 Android bind 정정) | Accepted |
 | [0226](0226-composer-stars-are-host-global-persistent-state.md) | Composer 별표는 Desktop·Remote가 공유하는 호스트 전역 영구 상태다 (0029·0055 확장) | Accepted |
@@ -390,6 +390,7 @@ ADR 이 필요한 대표 기준:
 | [0364](0364-graceful-terminal-close-before-pty-hangup.md) | 명시적 터미널 종료는 PTY 단절 전에 foreground 작업에 정상 종료를 요청한다 | Accepted |
 | [0365](0365-navigation-admission-during-hidden-eviction.md) | 숨김 터미널 회수 중 명시적 탐색 허용 | Accepted |
 | [0366](0366-codex-close-proof-lives-through-fenced-save.md) | Codex 종료 확인 결과는 입력 차단을 유지한 저장까지 유효하다 | Accepted |
+| [0367](0367-reuse-unchanged-android-apk-assets.md) | Android 미변경 릴리스에는 기존 APK를 같은 파일명으로 재첨부한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -158,6 +158,8 @@ jobs:
               git diff --name-only "$android_release_tag"..."$GITHUB_SHA" -- "${android_release_inputs[@]}" >&2
               exit 1
             fi
+            # Reuse exactly the manifest whose Android inputs passed this guard.
+            printf '%s' "$android_manifest" >"$RUNNER_TEMP/laymux-android-reuse.json"
           fi
 
           existing_release_id="$(
@@ -188,6 +190,19 @@ jobs:
           echo "prerelease=$PRERELEASE" >>"$GITHUB_OUTPUT"
           echo "publish_android=$PUBLISH_ANDROID" >>"$GITHUB_OUTPUT"
           echo "commit_sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Reuse unchanged Android APK
+        if: ${{ inputs.publish_android == false }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+        run: |
+          node scripts/release/reuse-android-apk.mjs \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --release-id "$RELEASE_ID" \
+            --manifest "$RUNNER_TEMP/laymux-android-reuse.json"
 
   wsl-probe:
     needs: prepare
