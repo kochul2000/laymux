@@ -1,6 +1,6 @@
 # 0367. Android 미변경 릴리스에는 기존 APK를 같은 파일명으로 재첨부한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-31
 - Source: 사용자 요구(최신 APK를 찾기 어려우므로 변경 없는 APK는 빌드 없이 새 릴리스에 복사), [릴리스 정책](../release-policy.md), [ADR-0223](0223-android-release-advances-only-with-apk.md)
 - 관계: ADR-0223의 APK 재첨부 금지만 대체한다. APK 버전·채널·빌드 입력 게이트는 유지한다.
