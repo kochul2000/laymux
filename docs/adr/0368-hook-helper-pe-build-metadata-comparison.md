@@ -1,6 +1,6 @@
 # 0368. 훅 helper 비교에서 Windows PE의 빌드 식별 메타데이터를 제외한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-31
 - Source: 사용자 보고(훅 내용이 같은 앱 업데이트에서도 갱신 안내), 실제 v3.8.1/v3.8.2 설치 파일 비교, [ADR-0289](0289-agent-hook-update-notification.md), [api-contracts §10](../architecture/api-contracts.md)
 - 관계: ADR-0289의 helper 전체 바이트 비교만 확장한다. 검사 시점·캐시·설치 소유권·등록 명령 비교는 유지한다.
