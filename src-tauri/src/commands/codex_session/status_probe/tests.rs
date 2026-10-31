@@ -23,10 +23,11 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
         resized: false,
         dismissed: false,
         clear_batches: 0,
-        next_step: Some(CodexStatusStep::Submit),
+        next_step: None,
         output_start: Some(40),
         proof: Some(("01a0e103-7bcb-7a20-89c0-2dc0472f2957".into(), false)),
         hook_binding: None,
+        status_title: None,
     };
     *state.session_checkpoint.codex_status.lock().unwrap() = Some(CodexStatusCheckpoint {
         token: "test-token".into(),
@@ -36,6 +37,7 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
             Instant::now() + Duration::from_secs(5)
         },
         owns_fence,
+        sealed: false,
         completed: false,
         update_request_id: None,
         targets: HashMap::from([("terminal-test".into(), target)]),
@@ -157,12 +159,118 @@ fn successful_close_keeps_input_fenced_until_window_destruction() {
     let state = AppState::new();
     install_probe(&state, true, false);
     assert!(!state.session_checkpoint.close_cleanup_allowed());
+    seal_inner(&state, "test-token").unwrap();
     complete_inner(&state, "test-token").unwrap();
     finish_inner(&state, "test-token").unwrap();
     assert!(state.session_checkpoint.ensure_mutations_allowed().is_err());
     assert!(state.session_checkpoint.close_cleanup_allowed());
     state.session_checkpoint.cancel_finalization();
     assert!(!state.session_checkpoint.close_cleanup_allowed());
+}
+
+#[test]
+fn verified_empty_conversation_survives_a_slow_save_but_cannot_receive_late_input() {
+    let state = AppState::new();
+    install_probe(&state, true, false);
+    seal_inner(&state, "test-token").unwrap();
+    state
+        .session_checkpoint
+        .codex_status
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .deadline = Instant::now();
+    for step in [
+        CodexStatusStep::Clear,
+        CodexStatusStep::TypeStatus,
+        CodexStatusStep::Submit,
+    ] {
+        assert!(input_inner(&state, "test-token", "terminal-test", step)
+            .unwrap_err()
+            .contains("sealed"));
+    }
+    assert!(
+        target_for(&state, "test-token", "terminal-test")
+            .unwrap_err()
+            .contains("sealed"),
+        "late screen reads share acquisition admission"
+    );
+    complete_inner(&state, "test-token").unwrap();
+    finish_inner(&state, "test-token").unwrap();
+    assert!(state.session_checkpoint.close_cleanup_allowed());
+    assert!(state.session_checkpoint.ensure_mutations_allowed().is_err());
+}
+
+#[test]
+fn incomplete_or_expired_acquisition_cannot_be_sealed() {
+    for failure in [
+        "expired",
+        "missing-proof",
+        "pending-input",
+        "lost-fence",
+        "wrong-token",
+    ] {
+        let state = AppState::new();
+        install_probe(&state, true, failure == "expired");
+        if failure == "lost-fence" {
+            state.session_checkpoint.cancel_finalization();
+        }
+        {
+            let mut slot = state.session_checkpoint.codex_status.lock().unwrap();
+            let target = slot
+                .as_mut()
+                .unwrap()
+                .targets
+                .get_mut("terminal-test")
+                .unwrap();
+            if failure == "missing-proof" {
+                target.proof = None;
+            }
+            if failure == "pending-input" {
+                target.next_step = Some(CodexStatusStep::Submit);
+            }
+        }
+        assert!(
+            seal_inner(
+                &state,
+                if failure == "wrong-token" {
+                    "older-token"
+                } else {
+                    "test-token"
+                }
+            )
+            .is_err(),
+            "{failure}"
+        );
+        assert!(
+            !state
+                .session_checkpoint
+                .codex_status
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .sealed
+        );
+        finish_inner(&state, "test-token").unwrap();
+        assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
+    }
+}
+
+#[test]
+fn failed_save_after_sealing_releases_only_its_own_fence() {
+    let state = AppState::new();
+    install_probe(&state, true, false);
+    assert!(
+        complete_inner(&state, "test-token").is_err(),
+        "unsealed proofs cannot commit"
+    );
+    seal_inner(&state, "test-token").unwrap();
+    finish_inner(&state, "older-token").unwrap();
+    assert!(state.session_checkpoint.ensure_mutations_allowed().is_err());
+    finish_inner(&state, "test-token").unwrap();
+    assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
 }
 
 #[test]

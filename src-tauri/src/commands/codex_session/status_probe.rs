@@ -1,5 +1,10 @@
 //! Explicit, fenced Codex status queries for close/update checkpoints.
+mod finalization;
 mod hooks;
+use finalization::finish_inner;
+pub use finalization::*;
+#[cfg(test)]
+use finalization::{complete_inner, seal_inner};
 pub(crate) use hooks::verified_status_sessions;
 #[cfg(test)]
 mod output;
@@ -84,6 +89,7 @@ pub async fn begin_codex_status_checkpoint(
         *slot = Some(CodexStatusCheckpoint {
             token: token.clone(),
             deadline: Instant::now() + PROBE_TIMEOUT,
+            sealed: false,
             owns_fence,
             completed: false,
             update_request_id,
@@ -147,7 +153,7 @@ fn target_for(state: &AppState, token: &str, id: &str) -> Result<CodexStatusTarg
     let checkpoint = slot
         .as_ref()
         .ok_or("Codex status checkpoint was cancelled")?;
-    checkpoint.check(token)?;
+    checkpoint.check_acquisition(token)?;
     if !state.session_checkpoint.is_finalizing()
         || checkpoint.update_request_id.is_some_and(|request| {
             !state
@@ -175,7 +181,7 @@ fn change_target(
     let checkpoint = slot
         .as_mut()
         .ok_or("Codex status checkpoint was cancelled")?;
-    checkpoint.check(token)?;
+    checkpoint.check_acquisition(token)?;
     change(
         checkpoint
             .targets
@@ -357,7 +363,13 @@ fn read_inner(
     let Some(id) = screen::parse_status_screen(screen) else {
         return Ok(None);
     };
+    let title = status_title(state, terminal_id, &id)?;
     let fresh = targets::verify_session(&target.process, &id)?;
+    if status_title(state, terminal_id, &id)? != title {
+        return Err(format!(
+            "[{terminal_id}] Codex title changed during status verification"
+        ));
+    }
     if !fresh {
         targets::remember_checkpoint_file(
             state,
@@ -369,95 +381,30 @@ fn read_inner(
     }
     change_target(state, token, terminal_id, |target| {
         target.proof = Some((id.clone(), fresh));
+        target.status_title = title;
         Ok(())
     })?;
     Ok(Some(id))
 }
 
-#[tauri::command]
-pub fn complete_codex_status_checkpoint(
-    token: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<(), String> {
-    complete_inner(&state, &token)
-}
-
-fn complete_inner(state: &AppState, token: &str) -> Result<(), String> {
-    let mut slot = state.session_checkpoint.codex_status.lock_or_err()?;
-    let checkpoint = slot
-        .as_mut()
-        .ok_or("Codex status checkpoint was cancelled")?;
-    checkpoint.check(token)?;
-    if !state.session_checkpoint.is_finalizing()
-        || checkpoint.update_request_id.is_some_and(|id| {
-            !state
-                .session_checkpoint
-                .owns_update_checkpoint(id)
-                .unwrap_or(false)
-        })
-        || checkpoint
-            .targets
-            .values()
-            .any(|target| target.proof.is_none())
+fn status_title(
+    state: &AppState,
+    terminal: &str,
+    session_id: &str,
+) -> Result<Option<crate::agent_hooks::title::TitleBinding>, String> {
+    let title = state
+        .terminals
+        .lock_or_err()?
+        .get(terminal)
+        .map(|t| t.codex_hook_title.clone());
+    if title
+        .as_ref()
+        .and_then(|t| t.identity.as_deref())
+        .is_some_and(|identity| !session_id.starts_with(identity))
     {
-        return Err(
-            "Codex status checkpoint cannot complete without its proof and input fence".into(),
-        );
+        return Err(format!(
+            "[{terminal}] Codex live title conflicts with its status proof"
+        ));
     }
-    checkpoint.completed = true;
-    if checkpoint.owns_fence {
-        state.session_checkpoint.commit_close_checkpoint();
-    }
-    Ok(())
-}
-
-#[tauri::command(async)]
-pub fn finish_codex_status_checkpoint(
-    token: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<(), String> {
-    finish_inner(&state, &token)
-}
-
-fn finish_inner(state: &AppState, token: &str) -> Result<(), String> {
-    let checkpoint = {
-        let mut slot = state.session_checkpoint.codex_status.lock_or_err()?;
-        if slot
-            .as_ref()
-            .is_none_or(|checkpoint| checkpoint.token != token)
-        {
-            return Ok(());
-        }
-        slot.take().ok_or("Codex status checkpoint disappeared")?
-    };
-    let mut errors = Vec::new();
-    for (id, target) in &checkpoint.targets {
-        if !target.resized {
-            continue;
-        }
-        match target.io.lock_or_err() {
-            Ok(_io) => {
-                if let Err(error) = resize_target(
-                    state,
-                    id,
-                    target,
-                    target.original_cols,
-                    target.original_rows,
-                ) {
-                    errors.push(error);
-                }
-            }
-            Err(error) => errors.push(error.to_string()),
-        }
-    }
-    // A successful close retains admission through window destruction. TTL only
-    // expires the proof: it must never silently reopen input while a save runs.
-    if checkpoint.owns_fence && (!checkpoint.completed || !errors.is_empty()) {
-        state.session_checkpoint.cancel_finalization();
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
-    }
+    Ok(title)
 }

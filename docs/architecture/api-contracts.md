@@ -713,6 +713,8 @@ Windows child wait와 PID 기반 `taskkill`은 하나의 handshake를 공유한�
 
 Codex의 fresh 귀속에서 모델 등 설정 변경만 담은 정확한 `ThreadSettings` submission은 턴 입력 증거가 아니다([ADR-0256](../adr/0256-codex-thread-settings-preserve-fresh.md)). 기존 새 대화 ID·rollout 부재 검증과 critical checkpoint 이중 관측은 유지하며, 실제 입력·중단·종료·미확인 기록이나 resume를 fresh로 바꾸지 않는다. 상태·IPC·저장 필드는 추가하지 않는다.
 
+명시적 종료의 Codex 확인은 `begin_codex_status_checkpoint → (입력·현재 화면 판독) → seal_codex_status_checkpoint → 세션·기록 저장 → complete_codex_status_checkpoint → finish_codex_status_checkpoint` 순서다([ADR-0365](../adr/0365-codex-close-proof-lives-through-fenced-save.md)). seal은 내부 IPC이며 기한 내 전체 확인·입력 완료와 동일 token·fence를 요구한다. 저장 단계는 수집 기한으로 proof를 버리지 않으며 추가 입력·화면 판독은 거절한다. 현재 프로세스·대화·generation·rollout과 두 번의 귀속 검증은 계속 수행한다. 저장 실패·소유권 상실은 성공 완료로 처리하지 않는다.
+
 ### Grok 설정
 
 Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 실행 명령·세션 복원·상태 메시지 필드는 Codex와 공유하지만, Codex 전용 transcript 설정과 Claude 전용 `syncCwd`·`sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).

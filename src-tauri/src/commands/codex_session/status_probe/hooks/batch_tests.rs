@@ -54,6 +54,7 @@ fn fixture() -> (
                 output_start: None,
                 proof: Some((id, false)),
                 hook_binding: Some(CodexHookBinding::Process(None)),
+                status_title: None,
             },
         );
     }
@@ -61,11 +62,97 @@ fn fixture() -> (
         token: "batch".into(),
         deadline: Instant::now() + Duration::from_secs(30),
         owns_fence: true,
+        sealed: false,
         completed: false,
         update_request_id: None,
         targets,
     });
     (state, lookup, processes)
+}
+
+#[test]
+fn sealed_screen_proof_cannot_hide_a_new_or_cleared_live_title_without_lifecycle_logs() {
+    for change in ["unchanged", "different", "cleared"] {
+        let (state, mut lookup, mut processes) = fixture();
+        let home = tempfile::tempdir().unwrap();
+        let terminal = "pane-0";
+        let id = lookup.attributions[terminal].clone().unwrap();
+        processes.retain(|key, _| key == terminal);
+        let process = processes.get_mut(terminal).unwrap();
+        process.codex_home = home.path().into();
+        process.sqlite_home = home.path().into();
+        let title = crate::agent_hooks::title::TitleBinding {
+            generation: 7,
+            revision: 1,
+            identity: Some(id[..29].into()),
+        };
+        let mut session =
+            crate::terminal::TerminalSession::new(terminal.into(), Default::default());
+        session.codex_hook_title = title.clone();
+        if change != "unchanged" {
+            session.codex_hook_title.revision += 1;
+            session.codex_hook_title.identity =
+                (change == "different").then(|| "01a0ec07-451a-7e61-ac51-bd98f".into());
+        }
+        state
+            .terminals
+            .lock()
+            .unwrap()
+            .insert(terminal.into(), session);
+        {
+            let mut slot = state.session_checkpoint.codex_status.lock().unwrap();
+            let checkpoint = slot.as_mut().unwrap();
+            checkpoint.sealed = true;
+            checkpoint.deadline = Instant::now();
+            checkpoint.targets.retain(|key, _| key == terminal);
+            let target = checkpoint.targets.get_mut(terminal).unwrap();
+            target.process = process.clone();
+            target.hook_binding = None;
+            target.status_title = Some(title);
+        }
+        lookup.attributions.insert(terminal.into(), None);
+        let result =
+            verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || {
+                Ok(processes)
+            });
+        if change == "unchanged" {
+            assert_eq!(result.unwrap()[terminal], (7, id, true));
+        } else {
+            assert!(result.unwrap_err().contains("title"), "{change}");
+        }
+    }
+}
+
+#[test]
+fn sealed_proof_survives_acquisition_deadline_and_still_revalidates_conversations() {
+    for changed in [false, true] {
+        let (state, mut lookup, processes) = fixture();
+        {
+            let mut slot = state.session_checkpoint.codex_status.lock().unwrap();
+            let checkpoint = slot.as_mut().unwrap();
+            checkpoint.sealed = true;
+            checkpoint.deadline = Instant::now();
+        }
+        if changed {
+            lookup.attributions.insert("pane-0".into(), None);
+        }
+        let result =
+            verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || {
+                Ok(processes)
+            });
+        if changed {
+            assert!(
+                result.is_err(),
+                "lost current conversation cannot use a sealed proof"
+            );
+        } else {
+            assert_eq!(
+                result.unwrap().len(),
+                8,
+                "slow save keeps every verified conversation"
+            );
+        }
+    }
 }
 
 #[test]
@@ -114,6 +201,12 @@ fn a_failed_lost_or_changed_selection_cannot_be_overwritten_by_the_earlier_proof
 fn current_pid_incarnation_and_terminal_generation_are_still_required() {
     for change in ["pid-reuse", "removed", "generation"] {
         let (state, lookup, mut processes) = fixture();
+        {
+            let mut slot = state.session_checkpoint.codex_status.lock().unwrap();
+            let checkpoint = slot.as_mut().unwrap();
+            checkpoint.sealed = true;
+            checkpoint.deadline = Instant::now();
+        }
         match change {
             "pid-reuse" => processes.get_mut("pane-0").unwrap().started_at += 1,
             "removed" => {
@@ -194,6 +287,17 @@ fn reusable_status_fallback_does_not_add_or_refresh_checkpoint_evidence() {
             crate::terminal::TerminalConfig::default(),
         );
         session.codex_hook_title.generation = 7;
+        state
+            .session_checkpoint
+            .codex_status
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .targets
+            .get_mut(id)
+            .unwrap()
+            .status_title = Some(session.codex_hook_title.clone());
         state.terminals.lock().unwrap().insert(id.clone(), session);
     }
     crate::session_checkpoint::receipt::capture(&state)

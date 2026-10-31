@@ -1974,13 +1974,15 @@ describe("saveBeforeClose", () => {
 
     expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
       "begin_codex_status_checkpoint",
+      "seal_codex_status_checkpoint",
       "complete_codex_status_checkpoint",
       "finish_codex_status_checkpoint",
     ]);
     const calls = vi.mocked(invoke).mock.invocationCallOrder;
     const saved = vi.mocked(saveLocalSession).mock.invocationCallOrder[0];
     expect(calls[0]).toBeLessThan(saved);
-    expect(calls[1]).toBeGreaterThan(saved);
+    expect(calls[1]).toBeLessThan(saved);
+    expect(calls[2]).toBeGreaterThan(saved);
   });
 
   it.each(["unchanged", "frontend-change", "backend-change", "failed-save"])(

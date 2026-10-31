@@ -191,6 +191,7 @@ pub(super) fn collect_targets(
                 output_start: None,
                 proof,
                 hook_binding,
+                status_title: None,
             },
         );
     }

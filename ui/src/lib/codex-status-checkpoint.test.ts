@@ -160,20 +160,22 @@ describe("fenced Codex checkpoint", () => {
     expect(invoke).toHaveBeenCalledWith("begin_codex_status_checkpoint", { updateRequestId: 42 });
     expect(calls).toEqual([
       "begin_codex_status_checkpoint",
+      "seal_codex_status_checkpoint",
       "commit",
       "complete_codex_status_checkpoint",
       "finish_codex_status_checkpoint",
     ]);
   });
 
-  it("does not report a delayed save as successful after its proof expires", async () => {
+  it("does not start saving if acquisition expired before the proof could be sealed", async () => {
+    const commit = vi.fn();
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "begin_codex_status_checkpoint") return { token: "proof", targets: [] };
-      if (command === "complete_codex_status_checkpoint") throw new Error("checkpoint expired");
+      if (command === "seal_codex_status_checkpoint") throw new Error("checkpoint expired");
     });
-    await expect(withCodexStatusCheckpoint(true, undefined, async () => 7)).rejects.toThrow(
-      "expired",
-    );
+    await expect(withCodexStatusCheckpoint(true, undefined, commit)).rejects.toThrow("expired");
+    expect(commit).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("complete_codex_status_checkpoint", expect.anything());
     expect(invoke).toHaveBeenLastCalledWith("finish_codex_status_checkpoint", { token: "proof" });
   });
 
