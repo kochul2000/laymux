@@ -206,7 +206,7 @@ Remote workspace 항목의 하단 패딩은 3px이며, 두 줄 pane 행은 최�
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**
 - **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 hidden/active/settings raw state 변경을 즉시 평가하고, 5초 interval은 타임아웃 만료 판정에만 사용한다. 타임아웃이 지난 Pane id는 `uiStore.evictedPaneIds`에 기록하며 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
 - **정밀도**: 숨김 시작·해제 stamp는 raw state 전환을 구독해 즉시 기록·초기화한다. 만료 판정만 5초(`TICK_INTERVAL_MS`) tick 경계에서 수행하므로 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).
-- **실제 종료 경로**: WorkspaceArea는 비활성 워크스페이스에서 `evictedPaneIds`에 포함된 Pane을 렌더 목록에서 제외한다 → 해당 `TerminalView`가 언마운트되며 기존 언마운트 클린업(`closeTerminalSession`)이 PTY를 정리한다. 다시 표시(un-hide)하면 eviction에서 빠지고 재마운트되어 새 PTY가 생성된다. 별도의 종료 IPC를 추가하지 않고 검증된 unmount→close 경로를 재사용한다.
+- **실제 종료 경로**: backend `checkpoint_and_close_hidden_terminals`가 대상 입력 차단·drain·critical checkpoint·PTY close를 소유한다. 실제 닫힌 ID만 `evictedPaneIds`에 반영하여 WorkspaceArea가 해당 TerminalView를 unmount한다. ACK 직전 적격성을 재검사하며 close 도중 표시 상태가 바뀐 pane도 closed-ID 반영 후 즉시 remount한다. 명시적 Remote/Automation 탐색은 회수 중에도 승인한다. 탐색 요청은 업데이트 drain에는 포함하되 회수 drain에는 포함하지 않는다([ADR-0365](../adr/0365-navigation-admission-during-hidden-eviction.md)).
 
 ---
 
