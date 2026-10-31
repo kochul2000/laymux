@@ -50,7 +50,7 @@ pub(crate) struct CodexStatusCheckpoint {
     pub token: String,
     pub deadline: Instant,
     /// Acquisition is bounded; verified evidence then lives with the fence
-    /// through persistence and exit cleanup (ADR-0365).
+    /// through persistence and exit cleanup (ADR-0366).
     pub sealed: bool,
     pub owns_fence: bool,
     pub completed: bool,

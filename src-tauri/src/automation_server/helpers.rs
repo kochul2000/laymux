@@ -34,6 +34,36 @@ async fn wait_for_frontend_response_until<T>(
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
 
+pub(crate) fn admit_bridge_mutation(
+    runtime: &crate::session_checkpoint::SessionCheckpointRuntime,
+    request_id: &str,
+    category: &str,
+    target: &str,
+    method: &str,
+) -> Result<bool, String> {
+    if category != "action" {
+        return Ok(false);
+    }
+    // Exact allowlist: future structural/write actions keep the session fence.
+    // Navigation is still tracked for updater drain through its frontend ACK.
+    if matches!(
+        (target, method),
+        ("terminals", "setFocus")
+            | ("workspaces", "switchActive")
+            | ("grid", "focusPane")
+            | (
+                "navigation",
+                "spatialStep" | "directionStep" | "notificationStep"
+            )
+            | ("notifications", "markRead" | "markTerminalRead")
+    ) {
+        runtime.begin_detached_navigation(request_id)?;
+    } else {
+        runtime.begin_detached_mutation(request_id)?;
+    }
+    Ok(true)
+}
+
 /// Send a request to the frontend via Tauri event and wait for the response.
 pub async fn bridge_request(
     state: &ServerState,
@@ -43,14 +73,14 @@ pub async fn bridge_request(
     params: serde_json::Value,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let tracks_mutation = category == "action";
-    if tracks_mutation {
-        state
-            .app_state
-            .session_checkpoint
-            .begin_detached_mutation(&request_id)
-            .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
-    }
+    let tracks_mutation = admit_bridge_mutation(
+        &state.app_state.session_checkpoint,
+        &request_id,
+        category,
+        target,
+        method,
+    )
+    .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 

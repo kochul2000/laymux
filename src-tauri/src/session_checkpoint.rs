@@ -16,7 +16,9 @@ pub use close::*;
 pub(crate) mod codex_status;
 mod eviction;
 mod hints;
+mod mutation;
 pub(crate) use hints::CheckpointHints;
+use mutation::DetachedMutationKind;
 pub(crate) mod receipt;
 pub(crate) mod update;
 pub use eviction::TerminalMutationPermit;
@@ -61,7 +63,8 @@ pub struct SessionCheckpointRuntime {
     close_checkpoint_committed: AtomicBool,
     eviction: Mutex<eviction::EvictionAdmission>,
     active_mutations: AtomicUsize,
-    detached_mutations: Mutex<HashSet<String>>,
+    active_navigation: AtomicUsize,
+    detached_mutations: Mutex<HashMap<String, DetachedMutationKind>>,
     retired_pty_completions: Mutex<Vec<crate::pty_control::PtyControlCompletion>>,
 }
 
@@ -83,7 +86,8 @@ impl Default for SessionCheckpointRuntime {
             close_checkpoint_committed: AtomicBool::new(false),
             eviction: Mutex::new(eviction::EvictionAdmission::default()),
             active_mutations: AtomicUsize::new(0),
-            detached_mutations: Mutex::new(HashSet::new()),
+            active_navigation: AtomicUsize::new(0),
+            detached_mutations: Mutex::new(HashMap::new()),
             retired_pty_completions: Mutex::new(Vec::new()),
         }
     }
@@ -170,40 +174,6 @@ impl SessionCheckpointRuntime {
         }
     }
 
-    /// Admit a frontend action whose work can outlive the backend HTTP waiter.
-    /// It remains active until `automation_response` explicitly completes the
-    /// same request id, including responses that arrive after HTTP timeout.
-    pub fn begin_detached_mutation(&self, request_id: &str) -> Result<(), String> {
-        self.ensure_mutations_allowed()?;
-        self.active_mutations.fetch_add(1, Ordering::AcqRel);
-        if let Err(error) = self.ensure_mutations_allowed() {
-            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-            return Err(error);
-        }
-        let mut detached = match self.detached_mutations.lock_or_err() {
-            Ok(detached) => detached,
-            Err(error) => {
-                self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-                return Err(error.to_string());
-            }
-        };
-        if !detached.insert(request_id.to_owned()) {
-            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-            return Err(format!(
-                "session checkpoint mutation {request_id} is already active"
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn finish_detached_mutation(&self, request_id: &str) -> Result<bool, String> {
-        let removed = self.detached_mutations.lock_or_err()?.remove(request_id);
-        if removed {
-            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-        }
-        Ok(removed)
-    }
-
     /// Preserve a faulted worker acknowledgement after its handle leaves the
     /// live registry. The close mutation permit is still held while this is
     /// registered, so finalization cannot observe a gap between the two.
@@ -225,6 +195,7 @@ impl SessionCheckpointRuntime {
         let drained = tokio::time::timeout(FINALIZATION_DRAIN_TIMEOUT, async {
             loop {
                 let local_drained = self.active_mutations.load(Ordering::Acquire) == 0
+                    && self.active_navigation.load(Ordering::Acquire) == 0
                     && self.terminal_mutations_drained()?;
                 let terminal_drained =
                     crate::remote_server::human_control_operations_drained(state)?;

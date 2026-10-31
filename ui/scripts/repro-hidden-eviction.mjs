@@ -3,8 +3,12 @@
 // Injects attribution failures in the WebView IPC adapter; production Rust
 // eviction, human input, and PTY writers remain real.
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { chromium } from "@playwright/test";
 
+assert.equal(process.env.LAYMUX_REPRO_ISOLATED, "1", "격리된 dev APPDATA가 필요합니다");
+const base = "http://127.0.0.1:19281";
+const token = randomUUID();
 const health = await (await fetch("http://127.0.0.1:19281/api/v1/health")).json();
 const instance = health.instance ?? health.data?.instance;
 assert.equal(instance?.buildKind, "dev", "release instances must not be modified");
@@ -34,8 +38,10 @@ const invoke = async (command, args, options) => {
   }
   if (r?.inject && command === 'checkpoint_and_close_hidden_terminals') {
     r.requests.push(args);
+    r.inFlight += 1;
     try { return await realInvoke(command, args, options); }
     catch(error) { r.failures.push(String(error)); throw error; }
+    finally { r.inFlight -= 1; }
   }
   return realInvoke(command, args, options);
 };`;
@@ -50,6 +56,7 @@ try {
     const { useUiStore: ui } = await import("/src/stores/ui-store.ts");
     const { useTerminalStore: terminals } = await import("/src/stores/terminal-store.ts");
     const { focusWorkspacePane } = await import("/src/lib/workspace-transition.ts");
+    const { makeSlot } = await import("/src/lib/pane-layers.ts");
     const profile = settings.getState().profiles.find((p) => /powershell/i.test(p.name));
     if (!profile) throw new Error("PowerShell profile required");
     const suffix = Date.now().toString(36);
@@ -57,24 +64,29 @@ try {
       id: `repro-${kind}-${suffix}`,
       name: `Repro-${kind}`,
       panes: [
-        {
-          id: `repro-${kind}-pane-${suffix}`,
-          x: 0,
-          y: 0,
-          w: 12,
-          h: 12,
-          view: {
+        makeSlot(
+          `repro-${kind}-pane-${suffix}`,
+          { x: 0, y: 0, w: 12, h: 12 },
+          {
             type: "TerminalView",
             profile: profile.name,
             inputMode: "direct",
             ...(kind === "unvisited" ? { lastCodexSession: "saved-unvisited-repro" } : {}),
           },
-        },
+        ),
       ],
     });
     const visible = make("visible"),
       hidden = make("hidden"),
       unvisited = make("unvisited");
+    visible.panes[0].w = 6;
+    visible.panes.push(
+      makeSlot(
+        `${visible.panes[0].id}-second`,
+        { x: 6, y: 0, w: 6, h: 12 },
+        { ...visible.panes[0].layers[0].view },
+      ),
+    );
     workspaces.setState({
       workspaces: [...workspaces.getState().workspaces, visible, hidden, unvisited],
     });
@@ -91,11 +103,13 @@ try {
       unvisited,
       failures: [],
       requests: [],
+      inFlight: 0,
       inject: false,
     };
     return {
       hiddenId: `terminal-${hidden.panes[0].id}`,
       visibleId: `terminal-${visible.panes[0].id}`,
+      secondId: `terminal-${visible.panes[1].id}`,
     };
   });
   await page.waitForFunction(
@@ -116,6 +130,30 @@ try {
       window.__evictionRepro.terminals
         .getState()
         .instances.some((t) => t.id === id && t.sessionReady),
+    setup.secondId,
+    { timeout: 30_000 },
+  );
+  await page.evaluate(async (token) => {
+    const api = await import("/src/lib/tauri-api.ts");
+    await api.setRemoteRuntimeAccess(true, token);
+  }, token);
+  const remotePost = async (route, body) => {
+    const response = await fetch(`${base}${route}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, data: await response.json() };
+  };
+  const claim = await remotePost("/remote/v1/session/claim", { clientName: "eviction-repro" });
+  assert.equal(claim.status, 200, "Remote 제어권 획득 실패");
+  const leaseId = claim.data.leaseId;
+  assert(leaseId);
+  await page.waitForFunction(
+    (id) =>
+      window.__evictionRepro.terminals
+        .getState()
+        .instances.some((t) => t.id === id && t.sessionReady),
     setup.visibleId,
     { timeout: 30_000 },
   );
@@ -127,40 +165,65 @@ try {
     r.ui.getState().setWorkspaceHidden(r.unvisited.id, true);
     r.settings.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 1 });
   });
-  const result = await page.evaluate(async ({ visibleId }) => {
-    const r = window.__evictionRepro;
-    const api = await import("/src/lib/tauri-api.ts");
+  const inputRun = page.evaluate(
+    async ({ visibleId, leaseId }) => {
+      const r = window.__evictionRepro;
+      const api = await import("/src/lib/tauri-api.ts");
+      const errors = [];
+      let raw = 0,
+        paste = 0;
+      const started = performance.now();
+      while (performance.now() - started < 25_000) {
+        try {
+          await api.writeToTerminalForRemote(visibleId, "a", leaseId);
+          raw += 1;
+        } catch (e) {
+          errors.push(String(e));
+        }
+        try {
+          await api.writeTerminalInputForRemote(visibleId, "붙여넣기", false, leaseId);
+          paste += 1;
+        } catch (e) {
+          errors.push(String(e));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      return {
+        raw,
+        paste,
+        errors,
+        evictionFailures: r.failures,
+        requests: r.requests,
+        unvisitedStarted: r.terminals
+          .getState()
+          .instances.some((t) => t.id === `terminal-${r.unvisited.panes[0].id}`),
+      };
+    },
+    { ...setup, leaseId },
+  );
+  const navigationRun = (async () => {
     const errors = [];
-    let raw = 0,
-      paste = 0;
+    let switches = 0,
+      duringEviction = 0;
     const started = performance.now();
     while (performance.now() - started < 25_000) {
-      try {
-        await api.writeToTerminal(visibleId, "a");
-        raw += 1;
-      } catch (e) {
-        errors.push(String(e));
-      }
-      try {
-        await api.writeTerminalInput(visibleId, "붙여넣기", false);
-        paste += 1;
-      } catch (e) {
-        errors.push(String(e));
-      }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      const busy = await page.evaluate(() => window.__evictionRepro.inFlight > 0);
+      const id = switches % 2 ? setup.visibleId : setup.secondId;
+      const response = await remotePost(`/remote/v1/terminals/${encodeURIComponent(id)}/focus`, {
+        leaseId,
+      });
+      if (response.status !== 200 || response.data.focused !== id) errors.push(response);
+      else if (busy) duringEviction += 1;
+      switches += 1;
+      await remotePost("/remote/v1/session/heartbeat", { leaseId });
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    return {
-      raw,
-      paste,
-      errors,
-      evictionFailures: r.failures,
-      requests: r.requests,
-      unvisitedStarted: r.terminals
-        .getState()
-        .instances.some((t) => t.id === `terminal-${r.unvisited.panes[0].id}`),
-    };
-  }, setup);
-  console.log(JSON.stringify({ instance, ...result }, null, 2));
+    return { errors, switches, duringEviction };
+  })();
+  const [result, navigation] = await Promise.all([inputRun, navigationRun]);
+  console.log(JSON.stringify({ instance, ...result, navigation }, null, 2));
+  assert.equal(navigation.errors.length, 0, "정상 pane의 Remote 전환이 거부됨");
+  assert(navigation.duringEviction >= 10, "회수 중 탐색 표본 부족");
   assert(result.evictionFailures.length >= 2, "did not induce repeated eviction failure");
   assert.equal(result.errors.length, 0, "unrelated input was rejected");
   assert(result.raw >= 20 && result.paste >= 20, "insufficient input samples");
@@ -172,11 +235,13 @@ try {
     "unvisited pane entered eviction",
   );
 } finally {
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const r = window.__evictionRepro;
     if (!r) return;
     r.inject = false;
     r.settings.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 0 });
+    const api = await import("/src/lib/tauri-api.ts");
+    await api.setRemoteRuntimeAccess(false);
   });
   await browser.close();
 }
