@@ -1,6 +1,6 @@
 # 0365. Codex 종료 확인 결과는 입력 차단을 유지한 저장까지 유효하다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-31
 - Source: 사용자 보고(`activeButUnidentified`로 종료 차단), dev 빈 대화의 `/status` 성공 후 26초 저장 지연 재현, [data-flow §13.5](../architecture/data-flow.md), [ADR-0270](0270-codex-status-checkpoint-probe.md), [ADR-0278](0278-codex-status-current-screen.md)
 - 관계: ADR-0270의 확인 결과 만료 정책을 부분 대체한다. 업데이트 대상 정책(ADR-0323)은 유지한다.
