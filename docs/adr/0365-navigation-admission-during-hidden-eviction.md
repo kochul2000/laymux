@@ -1,6 +1,6 @@
 # 0365. 숨김 터미널 회수 중에도 명시적 탐색을 허용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-31
 - Source: 사용자 보고(Remote에서 사용 중인 pane으로 복귀할 때 `Focus failed: hidden terminal eviction is in progress` 반복), [api-contracts §13.3](../architecture/api-contracts.md#133-navigation-metadata), [ADR-0231](0231-hidden-eviction-target-scoped-input-admission.md)
 - 관계: ADR-0231의 generic frontend action 차단 범위에서 명시적 탐색과 탐색에 수반되는 읽음 처리를 분리한다.
