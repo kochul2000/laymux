@@ -60,8 +60,8 @@ pub(crate) use auth::{RemoteTransport, TunnelAuthorized};
 pub(crate) use file_viewer_signal::attach_heartbeat_signal;
 pub use file_viewer_signal::{report_file_viewer_signal, FileViewerSignal, FileViewerSignalMirror};
 pub(crate) use lease::{
-    active_lease_matches_with_timeout, begin_human_control_operation,
-    human_control_operations_drained, HumanControlOrigin, HumanControlPermit,
+    active_lease_matches, active_lease_matches_with_timeout, begin_human_control_operation,
+    human_control_operations_drained, require_active_lease, HumanControlOrigin, HumanControlPermit,
 };
 pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,

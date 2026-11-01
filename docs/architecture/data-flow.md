@@ -1944,3 +1944,21 @@ WebView가 UI 전체이므로, WebView2 browser나 main frame renderer가 죽으
 `LifecycleModal`은 App 루트에서 native dialog로 표시하여 Settings 패널의 unmount와 분리한다. Settings의 업데이트 진입점과 상단 UpdateButton은 `lifecycle-store.openUpdate`로 동일한 모달을 연다. 이 두 사용자 진입점은 `openUpdate({ check: true })`로 열어, 업데이터가 활성이고 `idle`이며 손실 감수 강제 설치 제안(`canForceInstall`)이 없을 때만 `check_app_update`를 즉시 1회 호출한다. 진행 중 작업·실패 상태를 보여 주려고 여는 경로(닫기 실패, dev preview)는 확인하지 않는다. 확인 실패는 모달 오류로 표시한다. 다운로드는 최소화할 수 있고 preparing/installing 진입 시 다시 표시한다. 창 종료는 `begin_app_close`로 업데이트 설치와 상호 배제한 뒤 `saveBeforeClose(report)` → PTY close → destroy 순서다. 창 종료 요청은 하나로 합치며 저장 실패나 지연은 자동 강제 종료 대신 사용자의 명시적 종료 선택을 기다린다. 지연됐던 저장이 완료되면 정상 종료할 수 있다.
 
 업데이트 진행은 Rust UpdateManager의 `preparation {stage,completed,total,warning}`을 사용한다. `useSessionCheckpointLifecycle`은 업데이트 요청을 받으면 일반 checkpoint를 차단하고, PTY 소유권에 맞춘 checkpoint commit과 `cacheTerminalOutputs`(출력 캐시)를 완료한 뒤 ACK한다. 업데이트는 `exit.interruptTerminals`와 무관하게 Ctrl+C를 보내지 않는다. PTY 데몬이 세션을 업데이트 너머로 유지하므로(ADR-0308) 인터럽트는 보존할 작업만 끝내기 때문이다. Ctrl+C 정리(`prepareTerminalExit`)는 명시적 종료에만 쓴다([ADR-0314](../adr/0314-update-never-interrupts-terminals.md)). 업데이트 ACK 기한은 40초이며 진행 IPC는 유효한 native request ID와 preparing 상태를 검사한다. idle 복귀 시 일반 checkpoint 차단을 해제한다. Remote는 같은 snapshot과 공유 문구·CSS로 native dialog를 표시하며, 설치 상태 뒤 단절만 재연결 대기로 표시하고 목표 실행 버전 확인 후 완료한다.
+
+## 14. 클라이언트 오디오와 Codex Voice (실험)
+
+[ADR-0369](../adr/0369-client-audio-for-codex-voice.md). PC 제어 바와 Remote Voice 버튼은
+동일한 `agent-voice-client` 수명 관리 코드를 사용한다. PC 미디어 코드는 첫 사용에 적재하고
+컨트롤러는 hover 제어 바의 mount/unmount와 분리한다. 마이크 permission 또는 서버 응답을
+기다리는 중 취소돼도 늦게 얻은 stream·session은 정리한다.
+
+`getUserMedia` → audio track/data channel을 가진 WebRTC offer → 기존 인증 경로의 start →
+Codex 로컬 제어 소켓 → `thread/realtime/sdp` answer → WebRTC audio 송수신 순서다.
+laymux는 모델을 호출하거나 대화를 새로 만들지 않고 기존 loaded thread에 연결한다.
+서버 오류·미디어 연결 실패는 숨기지 않고 표시한다. Remote는 문서가 background가 되거나
+pane/lease가 바뀌면 마이크를 닫는다. heartbeat는 500ms 간격 상태 조회이며 15초 유실 시
+호스트도 중개 세션을 닫는다. 오디오 bytes가 기존 terminal output 또는 Cloud RPC로 흐르지 않는다.
+
+수신 track은 보관한 `HTMLAudioElement`에 연결하고 `play()` 실패를 세션 오류로 처리한다.
+패킷 수신만으로 재생 성공을 판단하지 않는다. 브라우저 E2E는 실제 디코딩 샘플과 오디오 에너지를
+검사하며 종료 시 element 재생·stream 참조를 해제한다.

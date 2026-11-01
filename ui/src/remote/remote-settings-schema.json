@@ -447,6 +447,7 @@
             "soft:dpad",
             "soft:pgup",
             "soft:pgdn",
+            "voice",
             "attachment"
           ]
         }
@@ -592,6 +593,7 @@
     "send",
     "composer",
     "attachment",
+    "voice",
     "menu",
     "copyPane",
     "viewer",

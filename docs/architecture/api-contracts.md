@@ -2585,3 +2585,41 @@ Settings의 명시적 환경별 조회는 `manage_agent_hooks({request:{provider
 installed일 때 기존 훅 status를 조회한다. missing은 에이전트 이름·설치 후 재확인을 표시하고, unknown은 확인 불가·진단을 표시한다. 두 경우 훅 설치 버튼을 비활성화한다. 환경 전환·재확인은 재검사하며 이전 응답은 폐기한다. 이 연산은 훅 설치 캐시·자동 검사·작업 상태·설정 파일을 변경하지 않는다.
 
 dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"wsl:<distribution>"}`는 열린 Settings 훅 패널에서 기존 선택지로 전환하고 같은 change 이벤트 경로로 재검사한다. 미마운트·비활성·없는 선택지는 거부한다. Rust debug와 frontend DEV gate로 release에서는 차단하며 설치·설정 저장을 실행하지 않는다. 이 경로와 기존 Settings 열기·navigate·screenshot을 조합해 환경별 안내를 자율 검증한다.
+
+## 16. Codex Voice 클라이언트 오디오 중개 (실험)
+
+[ADR-0369](../adr/0369-client-audio-for-codex-voice.md). `agent_voice`가 현재 pane의
+PTY generation·live Codex 제목·에이전트 프로세스 귀속을 확인하고 그 프로세스의 CODEX_HOME 아래
+로컬 app-server 제어 소켓에 연결한다. 축약된 managed title만 있으면 그 소켓의 loaded thread
+목록에 유일하게 맞는 ID만 허용한다. CWD·최근 대화·클라이언트 제공 thread ID로 추측하지 않는다.
+WSL 귀속은 기존 공유 guest snapshot을 사용하며, 연결은 Windows interop가 필요 없는 제한된
+Python Unix socket byte relay로 운반한다. 사용자 shell/profile/default audio 설정을 변경하지 않는다.
+
+Tauri `voice_start(terminalId,sdp)`, `voice_events(sessionId,since)`, `voice_stop(sessionId)`와
+Automation `POST /api/v1/voice/start`, `GET /api/v1/voice/events?sessionId=…&since=…`,
+`POST /api/v1/voice/stop`을 제공한다. Remote의 대응 `/remote/v1/voice/{start,events,stop}`은
+모두 POST JSON이며 기존 remote 인증과 lease를 사용한다. start에는 `terminalId,sdp,leaseId`,
+events에는 `sessionId,since,leaseId`, stop에는 `sessionId,leaseId`를 보낸다. Android E2E에도
+이 세 exact route만 추가한다. 임의 thread/server/모델 지정은 받지 않는다.
+
+한 인스턴스에 중개 세션 하나만 허용한다. UUID capability와 local/remote lease 소유자가 모두
+맞아야 조회·종료할 수 있다. 15초 heartbeat 만료·pane 세대/제목 identity 변경·제어권 상실 시
+세션을 정리한다. 이벤트는 최대 128개를 보관하고 cursor gap은 재연결 오류다. WebSocket
+메시지는 512 KiB, 클라이언트 SDP는 128 KiB로 제한한다. SDP·원시 마이크 데이터는 저장하지 않는다.
+
+Codex 0.166.0의 실험용 realtime V3/WebRTC를 사용한다. 마이크·스피커와 echo cancellation은
+클라이언트 WebRTC가 소유하며 미디어는 클라이언트와 Codex 서비스 사이로 흐른다. PC relay에는
+SDP·세션 상태만 전달한다. 비보안 HTTP에서는 브라우저 마이크를 사용할 수 없고 오류를 표시한다.
+Android는 OS RECORD_AUDIO 승인을 받은 뒤 활성 synthetic Remote origin의 audio-only 요청에만
+권한을 부여한다. Cloud·이전 문서·다른 출처·camera 요청은 거부한다.
+
+Claude Code `/voice`는 공급자의 로컬 받아쓰기이며 이 Codex realtime 계약의 대상이 아니다.
+공급자별 실제 검증 결과를 혼동하지 않으며 자동 STT/TTS fallback은 없다. 실험용 서비스 버전·
+계정 조건·실제 송수신에 대한 호환성은 개발 실행 검증으로 별도 확인한다.
+
+Remote의 Voice는 입력 action registry의 `voice`이며 새 기기의 Keys 확장 행에 기본 배치한다.
+기존 저장 배치는 유지하고 Add keys에서 추가·이동·숨김할 수 있다. PC 미디어 컨트롤은 별도
+청크로 분리하고 실제 미디어 클라이언트는 첫 클릭에 적재한다. `thread/resume`에는
+`excludeTurns:true`를 보내 과거 대화를 신호 전송에 포함하지 않는다.
+설치본 `thread/realtime/stop`은 thread 단위이므로 같은 thread에서 CLI 자체 Voice와의 동시
+사용은 지원하지 않는다. 서버 closed/error 이후 stop 재전송은 피하지만 원자적 세션 교체 보호를 보장하지 않는다.

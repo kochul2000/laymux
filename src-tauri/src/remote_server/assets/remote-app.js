@@ -1,4 +1,5 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
+import { createAgentVoiceClient } from "../../../../ui/src/lib/agent-voice-client.ts";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createRemoteWorktrees } from "../../../../ui/src/remote/remote-worktrees.js";
@@ -492,6 +493,37 @@ import {
         let heartbeatInterrupted = false;
         let outputInterrupted = false;
         let activeTerminalId = null;
+        let voiceClient = null;
+        const voiceToggle = $("voiceToggle");
+        voiceToggle.addEventListener("click", async () => {
+          if (voiceClient) { const previous = voiceClient; voiceClient = null; await previous.stop(); return; }
+          const terminalId = activeTerminalId;
+          const selectedLease = leaseId;
+          if (!terminalId || !selectedLease) { setStatus("Voice를 시작할 Codex 터미널과 제어권이 필요합니다.", true); return; }
+          const voice = createAgentVoiceClient({
+            start: async (sdp) => {
+              if (activeTerminalId !== terminalId || leaseId !== selectedLease) throw new Error("Voice 대상이 변경됐습니다.");
+              const result = await remoteFetch("/remote/v1/voice/start", {method:"POST",body:JSON.stringify({terminalId,sdp,leaseId:selectedLease})});
+              return result.sessionId;
+            },
+            poll: (sessionId, since) => {
+              if (activeTerminalId !== terminalId || leaseId !== selectedLease || document.hidden) throw new Error("Voice 연결이 종료됐습니다.");
+              return remoteFetch("/remote/v1/voice/events", {method:"POST",body:JSON.stringify({sessionId,since,leaseId:selectedLease})});
+            },
+            stop: (sessionId) => remoteFetch("/remote/v1/voice/stop", {method:"POST",body:JSON.stringify({sessionId,leaseId:selectedLease})}),
+          }, (state) => {
+            const active = state.status === "starting" || state.status === "connected";
+            voiceToggle.setAttribute("aria-pressed", String(active));
+            setRemoteIcon(voiceToggle, active ? "MicOff" : "Mic");
+            voiceToggle.setAttribute("aria-label", active ? "Codex Voice 중지" : "Codex Voice 시작");
+            if (state.status === "error") setStatus(state.error, true);
+            if (!active && voiceClient === voice) voiceClient = null;
+          });
+          voiceClient = voice;
+          await voice.start();
+        });
+        document.addEventListener("visibilitychange", () => { if (document.hidden && voiceClient) { const previous = voiceClient; voiceClient = null; void previous.stop(); } });
+        window.addEventListener("pagehide", () => { if (voiceClient) { void voiceClient.stop(); voiceClient = null; } });
         let activeGithubRepoBase = null;
         let githubRepoRequestRevision = 0;
         let githubRepoAbortController = null;
@@ -5554,6 +5586,7 @@ import {
         function updateTerminalControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
           focusTerminalButton.disabled = !canControl;
+          voiceToggle.disabled = !canControl;
           updateComposerControls();
           updateKeyBarControls();
         }
@@ -11561,6 +11594,7 @@ import {
           "send",
           "composer",
           "attachment",
+          "voice",
           "menu", "copyPane", "viewer", "skip",
         ];
         const HEADER_INPUT_ACTIONS = {
@@ -11573,6 +11607,7 @@ import {
           send: "Send",
           composer: "Composer",
           attachment: "Attach file",
+          voice: "Codex Voice",
           menu: "Menu", copyPane: "Copy pane ID", viewer: "Viewer", skip: "Skip pane",
         };
         // Icon an Add keys chip shows beside the action's name (ADR-0327).
@@ -11582,6 +11617,7 @@ import {
           send: "Send",
           composer: "Pencil",
           attachment: "Paperclip",
+          voice: "Mic",
           menu: "Menu", copyPane: "Copy", viewer: "FolderOpen", skip: "CircleMinus",
         };
         const softInputActionId = (keyId) => `soft:${keyId}`;
@@ -11617,6 +11653,7 @@ import {
                 "soft:dpad",
                 "soft:pgup",
                 "soft:pgdn",
+                "voice",
                 "attachment",
               ],
             },
@@ -12369,6 +12406,7 @@ import {
             send: composerSendButton,
             composer: inputModeToggleButton,
             attachment: attachmentButton,
+            voice: voiceToggle,
           }[actionId];
         }
 

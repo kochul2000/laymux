@@ -168,6 +168,7 @@ impl RemoteQuery {
 
 pub fn build_router(state: ServerState) -> Router<ServerState> {
     let api_routes = Router::new()
+        .merge(crate::agent_voice::routes::router(true))
         .route("/remote/v1/health", get(remote_health))
         .route(
             "/remote/v1/e2e/pair/ack",

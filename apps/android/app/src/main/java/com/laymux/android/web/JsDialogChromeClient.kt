@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.net.Uri
 import android.webkit.JsResult
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -18,8 +19,18 @@ import android.webkit.WebView
 class JsDialogChromeClient(
     private val activity: Activity,
     private val showFileChooser: ((ValueCallback<Array<Uri>>, FileChooserParams) -> Unit)? = null,
+    private val requestAudio: ((PermissionRequest) -> Unit)? = null,
+    private val cancelAudio: ((PermissionRequest) -> Unit)? = null,
 ) : WebChromeClient() {
     private var activeDialog: AlertDialog? = null
+
+    override fun onPermissionRequest(request: PermissionRequest) {
+        activity.runOnUiThread { requestAudio?.invoke(request) ?: request.deny() }
+    }
+
+    override fun onPermissionRequestCanceled(request: PermissionRequest) {
+        activity.runOnUiThread { cancelAudio?.invoke(request) }
+    }
 
     override fun onJsAlert(
         view: WebView?,

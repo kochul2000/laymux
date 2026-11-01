@@ -72,6 +72,7 @@ test("fresh Remote device starts in composer with the requested controls", async
     "soft:dpad",
     "soft:pgup",
     "soft:pgdn",
+    "voice",
     "attachment",
   ]);
 

@@ -47,6 +47,7 @@ pub use app_update::*;
 pub use archive_listing::*;
 pub use claude_session::*;
 pub use claude_turn_result::*;
+pub(crate) use codex_session::codex_voice_target;
 pub use codex_session::turns::*;
 pub use codex_session::*;
 pub use codex_usage::*;

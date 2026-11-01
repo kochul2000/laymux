@@ -196,6 +196,7 @@ mod tests {
                 "soft:dpad",
                 "soft:pgup",
                 "soft:pgdn",
+                "voice",
                 "attachment"
             ])
         );

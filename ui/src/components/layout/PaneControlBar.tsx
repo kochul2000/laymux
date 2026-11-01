@@ -11,6 +11,7 @@ import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { FloatingPaneControlMenu } from "./FloatingPaneControlMenu";
 import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import { VIEW_LABELS } from "@/lib/view-labels";
+import { AgentVoiceButton } from "@/components/ui/AgentVoiceButton";
 import {
   BroomIcon,
   ColumnsIcon,
@@ -374,6 +375,7 @@ function ViewSelect({
 // ─── Bar content (shared by hover & pinned modes) ───────
 function BarContent({
   currentView,
+  voiceTerminalId,
   actions,
   mode,
   onSetMode,
@@ -389,6 +391,7 @@ function BarContent({
   testId,
 }: {
   currentView: ViewInstanceConfig;
+  voiceTerminalId?: string;
   actions: PaneControlBarActions;
   mode: ControlBarMode;
   onSetMode: (m: ControlBarMode) => void;
@@ -491,6 +494,7 @@ function BarContent({
               {paneHidden ? <EyeOffIcon /> : <EyeIcon />}
             </BarBtn>
           )}
+          {voiceTerminalId && <AgentVoiceButton terminalId={voiceTerminalId} />}
           {currentView.type === "TerminalView" && actions.onClearTerminal && (
             <ClearTerminalBtn onClick={actions.onClearTerminal} />
           )}
@@ -692,6 +696,8 @@ export function PaneControlBar({
   const rootRef = useRef<HTMLDivElement>(null);
   // workspace selector 목록 숨김 상태(raw)를 구독해 토글 버튼 상태로 쓴다 (ADR-0035).
   const hideTargetId = contentPaneId ?? paneId;
+  const voiceTerminalId =
+    currentView.type === "TerminalView" && hideTargetId ? `terminal-${hideTargetId}` : undefined;
   const paneHidden = useUiStore((s) =>
     showListHideToggle && hideTargetId ? s.hiddenPaneIds.has(hideTargetId) : false,
   );
@@ -816,6 +822,7 @@ export function PaneControlBar({
         />
       ) : (
         <BarContent
+          voiceTerminalId={voiceTerminalId}
           currentView={currentView}
           actions={actions}
           mode={mode}
@@ -828,6 +835,7 @@ export function PaneControlBar({
         />
       ),
     [
+      voiceTerminalId,
       currentView,
       actions,
       mode,
@@ -942,6 +950,7 @@ export function PaneControlBar({
               />
             ) : (
               <BarContent
+                voiceTerminalId={voiceTerminalId}
                 currentView={currentView}
                 actions={actions}
                 mode={mode}
@@ -998,6 +1007,7 @@ export function PaneControlBar({
                 />
               ) : (
                 <BarContent
+                  voiceTerminalId={voiceTerminalId}
                   currentView={currentView}
                   actions={actions}
                   mode={mode}
@@ -1034,6 +1044,7 @@ export function PaneControlBar({
             paneRef={rootRef}
           >
             <BarContent
+              voiceTerminalId={voiceTerminalId}
               currentView={currentView}
               actions={actions}
               mode={mode}
