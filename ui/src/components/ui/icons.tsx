@@ -43,6 +43,8 @@ import {
   ListFilter,
   LoaderCircle,
   Maximize2,
+  Mic,
+  MicOff,
   Minus,
   Minimize2,
   Moon,
@@ -372,4 +374,11 @@ export function ZoomOutIcon(props: IconProps) {
 
 export function CircleAlertIcon(props: IconProps) {
   return renderIcon(CircleAlert, props);
+}
+
+export function MicIcon(props: IconProps) {
+  return renderIcon(Mic, props);
+}
+export function MicOffIcon(props: IconProps) {
+  return renderIcon(MicOff, props);
 }

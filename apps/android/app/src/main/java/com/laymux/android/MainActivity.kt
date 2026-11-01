@@ -23,6 +23,7 @@ import android.webkit.WebSettings
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.webkit.PermissionRequest
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -251,6 +252,31 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         attachmentPicker.complete(result.resultCode, result.data)
+    }
+
+    private var pendingMicrophone: Pair<PermissionRequest, Long>? = null
+    private val microphoneLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val pending = pendingMicrophone
+        pendingMicrophone = null
+        if (pending != null) {
+            val (request, generation) = pending
+            if (granted && com.laymux.android.web.allowRemoteMicrophone(request.origin.toString(), request.resources.toList(), remoteBridgeActionsEnabled(generation))) {
+                request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+            } else request.deny()
+        }
+    }
+
+    private fun requestRemoteMicrophone(request: PermissionRequest, generation: Long) {
+        if (!com.laymux.android.web.allowRemoteMicrophone(request.origin.toString(), request.resources.toList(), remoteBridgeActionsEnabled(generation))) {
+            request.deny()
+            return
+        }
+        pendingMicrophone?.first?.deny()
+        pendingMicrophone = request to generation
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pendingMicrophone = null
+            request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+        } else microphoneLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -616,6 +642,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             webChromeClient = JsDialogChromeClient(
                 this@MainActivity,
                 ::showWebFileChooser,
+                { request -> requestRemoteMicrophone(request, documentGeneration) },
+                { request -> if (pendingMicrophone?.first === request) pendingMicrophone = null },
             ).also {
                 remoteJsDialogs?.dismissActive()
                 remoteJsDialogs = it
@@ -3365,6 +3393,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onStop() {
+        pendingMicrophone?.first?.deny()
+        pendingMicrophone = null
         if (::webView.isInitialized && visibleWebSurface == VisibleWebSurface.REMOTE) {
             webView.evaluateJavascript("window.laymuxAndroidE2e?.onNativeBackground?.()", null)
         }

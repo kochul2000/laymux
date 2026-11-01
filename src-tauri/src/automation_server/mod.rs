@@ -159,6 +159,7 @@ pub fn build_router(
     is_dev: bool,
 ) -> Router {
     let automation_routes = Router::new()
+        .merge(crate::agent_voice::routes::router(false))
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
         .route("/api/v1/worktrees", get(worktrees::list))

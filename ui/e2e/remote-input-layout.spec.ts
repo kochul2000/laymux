@@ -294,8 +294,12 @@ test.describe("Remote input action layout", () => {
         "soft:dpad",
         "soft:pgup",
         "soft:pgdn",
+        "voice",
         "attachment",
       ]);
+    await expect(page.locator("#voiceToggle")).toBeVisible();
+    await expect(page.locator("#voiceToggle")).toHaveAttribute("data-input-action", "voice");
+    await expect(page.locator("#voiceToggle")).toBeDisabled();
     await expect(page.locator("#keyBarSettings")).toHaveCount(0);
     await expect(page.locator("#keyPopover")).toHaveCount(0);
 

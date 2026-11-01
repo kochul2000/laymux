@@ -113,6 +113,7 @@ pub struct AppState {
     pub agent_mcp_inspections: crate::agent_hooks::mcp::McpInspections,
     /// Heuristic Claude/Codex usage per environment for missing notices (ADR-0330).
     pub agent_usage: crate::agent_hooks::usage::AgentUsage,
+    pub agent_voice: crate::agent_voice::VoiceManager,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
@@ -409,6 +410,7 @@ impl AppState {
             agent_hook_inspections: Default::default(),
             agent_mcp_inspections: Default::default(),
             agent_usage: Default::default(),
+            agent_voice: Default::default(),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),

@@ -105,6 +105,8 @@ export function resolveChunkGroup(id: string): string | undefined {
   if (normalizedId.endsWith(TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX)) {
     return "terminal-input-delivery-metrics";
   }
+  if (normalizedId.endsWith("/src/components/ui/AgentVoiceButton.tsx"))
+    return "agent-voice-controls";
   if (!normalizedId.includes(NODE_MODULES_SEGMENT)) return undefined;
 
   if (normalizedId.includes("/node_modules/@xterm/")) return "xterm";

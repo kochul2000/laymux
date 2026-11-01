@@ -3,6 +3,7 @@ pub mod activity;
 pub mod activity_order;
 pub mod activity_reconcile;
 pub mod agent_hooks;
+pub mod agent_voice;
 pub mod android_e2e;
 pub mod android_pairing;
 pub mod app_update;
@@ -294,6 +295,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            agent_voice::routes::voice_start,
+            agent_voice::routes::voice_events,
+            agent_voice::routes::voice_stop,
             commands::greet,
             commands::create_terminal_session,
             commands::reconnect_terminal_session,
