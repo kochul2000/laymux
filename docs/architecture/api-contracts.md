@@ -838,6 +838,8 @@ Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가�
 
 ### 종료 시 동작(kill-on-exit) 설정
 
+PC 명시적 창 닫기는 `exit.confirmBeforeExit: boolean`(기본 true, 생략 시 true)에 따라 종료 준비 전에 확인한다([ADR-0372](../adr/0372-desktop-exit-confirmation.md)). Settings → 터미널 → 종료 시 동작에서 변경한다. 취소·Escape는 종료 준비를 시작하지 않는다. ‘다시 보지 않기’를 체크하고 종료를 확정하면 snapshot 저장·적용 경로로 이 설정을 false로 저장한 후 기존 종료를 진행한다. 저장 실패는 확인 창에 오류로 표시하고 종료하지 않는다. 업데이트·복구 재시작과 Remote·Android에는 이 확인을 적용하지 않는다. dev `POST /api/v1/ui/lifecycle`의 `action: request-close | cancel-close | confirm-close`, `dontShowAgain?: boolean`으로 실제 창 닫기 요청과 확인을 검증한다. release는 기존처럼 403이다.
+
 앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 힌트는 사용자 가시 기록으로 스크롤백 캐시에 남는다. 자동 복원에 쓰는 식별자는 이 텍스트를 파싱하지 않고 같은 저장 시점에 Claude session metadata 또는 Codex rollout metadata에서 별도로 조회한다(위 agent 설정, [data-flow.md §13](./data-flow.md#13-session-persistence--cache)).
 
 ```jsonc
@@ -2542,7 +2544,7 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 `UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|caching, completed, total: number|null, warning: string|null}`이다. 업데이트는 터미널을 인터럽트하지 않으므로 종료 설정(`exit`)을 싣지 않는다([ADR-0314](../adr/0314-update-never-interrupts-terminals.md)). Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
 
-Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. `interrupting`·`settling`과 `cleanup`은 close에만 적용되며 update preview에 주면 거부한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. `interrupting`·`settling`과 `cleanup`은 close에만 적용되며 update preview에 주면 거부한다. preview는 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. `action: request-close | cancel-close | confirm-close`는 실제 PC 창 닫기와 확인을 제어한다(§10, ADR-0372). Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
 Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(ADR-0308)를 실행한다. `{mode:"installer"}`는 설치 직전 teardown(`release_installer_file_locks`)을 실행한 뒤 `process::exit(0)`으로 끝나고, `{mode:"restart"}`는 인계를 표시한 뒤 `app.restart()`를 부른다. `installer`·`restart`는 설치 뒤의 경로만 실행하고 응답(202) 직후 프로세스가 끝난다. `{mode:"prepare"}`는 실제 설치 준비 함수의 입력 fence/drain → native checkpoint 요청 → 전체 레이아웃·세션 저장 → 출력 캐시 → ACK를 실행한다(ADR-0323). 200 응답의 `result`는 `{checkpointCommitId,preparation}`이며 마지막 캐시 진행 상태를 포함한다. 검증이 소유한 fence와 직전 업데이트 snapshot은 성공·실패 뒤 복구하고 설치하거나 종료하지 않는다. 다른 종료·업데이트·입력 fence가 진행 중이면 409로 거절하며 HTTP 호출자가 끊겨도 시작한 준비는 끝낸 뒤 해제한다. release는 모든 모드에서 403이다.
 

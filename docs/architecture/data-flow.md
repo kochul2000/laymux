@@ -1950,6 +1950,8 @@ WebView가 UI 전체이므로, WebView2 browser나 main frame renderer가 죽으
 
 ### 종료·업데이트 진행 UI (ADR-0264)
 
+명시적 PC 창 닫기는 [ADR-0372](../adr/0372-desktop-exit-confirmation.md)에 따라 `close-confirmation-store`의 사용자 결정을 기다린다(`exit.confirmBeforeExit`, 기본 true). 앱 루트의 `CloseConfirmationModal`이 표시하며 취소하면 종료 handler를 해제한다. ‘다시 보지 않기’는 승인 시 구성 snapshot 저장에 성공한 뒤 false를 적용한다. 이 단계 이후에만 기존 `begin_app_close`와 종료 진행 UI가 시작된다.
+
 준비 실패·지연의 손실 예외는 [ADR-0279](../adr/0279-lifecycle-explicit-loss-override.md)를 따른다. 일반 종료의 `손실 감수하고 종료`는 저장 완료를 기다리지 않고 창을 닫는다. 업데이트 준비가 실패하면 Rust snapshot의 `canForceInstall`이 켜지고 PC·Remote에 손실 경고와 `손실 감수하고 업데이트`가 표시된다. 이 버튼은 `force: true`로 같은 채널·후보 설치를 다시 수락하며, 권한은 새 확인 또는 설치 수락 때 소모된다. 새 다운로드·서명 검증 및 입력 fence/drain을 완료한 뒤 frontend checkpoint·Codex 확인·인터럽트·캐시를 생략하고 기존 설치기 정리 경로로 진입한다. 설치 모듈 `app_update_install.rs`가 이 분기를 소유한다. 일반 경로의 실패 중단은 유지한다. 강행처럼 checkpoint 요청이 없는 경우도 업데이트 preparing/installing 이벤트가 일반 frontend persistence를 차단한다. dev lifecycle preview의 `error`로 두 실패 화면의 버튼과 경고를 검증하며 강행 버튼은 비활성이다.
 
 `LifecycleModal`은 App 루트에서 native dialog로 표시하여 Settings 패널의 unmount와 분리한다. Settings의 업데이트 진입점과 상단 UpdateButton은 `lifecycle-store.openUpdate`로 동일한 모달을 연다. 이 두 사용자 진입점은 `openUpdate({ check: true })`로 열어, 업데이터가 활성이고 `idle`이며 손실 감수 강제 설치 제안(`canForceInstall`)이 없을 때만 `check_app_update`를 즉시 1회 호출한다. 진행 중 작업·실패 상태를 보여 주려고 여는 경로(닫기 실패, dev preview)는 확인하지 않는다. 확인 실패는 모달 오류로 표시한다. 다운로드는 최소화할 수 있고 preparing/installing 진입 시 다시 표시한다. 창 종료는 `begin_app_close`로 업데이트 설치와 상호 배제한 뒤 `saveBeforeClose(report)` → PTY close → destroy 순서다. 창 종료 요청은 하나로 합치며 저장 실패나 지연은 자동 강제 종료 대신 사용자의 명시적 종료 선택을 기다린다. 지연됐던 저장이 완료되면 정상 종료할 수 있다.

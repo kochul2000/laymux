@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { App } from "./App";
 import {
   acknowledgeSettingsRecovery,
+  beginAppClose,
   loadSettingsValidated,
   reportFileViewerSignal,
 } from "@/lib/tauri-api";
@@ -13,6 +14,7 @@ import { useLifecycleStore } from "@/stores/lifecycle-store";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useCloseConfirmationStore } from "@/stores/close-confirmation-store";
 
 vi.mock("@/components/layout/LifecycleModal", () => ({ LifecycleModal: () => null }));
 
@@ -188,7 +190,14 @@ function loadedSettings(remote?: Partial<ReturnType<typeof useSettingsStore.getS
 
 describe("App", () => {
   beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute("open");
+    };
     useLifecycleStore.setState(useLifecycleStore.getInitialState());
+    useCloseConfirmationStore.setState(useCloseConfirmationStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useLocalMobileModeStore.setState(useLocalMobileModeStore.getInitialState());
@@ -218,7 +227,11 @@ describe("App", () => {
     await screen.findByTestId("workspace-area");
     useSettingsStore.setState({
       codex: { ...useSettingsStore.getState().codex, verifySessionOnExit: false },
-      exit: { ...useSettingsStore.getState().exit, interruptTerminals: false },
+      exit: {
+        ...useSettingsStore.getState().exit,
+        confirmBeforeExit: false,
+        interruptTerminals: false,
+      },
     });
     const handler = vi.mocked(appWindow.onCloseRequested).mock.calls.at(-1)![0];
     vi.useFakeTimers();
@@ -243,6 +256,46 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("종료 확인 중 중복 닫기를 합치며 취소 후 다시 확인하고 승인해야 정리를 시작한다", async () => {
+    const appWindow = getCurrentWindow();
+    vi.mocked(appWindow.onCloseRequested).mockClear();
+    vi.mocked(appWindow.destroy).mockClear();
+    vi.mocked(beginAppClose).mockClear();
+    vi.mocked(saveBeforeClose).mockClear();
+    render(<App />);
+    await screen.findByTestId("workspace-area");
+    await waitFor(() => expect(appWindow.onCloseRequested).toHaveBeenCalled());
+    const handler = vi.mocked(appWindow.onCloseRequested).mock.calls.at(-1)![0];
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = Promise.resolve(
+        handler({ preventDefault: vi.fn() } as Parameters<typeof handler>[0]),
+      );
+      await handler({ preventDefault: vi.fn() } as Parameters<typeof handler>[0]);
+    });
+    expect(useCloseConfirmationStore.getState().open).toBe(true);
+    expect(beginAppClose).not.toHaveBeenCalled();
+    expect(saveBeforeClose).not.toHaveBeenCalled();
+    await act(async () => {
+      useCloseConfirmationStore.getState().cancel();
+      await closing;
+    });
+    expect(appWindow.destroy).not.toHaveBeenCalled();
+    await act(async () => {
+      closing = Promise.resolve(
+        handler({ preventDefault: vi.fn() } as Parameters<typeof handler>[0]),
+      );
+    });
+    expect(useCloseConfirmationStore.getState().open).toBe(true);
+    await act(async () => {
+      await useCloseConfirmationStore.getState().confirm();
+      await closing;
+    });
+    expect(beginAppClose).toHaveBeenCalledOnce();
+    expect(saveBeforeClose).toHaveBeenCalledOnce();
+    expect(appWindow.destroy).toHaveBeenCalledOnce();
   });
 
   it("mirrors the desktop viewer signal before the session finishes loading (ADR-0291)", () => {

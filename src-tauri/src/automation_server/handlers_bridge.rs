@@ -1038,7 +1038,7 @@ pub async fn ui_hook_environment(
     }
 }
 
-/// Dev-only visual lifecycle preview. No terminal or installer work is performed.
+/// Dev-only lifecycle preview and explicit desktop close confirmation controls.
 pub async fn ui_lifecycle(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,

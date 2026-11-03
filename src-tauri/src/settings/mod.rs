@@ -1656,6 +1656,42 @@ mod tests {
     }
 
     #[test]
+    fn desktop_exit_confirmation_defaults_on_and_roundtrips_explicit_choice() {
+        assert!(Settings::default().exit.confirm_before_exit);
+        for json in [
+            r#"{}"#,
+            r#"{"exit":{}}"#,
+            r#"{"exit":{"interruptTerminals":true}}"#,
+        ] {
+            let settings: Settings = serde_json::from_str(json).unwrap();
+            assert!(settings.exit.confirm_before_exit);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut settings = Settings::default();
+        settings.exit.confirm_before_exit = false;
+        save_settings_to(&path, &settings).unwrap();
+        let restored: Settings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(!restored.exit.confirm_before_exit);
+        assert_eq!(
+            restored.exit.interrupt_rounds,
+            settings.exit.interrupt_rounds
+        );
+        for enabled in [true, false] {
+            let settings: Settings = serde_json::from_value(serde_json::json!({
+                "exit": { "confirmBeforeExit": enabled, "interruptTerminals": true }
+            }))
+            .unwrap();
+            let serialized = serde_json::to_value(&settings).unwrap();
+            assert_eq!(serialized["exit"]["confirmBeforeExit"], enabled);
+            let restored: Settings = serde_json::from_value(serialized).unwrap();
+            assert_eq!(restored.exit.confirm_before_exit, enabled);
+            assert!(restored.exit.interrupt_terminals);
+        }
+    }
+
+    #[test]
     fn codex_exit_verification_defaults_on_but_preserves_explicit_choice() {
         assert!(Settings::default().codex.verify_session_on_exit);
         for json in [r#"{}"#, r#"{ "codex": {} }"#] {

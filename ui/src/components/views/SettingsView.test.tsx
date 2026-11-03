@@ -1391,6 +1391,17 @@ describe("SettingsView", () => {
 
   // -- Terminal section: kill-on-exit (issue #451) --
 
+  it("앱 종료 확인은 기본 켜짐이며 해제 후 저장해야 적용된다", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("confirm-before-exit-toggle")).toBeChecked();
+    await user.click(screen.getByTestId("confirm-before-exit-toggle"));
+    expect(useSettingsStore.getState().exit.confirmBeforeExit).toBe(true);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().exit.confirmBeforeExit).toBe(false);
+  });
+
   it("interrupt-on-exit is off by default and its inputs are hidden", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
