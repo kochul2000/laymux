@@ -58,3 +58,16 @@ export function restoreTerminalDisplayCheckpoint(
     ),
   });
 }
+
+/** Structural removal and profile replacement end display history; hidden unmounts do not. */
+export function pruneTerminalDisplayContexts(
+  settings: Pick<Settings, "workspaces" | "docks">,
+): void {
+  const contexts = useTerminalDisplayStore.getState().contexts;
+  const profiles = terminalProfiles(settings);
+  const retained = Object.entries(contexts).filter(
+    ([id, context]) => context.profile === profiles.get(id),
+  );
+  if (retained.length !== Object.keys(contexts).length)
+    useTerminalDisplayStore.setState({ contexts: Object.fromEntries(retained) });
+}
