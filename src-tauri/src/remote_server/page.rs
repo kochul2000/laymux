@@ -2224,8 +2224,18 @@ mod tests {
         assert!(html.contains("async function refreshNavigationView()"));
         assert!(html.contains("function startNavigationViewPolling()"));
         assert!(html.contains("function stopNavigationViewPolling()"));
-        assert!(html.contains("if (open) startNavigationViewPolling();"));
-        assert!(html.contains("else stopNavigationViewPolling();"));
+        let start = html.find("function setNavigationOpen(open)").unwrap();
+        let end = start
+            + html[start..]
+                .find("function remoteNavigationPinnedForViewport")
+                .unwrap();
+        assert!(html[start..end].contains("syncNavigationViewPolling();"));
+        let start = html.find("function syncNavigationViewPolling()").unwrap();
+        let end = start + html[start..].find("document.addEventListener").unwrap();
+        let polling = &html[start..end];
+        assert!(polling.contains("!leaseId || document.hidden || !navigationViewPollingNeeded()"));
+        assert!(polling.contains("stopNavigationViewPolling();"));
+        assert!(polling.contains("startNavigationViewPolling();"));
     }
 
     #[test]

@@ -204,6 +204,12 @@ impl SubscriptionRegistry {
         self.by_peer.remove(id);
     }
 
+    /// Retire a listener generation after cancelling its MCP session token.
+    pub fn clear(&mut self) {
+        self.by_peer.clear();
+        self.peers.clear();
+    }
+
     pub fn subscribe(&mut self, peer_id: &PeerId, uri: &str) {
         self.by_peer
             .entry(peer_id.clone())

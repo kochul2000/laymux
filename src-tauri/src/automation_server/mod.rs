@@ -134,9 +134,9 @@ pub async fn retry(
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let status = app_state
         .automation_server
-        .start(addr, &discovery_dir(), || {
+        .start(addr, &discovery_dir(), |mcp_config| {
             let subscriptions = app_state.automation_server.subscriptions(app_handle);
-            build_router(server_state, subscriptions, is_dev)
+            build_router(server_state, subscriptions, is_dev, mcp_config)
         })
         .await?;
     if status.phase == lifecycle::Phase::Running {
@@ -149,6 +149,7 @@ pub fn build_router(
     state: ServerState,
     subscriptions: SharedSubscriptionRegistry,
     is_dev: bool,
+    mcp_config: rmcp::transport::streamable_http_server::StreamableHttpServerConfig,
 ) -> Router {
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
@@ -282,7 +283,7 @@ pub fn build_router(
         .route("/api/v1/screenshot", post(screenshot_capture))
         .nest_service(
             "/mcp",
-            mcp::create_service(state.clone(), subscriptions.clone(), is_dev),
+            mcp::create_service(state.clone(), subscriptions.clone(), is_dev, mcp_config),
         )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/remote-access", post(ui_remote_access))

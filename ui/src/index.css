@@ -457,8 +457,9 @@
 .mcp-server-notice {
   position: fixed;
   top: 48px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 16px;
+  right: 16px;
+  margin-inline: auto;
   width: min(520px, calc(100vw - 32px));
   max-height: calc(100vh - 96px);
   overflow: auto;

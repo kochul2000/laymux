@@ -1097,6 +1097,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
+서버 복구 시 구세대 MCP 취소 토큰을 취소하고 리소스 구독·peer를 비운 뒤 재시도를 허용한다. 새 터미널의 `LX_AUTOMATION_PORT`는 현재 리스너 가용 상태와 독립적으로 빌드의 고정 포트를 전달하므로, 서버 중단 중 시작한 셸도 복구 후 재시작 없이 훅 요청을 보낼 수 있다.
+
 > **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 62개 = REST 61 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
@@ -2433,6 +2435,8 @@ pub fn get_terminal_summaries_inner(
 - 새 View 추가 시 기존 공유 컴포넌트를 우선 검토하고, 없으면 인라인으로 작성 후 반복이 확인되면 추출한다.
 
 ### 15.4 컴포넌트 설계
+
+프로덕션 UI의 정적 import 청크는 500 KiB 예산을 유지한다. `ui/src/build/chunk-groups.ts`는 Settings·GitHub와 같은 기존 분리 방식으로 `TerminalView.tsx`도 `terminal-view` 청크에 둔다. 정적 import와 모듈 평가 순서는 유지하며, 의존성을 재귀 흡수하거나 런타임 상태 소유권을 바꾸지 않는다. 실제 번들 검증은 `production-bundle.test.ts`가 담당한다.
 
 파일 항목의 표시 규칙은 `ui/src/lib/file-kind-icon.ts`를 PC·Remote가 함께 import한다([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md) 직접 적용). 탐색기·FileViewer 내부 탐색기·압축파일 목록은 `FolderUp`/`Folder`/`Link`/`File`을 13px로 표시한다. 아이콘과 이름 모두 디렉터리(상위 폴더·디렉터리 링크 포함)는 `--accent`, 파일 링크는 `--green`, 일반 파일은 `--text-primary`를 쓴다. PC의 선택된 포커스 행은 기존 선택 대비색을 아이콘과 이름에 함께 적용한다. React의 `FileKindIcon`과 Remote의 Lucide DOM 경계는 같은 매핑·크기를 소비하고, Remote 생성 번들 드리프트 검사에는 이 공용 모듈도 포함한다.
 

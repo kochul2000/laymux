@@ -32,6 +32,8 @@ async function screenshot(name) {
 }
 
 let interrupted = false;
+const terminalId = `terminal-mcp-recovery-${Date.now()}`;
+let terminalCreated = false;
 try {
   const before = await page.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -76,6 +78,23 @@ try {
   assert.equal(failure.status.phase, "failed");
   assert.equal(failure.role, "alert");
   assert.ok(failure.notice.includes(failure.status.error));
+  await page.evaluate(async (id) => {
+    const { useSettingsStore } = await import("/src/stores/settings-store.ts");
+    const profile = useSettingsStore
+      .getState()
+      .profiles.find((profile) => /powershell|pwsh/i.test(profile.commandLine));
+    if (!profile) throw new Error("네이티브 PowerShell 프로필이 필요합니다");
+    await window.__TAURI_INTERNALS__.invoke("create_terminal_session", {
+      id,
+      profile: profile.name,
+      cols: 80,
+      rows: 24,
+      syncGroup: "mcp-recovery-test",
+      cwdSend: false,
+      cwdReceive: false,
+    });
+  }, terminalId);
+  terminalCreated = true;
   // A fresh connection must be refused; HTTP is not serving the failure notice.
   await assert.rejects(
     new Promise((resolve, reject) => {
@@ -111,16 +130,42 @@ try {
     window.__TAURI_INTERNALS__.invoke("get_terminal_session_attributions"),
   );
   assert.deepEqual(
-    Object.keys(sessions).sort(),
+    Object.keys(sessions)
+      .filter((id) => id !== terminalId)
+      .sort(),
     Object.keys(before.sessions).sort(),
   );
   for (const [terminalId, session] of Object.entries(sessions)) {
+    if (!before.sessions[terminalId]) continue;
     assert.equal(
       session.generation,
       before.sessions[terminalId].generation,
       "PTY 세대를 유지한다",
     );
   }
+  await page.evaluate(
+    async (id) =>
+      window.__TAURI_INTERNALS__.invoke("write_to_terminal", {
+        id,
+        data: "$h=Invoke-RestMethod ('http://127.0.0.1:'+$env:LX_AUTOMATION_PORT+'/api/v1/health'); Write-Output ('__MCP_CHILD__'+$env:LX_AUTOMATION_PORT+'|'+$h.instance.pid+'__')\r",
+      }),
+    terminalId,
+  );
+  const marker = `__MCP_CHILD__19281|${health.instance.pid}__`;
+  let output = "";
+  for (let attempt = 0; attempt < 80; attempt++) {
+    output = (
+      await (
+        await fetch(`${base}/api/v1/terminals/${terminalId}/output?lines=100`)
+      ).json()
+    ).output;
+    if (output?.includes(marker)) break;
+    await pause(250);
+  }
+  assert.ok(
+    output?.includes(marker),
+    `중단 중 생성된 동일 셸의 복구 후 통신 실패: ${output}`,
+  );
   const mcp = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: {
@@ -167,6 +212,12 @@ try {
   if (interrupted)
     await page.evaluate(async () =>
       window.__TAURI_INTERNALS__.invoke("retry_automation_server"),
+    );
+  if (terminalCreated)
+    await page.evaluate(
+      async (id) =>
+        window.__TAURI_INTERNALS__.invoke("close_terminal_session", { id }),
+      terminalId,
     );
   page.close();
 }

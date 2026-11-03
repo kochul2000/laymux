@@ -56,7 +56,14 @@ describe("resolveChunkGroup", () => {
 
   it("leaves small vendors and other app modules to the bundler", () => {
     expect(resolveChunkGroup("/repo/ui/node_modules/zustand/esm/index.mjs")).toBeUndefined();
-    expect(resolveChunkGroup("/repo/ui/src/components/views/TerminalView.tsx")).toBeUndefined();
+    expect(resolveChunkGroup("/repo/ui/src/components/views/SomeView.tsx")).toBeUndefined();
+  });
+
+  it.each([
+    "/repo/ui/src/components/views/TerminalView.tsx",
+    String.raw`C:\repo\ui\src\components\views\TerminalView.tsx`,
+  ])("keeps the static terminal view within the production chunk budget: %s", (id) => {
+    expect(resolveChunkGroup(id)).toBe("terminal-view");
   });
 
   it.each([

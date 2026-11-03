@@ -3,7 +3,7 @@ use axum::{routing::get, Router};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 
-fn router() -> Router {
+fn router(_config: rmcp::transport::streamable_http_server::StreamableHttpServerConfig) -> Router {
     Router::new().route("/health", get(|| async { "ready" }))
 }
 
@@ -34,7 +34,7 @@ async fn occupied_port_is_visible_and_retry_recovers_http_without_replacing_a_li
 
     let (a, b) = tokio::join!(
         server.start(address, directory.path(), router),
-        server.start(address, directory.path(), || panic!(
+        server.start(address, directory.path(), |_| panic!(
             "must reuse the healthy server"
         ))
     );
@@ -95,4 +95,84 @@ async fn failure_never_removes_another_instances_discovery() {
         .await
         .unwrap();
     assert_eq!(std::fs::read(path).unwrap(), foreign);
+}
+
+#[tokio::test]
+async fn stopped_listener_closes_existing_mcp_sse_and_accepts_a_new_session_after_retry() {
+    use rmcp::transport::streamable_http_server::{
+        session::local::LocalSessionManager, StreamableHttpService,
+    };
+    #[derive(Clone)]
+    struct Handler;
+    impl rmcp::ServerHandler for Handler {}
+    let make_router = |config| {
+        Router::new().nest_service(
+            "/mcp",
+            StreamableHttpService::new(
+                || Ok(Handler),
+                Arc::new(LocalSessionManager::default()),
+                config,
+            ),
+        )
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let server = Arc::new(ServerLifecycle::default());
+    let address = "127.0.0.1:0".parse().unwrap();
+    let first = server
+        .start(address, directory.path(), make_router)
+        .await
+        .unwrap();
+    let url = format!("http://127.0.0.1:{}/mcp", first.port);
+    let client = reqwest::Client::new();
+    let initialize = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"recovery-test","version":"1"}
+    }});
+    let init = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .json(&initialize)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(init.status(), 200);
+    let session_id = init.headers()["mcp-session-id"].clone();
+    let _ = init.text().await.unwrap();
+    let initialized = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", session_id.clone())
+        .json(&serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(initialized.status().is_success());
+    let mut stream = client
+        .get(&url)
+        .header("Accept", "text/event-stream")
+        .header("mcp-session-id", session_id)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream.status(), 200);
+    server.fail_stop().await.unwrap();
+    failed(&server).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while stream.chunk().await.unwrap().is_some() {}
+    })
+    .await
+    .expect("old MCP SSE must end, without waiting for its idle timeout");
+    let next = server
+        .start(address, directory.path(), make_router)
+        .await
+        .unwrap();
+    let response = client
+        .post(format!("http://127.0.0.1:{}/mcp", next.port))
+        .header("Accept", "application/json, text/event-stream")
+        .json(&initialize)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    server.fail_stop().await.unwrap();
+    failed(&server).await;
 }

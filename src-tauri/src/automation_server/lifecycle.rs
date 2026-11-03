@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
+use rmcp::transport::streamable_http_server::StreamableHttpServerConfig;
 use tokio::net::TcpListener;
 use tokio::task::AbortHandle;
 
@@ -31,9 +32,14 @@ pub struct ServerStatus {
 }
 
 pub struct ServerLifecycle {
-    gate: tokio::sync::Mutex<Option<AbortHandle>>,
+    gate: tokio::sync::Mutex<Option<RunningServer>>,
     status: Mutex<ServerStatus>,
     subscriptions: OnceLock<SharedSubscriptionRegistry>,
+}
+
+struct RunningServer {
+    task: AbortHandle,
+    mcp: StreamableHttpServerConfig,
 }
 
 impl Default for ServerLifecycle {
@@ -91,7 +97,7 @@ impl ServerLifecycle {
         self: &Arc<Self>,
         address: SocketAddr,
         directory: &Path,
-        make_router: impl FnOnce() -> Router,
+        make_router: impl FnOnce(StreamableHttpServerConfig) -> Router,
     ) -> Result<ServerStatus, AppError> {
         let mut active = self.gate.lock().await;
         if active.is_some() {
@@ -110,7 +116,8 @@ impl ServerLifecycle {
             }
         };
         let port = listener.local_addr()?.port();
-        let router = make_router();
+        let mcp = StreamableHttpServerConfig::default();
+        let router = make_router(mcp.clone());
         super::write_discovery_file_in(directory, port);
         let serving = tokio::spawn(async move {
             axum::serve(
@@ -119,7 +126,10 @@ impl ServerLifecycle {
             )
             .await
         });
-        *active = Some(serving.abort_handle());
+        *active = Some(RunningServer {
+            task: serving.abort_handle(),
+            mcp,
+        });
         let status = self.update(Phase::Running, port, None)?;
         tracing::info!(port, "MCP/Automation server listening");
 
@@ -133,6 +143,17 @@ impl ServerLifecycle {
             };
             // Cleanup finishes before another attempt can acquire the port.
             let mut active = owner.gate.lock().await;
+            if let Some(server) = active.as_ref() {
+                server.mcp.cancellation_token.cancel();
+            }
+            if let Some(registry) = owner.subscriptions.get() {
+                match registry.lock_or_err() {
+                    Ok(mut registry) => registry.clear(),
+                    Err(error) => {
+                        tracing::error!(%error, "Failed to clear stopped MCP subscriptions")
+                    }
+                }
+            }
             remove_owned_discovery_file(&directory);
             if let Err(status_error) = owner.update(Phase::Failed, port, Some(error.clone())) {
                 tracing::error!(%status_error, "Failed to record automation server failure");
@@ -154,7 +175,7 @@ impl ServerLifecycle {
         let handle = active
             .as_ref()
             .ok_or_else(|| AppError::Other("Server is not running".into()))?;
-        handle.abort();
+        handle.task.abort();
         Ok(())
     }
 }

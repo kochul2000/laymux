@@ -1,6 +1,6 @@
 # 0374. MCP 연결 서버 실패는 데스크톱에서 알리고 서버만 재시도한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 - Source: 사용자 요구(Windows·WSL MCP 접속 실패 시 알림과 서버 재시작), architecture/api-contracts.md §12.2, ADR-0002
 
@@ -17,6 +17,7 @@ MCP 서버의 시작 실패와 실행 중 오류는 로그에만 남고 앱은 �
 - bind 실패와 serve task의 오류·panic·취소를 failed로 기록한다. 사용자 알림은 HTTP 서버에 의존하지 않는 Tauri IPC 조회를 사용하므로 초기 시작 실패도 놓치지 않는다.
 - 재시도는 기존 빌드의 고정 포트·IP allowlist·Remote 인증 계약을 유지한다. 공유 서버 전체를 복구하며 앱·PTY·에이전트를 종료하지 않는다. 복구 후 에이전트 재연결이 필요할 수 있음을 안내한다.
 - MCP 리소스 이벤트 브리지는 앱 수명 동안 한 번만 설치한다. 발견 파일은 bind 성공 이후 게시하고, 서버 종료 시 현재 PID 소유 파일만 제거한다. 타 인스턴스 파일은 변경하지 않는다.
+- 서버가 종료되면 해당 세대의 MCP 취소 토큰을 취소하고 구독 레지스트리를 비운 뒤 재시도를 허용한다. 실패 중 새로 만드는 터미널에도 고정 `LX_AUTOMATION_PORT`를 전달해 프로세스를 다시 만들지 않고 훅 통신을 복구한다.
 - dev 전용 실패 주입 API로 실제 서버 중단 → 네이티브 알림 → 버튼 재시도 → HTTP/MCP 복구를 검증한다. release에서는 주입을 거절한다.
 
 ## Alternatives Considered
