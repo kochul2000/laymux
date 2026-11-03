@@ -30,4 +30,6 @@ pub fn state_path() -> Result<std::path::PathBuf, crate::error::AppError> {
         .join("state.db"))
 }
 #[cfg(test)]
+mod display_tests;
+#[cfg(test)]
 mod tests;

@@ -3,6 +3,12 @@ import type { TerminalAttributionCoverage } from "./settings-snapshot";
 import type { Settings } from "./tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useDockStore } from "@/stores/dock-store";
+import {
+  collectTerminalDisplayCheckpoint,
+  restoreTerminalDisplayCheckpoint,
+} from "./terminal-display-checkpoint";
+import type { TerminalDisplayContext } from "./terminal-display-context";
 
 export interface LocalSessionSnapshot {
   workspaces: Settings["workspaces"];
@@ -12,6 +18,7 @@ export interface LocalSessionSnapshot {
   attributionLookupFailed: boolean;
   cwdLookupFailed: boolean;
   uiState?: {
+    terminalDisplayContexts?: Record<string, TerminalDisplayContext>;
     activeWorkspaceId?: string;
     fileViewer?: { open: boolean; path: string; maximized: boolean };
   };
@@ -37,6 +44,7 @@ export function saveLocalSession(
     attributionLookupFailed,
     cwdLookupFailed,
     uiState: {
+      terminalDisplayContexts: collectTerminalDisplayCheckpoint(settings),
       activeWorkspaceId: useWorkspaceStore.getState().activeWorkspaceId,
       fileViewer: {
         open: viewer.open,
@@ -53,6 +61,10 @@ export function loadLocalSession(): Promise<LocalSessionSnapshot | null> {
 export function applyLocalUiState(
   snapshot: { uiState?: LocalSessionSnapshot["uiState"] } | null | undefined,
 ): void {
+  restoreTerminalDisplayCheckpoint(snapshot?.uiState?.terminalDisplayContexts, {
+    workspaces: useWorkspaceStore.getState().workspaces,
+    docks: useDockStore.getState().docks,
+  });
   const active = snapshot?.uiState?.activeWorkspaceId;
   if (active && useWorkspaceStore.getState().workspaces.some((w) => w.id === active))
     useWorkspaceStore.setState({ activeWorkspaceId: active });

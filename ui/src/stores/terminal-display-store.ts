@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { TerminalDisplayContext } from "@/lib/terminal-display-context";
 
-/** Live daemon history only: never included in settings/session serialization. */
+/** Display history restored from the local checkpoint or daemon; never live authority. */
 export const useTerminalDisplayStore = create<{
   contexts: Record<string, TerminalDisplayContext>;
   setContext: (id: string, context: TerminalDisplayContext | undefined) => void;

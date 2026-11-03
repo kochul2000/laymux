@@ -1061,7 +1061,7 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 
 재연결 invoke는 frontend create/close 큐에 넣지 않는다. 미정산 IPC 때문에 명시적 재시작까지 막히지 않게 backend의 terminal별 lifecycle claim이 close와 재연결을 직렬화한다. close는 blocking worker에서 테이블 락을 잡기 전에 최대 20초 기다려 claim을 얻고, timeout이면 catalog/handle을 보존한다. attach 응답 유실로 epoch가 불확실한 보존 handle의 종료가 superseded되면 같은 세션에 `takeOver:false`로 다시 붙어 확인한 epoch로 종료한다. 이 연결의 redraw는 배출하고 종료 ACK까지 연결을 유지한다. 활성 client의 attach 거절·불확실한 응답·재차 superseded된 종료는 오류다.
 
-**표시 문맥 인계([ADR-0329](../adr/0329-daemon-retains-workspace-display-context.md)):** GUI는 마지막 입력·상태 메시지·명령 결과와 표시용 작업 관측을 별도 제어 연결로 해당 데몬 세션 메모리에 전달한다. attach epoch가 소유권을 제한하고 attach metadata와 사설 문맥 읽기 요청으로 돌려준다. 세션 목록·디스크에는 입력을 남기지 않는다. 새 GUI는 최신 관측을 우선하며 이전 작업 관측을 표시용 stale 이력으로만 사용한다. 창 기하는 move/resize 때 기존 저장소에 반영하며 업데이트 준비에서 중복 수집하지 않는다.
+**표시 문맥 인계([ADR-0329](../adr/0329-daemon-retains-workspace-display-context.md), [ADR-0371](../adr/0371-durable-workspace-display-history.md)):** GUI는 마지막 입력·상태 메시지·명령 결과와 표시용 작업 관측을 별도 제어 연결로 해당 데몬 세션 메모리에 전달한다. attach epoch가 소유권을 제한하고 attach metadata와 사설 문맥 읽기 요청으로 돌려준다. 같은 표시 문맥을 로컬 SQLite checkpoint의 `uiState.terminalDisplayContexts`에도 저장해 데몬 종료 후 복원한다. portable 설정과 세션 목록에는 입력을 포함하지 않는다. 새 GUI는 최신 관측을 우선하며 이전 작업 관측을 표시용 stale 이력으로만 사용한다. unknown 관측 동안에는 마지막 앱 표시를 유지하고 실제 앱·작업 관측(유휴 포함)이 오면 교체한다. 마지막 제출 입력은 상태 재확인과 별개이며 새 제출 전까지 원래 값·시각을 유지한다. 창 기하는 move/resize 때 기존 저장소에 반영하며 업데이트 준비에서 중복 수집하지 않는다.
 
 `useTerminalDisplayContext`가 `terminal-store`의 준비된 generation만 구독하고 `terminal-display-context.ts`가 바뀐 문맥을 터미널별로 500ms 간격에 묶어 전송한다. 변경 없는 pane이나 출력 활동만 바뀐 경우에는 쓰지 않는다. 업데이트 체크포인트는 남은 문맥 전송을 기다린 뒤 ACK한다. 별도 `terminal-display-store`는 미방문 workspace의 표시 이력도 담지만 실제 `TerminalInstance`나 PTY를 만들지 않는다. `projectWorkspaceTerminals`가 PC·Remote에 같은 표시 모델을 만들며, 명시적으로 지운 필드·새 입력·새 관측이 과거 정보보다 우선한다. 데몬의 사설 `readDisplayContexts`는 최대 2개씩 읽고 일반 `list`에는 문맥을 싣지 않는다. `updateDisplayContext`·읽기 요청은 별도 연결에 유한 deadline을 사용하므로 출력 연결에 응답을 끼워 넣지 않는다.
 
@@ -1228,7 +1228,7 @@ clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy
 
 예외 조회는 이미 shell로 분류된 pane에만 적용한다. OSC 133 E만 받은 running이나 activity 미확정은 조회로 shell로 덮지 않는다. 조회 중 running/task 관측이 새로 생겼다면 그 증거도 보존하고 최신 상태로 busyPolicy를 적용한다.
 
-결과 아이콘은 pane 첫째 줄에 Lucide SVG로 표시하고 상태 색상과 읽지 않은 알림 링은 기존 배지가 소유한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. Direct 조립기는 ECMA-48 7-bit CSI의 parameter/intermediate/final byte 범위를 chunk 경계에 걸쳐 bounded 상태로 소비하므로 SGR·SGR-pixels와 parameterized mouse report 좌표가 제출 문장에 섞이지 않는다. 이 필터는 최근 입력 모델에만 적용하며 PTY로 보내는 원본 입력 바이트는 변경하지 않는다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
+결과 아이콘은 pane 첫째 줄에 Lucide SVG로 표시하고 상태 색상과 읽지 않은 알림 링은 기존 배지가 소유한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. Direct 조립기는 ECMA-48 7-bit CSI의 parameter/intermediate/final byte 범위를 chunk 경계에 걸쳐 bounded 상태로 소비하므로 SGR·SGR-pixels와 parameterized mouse report 좌표가 제출 문장에 섞이지 않는다. 이 필터는 최근 입력 모델에만 적용하며 PTY로 보내는 원본 입력 바이트는 변경하지 않는다. 제출 입력과 시각은 표시 이력으로 로컬 세션에 보존하며, workspace 진입 시에는 상태만 재확인한다([ADR-0371](../adr/0371-durable-workspace-display-history.md)). 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
 
 #### 출력 기반 메시지 추출 (Codex 대화 · Claude recap)
 
@@ -1595,7 +1595,11 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 ### 13.1 개요
 
-앱 재시작 시 SQLite의 workspace/dock/pane·CWD·대화 ID·활성 workspace·파일 뷰어를 복원하고 출력은 독립된 캐시에서 읽는다. 프로파일 단위 복원 옵션을 적용한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).
+표시 이력 변경은 구조 변경과 별도의 revision으로 checkpoint 재사용만 무효화한다. 마지막 표시 수집 이후의 제목 애니메이션은 귀속 관측·DB 저장 전체 재시도를 만들지 않는다. 저장 명령 본문과 시각은 같은 이력에서 복원하므로, 새 명령 본문 없는 초기 prompt/종료 결과가 과거 명령을 마지막 사용자 입력보다 최신으로 만들지 않는다([ADR-0371](../adr/0371-durable-workspace-display-history.md)).
+
+`useTerminalDisplayContext`는 workspace/dock의 구조 변경과 instance 제거 뒤 실제 content 목록·profile을 대조해 메모리 표시 이력도 정리한다. 숨김 회수만으로는 삭제하지 않으며, 구조 삭제 뒤 늦게 완료된 데몬 문맥 조회도 다시 걸러 영구 삭제한 입력 이력이 남지 않게 한다.
+
+앱 재시작 시 SQLite의 workspace/dock/pane·CWD·대화 ID·활성 workspace·파일 뷰어·terminal 표시 이력(마지막 제출 입력 포함)을 복원하고 출력은 독립된 캐시에서 읽는다. 프로파일 단위 복원 옵션을 적용한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).
 
 Rust `local_state`가 DB 연결과 짧은 트랜잭션을 소유한다. `settings/persistence`는 portable JSON과 DB 환경·세션을 유효 `Settings`로 합성한다. 생산 진입점은 OS 경로를 명시적으로 선택하고 내부 코어는 저장소를 주입받는다. 테스트는 settings 경로의 이웃 DB 또는 별도로 주입한 경로만 사용한다. read는 읽기 전용 연결이며, write는 WAL·synchronous=FULL·250ms busy timeout·IMMEDIATE transaction을 사용한다. 앱 상태 락과 프로세스/WSL 조회를 DB transaction 안에서 수행하지 않는다. schema 불일치·손상·잠금·디스크 부족은 오류로 전달하고 원본을 자동 삭제하거나 빈 상태로 재생성하지 않는다.
 

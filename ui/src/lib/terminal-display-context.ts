@@ -43,31 +43,42 @@ export function projectTerminalDisplay(
   const newerInput = (instance.lastUserInputAt ?? 0) > (history.lastUserInputAt ?? 0);
   const differentActivity =
     instance.activity &&
+    instance.activity.type !== "unknown" &&
     history.activity &&
     (instance.activity.type !== history.activity.type ||
       instance.activity.name !== history.activity.name);
   const newerCommand = (instance.lastCommandAt ?? 0) > (history.lastCommandAt ?? 0);
+  const historicalCommand =
+    !Object.hasOwn(instance, "lastCommand") && history.lastCommand !== undefined;
   const fallback = Object.fromEntries(
     fields
-      .filter((key) => !Object.hasOwn(instance, key) && history[key] !== undefined)
+      .filter(
+        (key) =>
+          (!Object.hasOwn(instance, key) ||
+            (key === "activity" && instance.activity?.type === "unknown")) &&
+          history[key] !== undefined,
+      )
       .filter((key) => !(differentActivity && (key === "activityMessage" || key === "title")))
       .filter((key) => !(newerCommand && key === "lastExitCode"))
       .map((key) => [key, history[key]]),
   );
   const previousTask = !newerInput && !differentActivity ? history.task : undefined;
   const task =
-    previousTask && (!instance.task?.state || instance.task.state === "idle")
+    previousTask && !instance.task?.state
       ? { ...previousTask, observation: "stale" as const, notification: undefined }
       : instance.task;
   return {
     ...instance,
     ...fallback,
+    // A prompt/result may have a fresh timestamp without a command body. Keep
+    // the historical body and its timestamp together for last-input selection.
+    ...(historicalCommand ? { lastCommandAt: history.lastCommandAt } : {}),
     lastActivityAt: Math.max(instance.lastActivityAt, history.lastActivityAt ?? 0),
     task,
   };
 }
 
-function snapshot(instance: TerminalInstance): TerminalDisplayContext {
+export function snapshotTerminalDisplay(instance: TerminalInstance): TerminalDisplayContext {
   const displayValue = (key: (typeof fields)[number]) => {
     const value = instance[key];
     return typeof value === "string"
@@ -106,7 +117,7 @@ function fingerprint(context: TerminalDisplayContext): string {
       : undefined,
   });
 }
-function validContext(value: unknown): value is TerminalDisplayContext {
+export function validDisplayContext(value: unknown): value is TerminalDisplayContext {
   return (
     !!value &&
     typeof value === "object" &&
@@ -115,6 +126,24 @@ function validContext(value: unknown): value is TerminalDisplayContext {
     "profile" in value &&
     typeof value.profile === "string"
   );
+}
+
+/** Daemon and disk can be saved at different times; submitted input has its own clock. */
+function mergeHistory(
+  previous: TerminalDisplayContext | undefined,
+  next: TerminalDisplayContext,
+): TerminalDisplayContext {
+  if (!previous || previous.profile !== next.profile) return next;
+  return {
+    ...previous,
+    ...next,
+    ...((previous.lastUserInputAt ?? 0) > (next.lastUserInputAt ?? 0)
+      ? {
+          lastUserInput: previous.lastUserInput,
+          lastUserInputAt: previous.lastUserInputAt,
+        }
+      : {}),
+  };
 }
 
 let currentSync: { scan: () => void; flush: () => Promise<void> } | undefined;
@@ -165,7 +194,7 @@ export function startTerminalDisplayContextSync(): () => void {
     });
   };
   const publish = (id: string, entry: Entry, initial = false) => {
-    if (!current(id, entry) || entry.initializing || !entry.supported) return;
+    if (!current(id, entry) || entry.initializing) return;
     const instance = catalog.get(id)!;
     if (!initial && entry.previous === instance && !entry.error) return;
     entry.previous = instance;
@@ -174,7 +203,7 @@ export function startTerminalDisplayContextSync(): () => void {
       history = { ...history, task: undefined };
     }
     entry.task = instance.task;
-    const context = snapshot(projectTerminalDisplay(instance, history));
+    const context = snapshotTerminalDisplay(projectTerminalDisplay(instance, history));
     if (fingerprint(context) === entry.queued && !entry.error) return;
     entry.queued = fingerprint(context);
     entry.pending = context;
@@ -190,7 +219,8 @@ export function startTerminalDisplayContextSync(): () => void {
         const removed = entries.get(id);
         if (removed?.timer) clearTimeout(removed.timer);
         entries.delete(id);
-        useTerminalDisplayStore.getState().setContext(id, undefined);
+        // Hidden eviction unmounts live instances; their display remains until
+        // the next attach. Checkpoint collection filters deleted content IDs.
       }
     }
     for (const instance of instances) {
@@ -208,8 +238,13 @@ export function startTerminalDisplayContextSync(): () => void {
               generation: initializing.generation,
             });
             if (!current(instance.id, initializing)) return;
+            const previous = useTerminalDisplayStore.getState().contexts[instance.id];
             const history =
-              validContext(value) && value.profile === instance.profile ? value : undefined;
+              validDisplayContext(value) && value.profile === instance.profile
+                ? mergeHistory(previous, value)
+                : previous?.profile === instance.profile
+                  ? previous
+                  : undefined;
             useTerminalDisplayStore.getState().setContext(instance.id, history);
             const latest = useTerminalStore.getState().instances.find((i) => i.id === instance.id)!;
             if (
@@ -285,11 +320,13 @@ export async function loadTerminalDisplayContexts(
   for (const [id, value] of Object.entries(contexts)) {
     // A mounted terminal has already obtained its exact attach's context.
     if (
-      !useTerminalStore.getState().instances.some((i) => i.id === id && i.sessionReady) &&
-      validContext(value) &&
+      !useTerminalStore.getState().instances.some((i) => i.id === id) &&
+      validDisplayContext(value) &&
       value.profile === profiles[id]
     ) {
-      useTerminalDisplayStore.getState().setContext(id, value);
+      useTerminalDisplayStore
+        .getState()
+        .setContext(id, mergeHistory(useTerminalDisplayStore.getState().contexts[id], value));
     }
   }
 }

@@ -59,8 +59,13 @@ const UI_ROOT = process.cwd();
  * 훅 일괄 갱신의 큐 처리와 단일 버튼 문구는 482 B를 추가해 552,526 B다.
  * 556 kB는 기존과 비슷한 3,474 B의 여유를 복원한다. 정적 로드 범위와
  * 문법 청크의 별도 상한은 유지한다.
+ *
+ * v3.9.0/main 223ca8f0의 같은 의존성 빌드는 이미 558,775 B다.
+ * 표시 checkpoint 보존과 삭제 시 정리를 포함한 entry는 559,050 B다.
+ * 562 kB로 현재 entry에 2,950 B의 여유를 복원한다. 기존 로딩 경계와
+ * 문법 청크 상한은 바꾸지 않는다.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 556_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 562_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

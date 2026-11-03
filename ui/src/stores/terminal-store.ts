@@ -47,7 +47,7 @@ export interface TerminalInstance {
   lastCommand?: string;
   lastExitCode?: number;
   lastCommandAt?: number;
-  /** Latest user text submitted to this terminal; runtime-only and never persisted. */
+  /** Latest submitted user text; retained in the local display checkpoint (ADR-0371). */
   lastUserInput?: string;
   lastUserInputAt?: number;
   /** Detected terminal activity state. */

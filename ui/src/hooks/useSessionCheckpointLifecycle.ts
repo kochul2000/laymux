@@ -9,6 +9,7 @@ import {
 import {
   flushSessionCheckpoint,
   markSessionCheckpointMutation,
+  markSessionDisplayMutation,
   persistSession,
   cacheTerminalOutputs,
   setPreparingUpdate,
@@ -21,6 +22,7 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
 import { flushTerminalDisplayContexts } from "@/lib/terminal-display-context";
+import { useTerminalDisplayStore } from "@/stores/terminal-display-store";
 
 function hiddenEvictionTargetsRemainEligible(terminalIds: readonly string[]): boolean {
   return areHiddenPaneIdsEligible(terminalIds.map(toPaneId));
@@ -129,6 +131,9 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
         console.warn("[session-checkpoint] Failed to subscribe to native requests:", error);
       });
 
+    const unsubscribeDisplay = useTerminalDisplayStore.subscribe(() =>
+      markSessionDisplayMutation(),
+    );
     const unsubscribeWorkspace = useWorkspaceStore.subscribe((state, previous) => {
       if (
         state.workspaces !== previous.workspaces ||
@@ -177,6 +182,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       unsubscribeDock();
       unsubscribeSettings();
       unsubscribeViewer();
+      unsubscribeDisplay();
       document.removeEventListener("visibilitychange", checkpointWhenVisible);
     };
   }, [ready]);
