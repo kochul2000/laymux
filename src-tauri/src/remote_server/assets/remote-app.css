@@ -930,12 +930,6 @@
       .copy-pane-button {
         color: var(--text-secondary);
       }
-      .pane-close-button[data-confirming="true"] {
-        color: var(--red);
-        background: var(--danger-bg);
-        box-shadow: inset 0 0 0 1px var(--red);
-        opacity: 1;
-      }
       .file-explorer-button {
         position: relative;
         color: var(--text-secondary);
@@ -2946,6 +2940,14 @@
       .key-btn:active:not(:disabled) {
         border-color: var(--accent-50);
         background: var(--accent-12);
+      }
+      .pane-close-button[data-confirming="true"],
+      .key-btn[data-confirming="true"]:not(:disabled) {
+        color: var(--red);
+        border-color: var(--red);
+        background: var(--danger-bg);
+        box-shadow: inset 0 0 0 1px var(--red);
+        opacity: 1;
       }
       .key-flick-btn {
         display: inline-flex;

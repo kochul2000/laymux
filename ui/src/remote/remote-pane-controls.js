@@ -1,5 +1,74 @@
 import { setRemoteIcon } from "./remote-icons.js";
 
+// Key rows preserve editor focus, so confirmation belongs to an explicit
+// button + pane + lease rather than document.activeElement (ADR-0369).
+export function createPaneCloseKeyConfirmation(document) {
+  let pending = null;
+  const installed = new WeakSet();
+
+  function reset() {
+    if (!pending) return;
+    const { button, title, label } = pending;
+    delete button.dataset.confirming;
+    button.title = title;
+    if (label === null) button.removeAttribute("aria-label");
+    else button.setAttribute("aria-label", label);
+    pending = null;
+  }
+
+  function update(target, lease) {
+    if (pending && (
+      pending.paneId !== target?.id || pending.lease !== lease || !target?.canClose ||
+      !pending.button.isConnected || pending.button.closest("[hidden]") || pending.button.disabled
+    )) reset();
+  }
+
+  function cancelOutside(event) {
+    if (pending && !pending.button.contains(event.target)) reset();
+  }
+  document.addEventListener("pointerdown", cancelOutside, true);
+  document.addEventListener("click", cancelOutside, true);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") reset();
+  }, true);
+  document.defaultView.addEventListener("blur", reset);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) reset();
+  });
+
+  return {
+    reset,
+    update,
+    activate(button, target, lease) {
+      update(target, lease);
+      if (!button || button.disabled || !button.isConnected || button.closest("[hidden]") ||
+          !target?.canClose || !lease) return false;
+      if (pending?.button === button) {
+        reset();
+        return true;
+      }
+      reset();
+      if (!installed.has(button)) {
+        installed.add(button);
+        button.addEventListener("blur", () => {
+          if (pending?.button === button) reset();
+        });
+        button.addEventListener("pointerleave", (event) => {
+          if (pending?.button === button && event.pointerType !== "touch") reset();
+        });
+      }
+      pending = {
+        button, paneId: target.id, lease,
+        title: button.title, label: button.getAttribute("aria-label"),
+      };
+      button.dataset.confirming = "true";
+      button.title = "Click again to close pane";
+      button.setAttribute("aria-label", button.title);
+      return false;
+    },
+  };
+}
+
 // The selected content id and lease own the transient two-click state.
 export function createPaneControls({
   hideButton,
