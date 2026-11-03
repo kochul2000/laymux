@@ -4,6 +4,7 @@ import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers
 import { taskSource } from "./terminal-task";
 import { heuristicTask } from "./terminal-task-detection";
 import { onTaskStateRefresh } from "./task-state-refresh";
+import { correctTerminalInputFromAgent } from "./terminal-input-history";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -61,6 +62,8 @@ export function subscribeCodexTurnStates(): () => void {
         {
           epoch: epochs.get(instance.id) ?? 0,
           inputAt: instance.lastUserInputAt,
+          clearedAt: instance.lastInputClearedAt,
+          submittedAt: instance.lastInputSubmissionAt,
           taskEpoch: instance.taskEpoch,
         },
       ]),
@@ -73,6 +76,8 @@ export function subscribeCodexTurnStates(): () => void {
         isCodex(current) &&
         stamp.epoch === (epochs.get(id) ?? 0) &&
         stamp.inputAt === current.lastUserInputAt &&
+        stamp.clearedAt === current.lastInputClearedAt &&
+        stamp.submittedAt === current.lastInputSubmissionAt &&
         stamp.taskEpoch === current.taskEpoch
         ? current
         : undefined;
@@ -135,6 +140,7 @@ export function subscribeCodexTurnStates(): () => void {
                   ? "interrupted"
                   : undefined,
         });
+        if (snapshot.submittedInput) correctTerminalInputFromAgent(id, snapshot.submittedInput);
         if (
           deferred?.observation &&
           deferred.source === source &&
@@ -174,7 +180,13 @@ export function subscribeCodexTurnStates(): () => void {
         if (current?.codexTurn)
           useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: undefined });
       }
-      if (current && old && isCodex(current) && current.lastUserInputAt !== old.lastUserInputAt) {
+      if (
+        current &&
+        old &&
+        isCodex(current) &&
+        (current.lastUserInputAt !== old.lastUserInputAt ||
+          current.lastInputSubmissionAt !== old.lastInputSubmissionAt)
+      ) {
         // A submitted local command is not a new task; invalidate in-flight reads only.
         schedule(0);
       }

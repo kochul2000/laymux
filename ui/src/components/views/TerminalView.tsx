@@ -154,6 +154,12 @@ import { installNativeCursorSuppression } from "@/lib/native-cursor-suppression"
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import { createDirectInputCapture, normalizeSubmittedInput } from "@/lib/terminal-last-input";
 import {
+  captureInputHistoryScope,
+  clearTerminalInputHistory,
+  noteTerminalInputSubmission,
+  recordTerminalInput,
+} from "@/lib/terminal-input-history";
+import {
   createTerminalFocusOwnership,
   type TerminalFocusOwnership,
 } from "@/lib/terminal-focus-ownership";
@@ -918,14 +924,12 @@ export function TerminalView({
     storeComposerDraft(started.draft);
     historyNavRef.current = { index: null, stash: "" };
     dismissTerminalResponseNotification(instanceId);
+    const historyScope = captureInputHistoryScope(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
         const lastUserInput = normalizeSubmittedInput(started.submission.text);
         if (lastUserInput) {
-          useTerminalStore.getState().updateInstanceInfo(started.submission.terminalId, {
-            lastUserInput,
-            lastUserInputAt: Date.now(),
-          });
+          recordTerminalInput(started.submission.terminalId, lastUserInput, historyScope);
         }
         pushComposerHistory(
           resolveComposerHistoryKey(started.submission.terminalId),
@@ -3761,6 +3765,7 @@ export function TerminalView({
     // additionally cover focus reports that xterm emits without wasUserInput.
     // Without the internal signal, ambiguous live-write data stays human.
     const directInputCapture = createDirectInputCapture();
+    let captureResetRevision = captureInputHistoryScope(instanceId)?.inputDraftResetRevision;
     terminal.onData((data) => {
       trace("terminal-onData", {
         bytes: data.length,
@@ -3791,18 +3796,24 @@ export function TerminalView({
       }
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
+        const historyScope = captureInputHistoryScope(instanceId);
+        if (captureResetRevision !== historyScope?.inputDraftResetRevision)
+          directInputCapture.reset();
+        captureResetRevision = historyScope?.inputDraftResetRevision;
         const submittedInputs = directInputCapture.push(data);
         const byteLength = textEncoder.encode(data).length;
         const attempt = beginTerminalInputDelivery(instanceId, byteLength);
         void writeToTerminal(instanceId, data).then(
           () => {
             settleTerminalInputDelivery(attempt, "succeeded");
+            if (cancelled) return;
+            if (data.includes("\x0c")) clearTerminalInputHistory(instanceId, historyScope);
             const lastUserInput = submittedInputs.at(-1);
-            if (!lastUserInput) return;
-            useTerminalStore.getState().updateInstanceInfo(instanceId, {
-              lastUserInput,
-              lastUserInputAt: Date.now(),
-            });
+            if (!lastUserInput) {
+              if (/[\r\n]/u.test(data)) noteTerminalInputSubmission(instanceId, historyScope);
+              return;
+            }
+            recordTerminalInput(instanceId, lastUserInput, historyScope);
           },
           (error: unknown) => {
             if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;

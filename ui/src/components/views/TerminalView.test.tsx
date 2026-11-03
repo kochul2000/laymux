@@ -4737,6 +4737,91 @@ describe("TerminalView", () => {
     });
   });
 
+  it("clears last input on successful human Ctrl+L and discards a delayed older submission", async () => {
+    const terminalId = "t-history-clear";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("previous\r", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+      ).toBe("previous"),
+    );
+    let finish!: () => void;
+    mockWriteToTerminal.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    act(() => terminal.emitCoreData("late\r", true));
+    act(() => terminal.emitCoreData("\x0c", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastInputClearedAt,
+      ).toBeGreaterThan(0),
+    );
+    await act(async () => finish());
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+    ).toBeUndefined();
+  });
+
+  it("preserves the Direct draft across screen-only Ctrl+L", async () => {
+    const terminalId = "t-history-screen-clear-draft";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("kept draft", true));
+    act(() => terminal.emitCoreData("\x0c", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastInputClearedAt,
+      ).toBeGreaterThan(0),
+    );
+    act(() => terminal.emitCoreData(" suffix\r", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+      ).toBe("kept draft suffix"),
+    );
+  });
+
+  it("resets the Direct draft when an actual pane clear discarded it", async () => {
+    const terminalId = "t-history-draft-discard";
+    const { clearTerminalInputHistory } = await import("@/lib/terminal-input-history");
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("old draft", true));
+    act(() => clearTerminalInputHistory(terminalId, undefined, { discardDraft: true }));
+    act(() => terminal.emitCoreData("next\r", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+      ).toBe("next"),
+    );
+  });
+
+  it("tracks an Enter after history navigation without inventing a user message", async () => {
+    const terminalId = "t-history-empty-key-capture";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => createdTerminals.at(-1)!.emitCoreData("\x1b[A\t\r", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)
+          ?.lastInputSubmissionAt,
+      ).toBeGreaterThan(0),
+    );
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+    ).toBeUndefined();
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.task,
+    ).toBeUndefined();
+  });
+
   it("coalesces rejected human onData alerts while counting every exactly-once attempt", async () => {
     const terminalId = "t-human-write-rejected";
     mockWriteToTerminal.mockRejectedValue(new Error("IPC response lost"));

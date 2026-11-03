@@ -37,6 +37,7 @@ export interface TerminalSummaryInfo {
   lastCommandAt: number | undefined;
   lastUserInput: string | undefined;
   lastUserInputAt: number | undefined;
+  lastInputClearedAt?: number;
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
   codexTurn?: TerminalInstance["codexTurn"];
@@ -210,6 +211,7 @@ export function computeWorkspaceSummary(
       lastCommandAt: t.lastCommandAt,
       lastUserInput: t.lastUserInput,
       lastUserInputAt: t.lastUserInputAt,
+      lastInputClearedAt: t.lastInputClearedAt,
       activity: t.activity,
       outputActive: t.outputActive ?? false,
       codexTurn: t.codexTurn,

@@ -15,6 +15,7 @@ import {
 } from "./workspace-clear";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { selectTerminalLastInput } from "./terminal-last-input";
 
 function seedWorkspace() {
   useWorkspaceStore.setState({
@@ -92,6 +93,55 @@ describe("clearWorkspace", () => {
   }
 
   // ADR-0271: the Remote lease holder's request writes as that holder.
+  it.each(["shell", "unknown", "running", "interactiveApp"] as const)(
+    "clears input history after a successful write regardless of %s activity",
+    async (type) => {
+      seedWorkspace();
+      registerReady("pane-a");
+      useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+        activity: { type },
+        lastUserInput: "previous",
+        lastUserInputAt: 10,
+      });
+      await clearWorkspace("ws-1");
+      expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBeUndefined();
+      expect(useTerminalStore.getState().instances[0].lastInputClearedAt).toBeGreaterThan(0);
+    },
+  );
+
+  it("preserves history when the clear write fails", async () => {
+    seedWorkspace();
+    registerReady("pane-a");
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+      lastUserInput: "previous",
+      lastUserInputAt: 10,
+    });
+    vi.mocked(writeToTerminal).mockRejectedValueOnce(new Error("failed"));
+    await clearWorkspace("ws-1");
+    expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBe("previous");
+  });
+
+  it("keeps a newer OSC command when a pending clear write settles", async () => {
+    seedWorkspace();
+    registerReady("pane-a");
+    let finish!: () => void;
+    vi.mocked(writeToTerminal).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const clearing = clearWorkspace("ws-1");
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("terminal-pane-a", {
+        lastCommand: "new command",
+        lastCommandAt: Date.now(),
+      });
+    finish();
+    await clearing;
+    expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBe("new command");
+  });
+
   it("broadcasts as the Remote lease holder when one requested the clear", async () => {
     seedWorkspace();
     registerReady("pane-a");

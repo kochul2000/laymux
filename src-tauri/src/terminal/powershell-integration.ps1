@@ -26,6 +26,11 @@ if (($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') -and
                 $global:__lmx_running = $true
                 # 성공 스트림에 쓰면 OSC가 명령 문자열에 섞이므로 호스트 UI에 직접 쓴다.
                 $Host.UI.Write($global:__lmx_e + ']133;C' + $global:__lmx_b)
+                # PSReadLine이 자동완성·이력·편집을 마친 실제 제출 문자열만 보고한다.
+                # OSC 종료/삽입을 막고 여러 줄을 표시용 한 줄로 접는다. 실행 원문은 보존한다.
+                $displayLine = $line -replace '[\x00-\x1f\x7f-\x9f]', ' '
+                if ($displayLine.Length -gt 16384) { $displayLine = $displayLine.Substring(0, 16384) }
+                $Host.UI.Write($global:__lmx_e + ']133;E;' + $displayLine + $global:__lmx_b)
             }
         }
         return $line

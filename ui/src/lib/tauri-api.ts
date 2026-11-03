@@ -2017,6 +2017,7 @@ export interface CodexTurnSnapshot {
   selectionKey?: string;
   turnId?: string;
   state: "running" | "completed" | "failed" | "interrupted" | "idle" | "unknown";
+  submittedInput?: { text: string; timestamp: string };
 }
 
 export async function getCodexTurnStates(): Promise<Record<string, CodexTurnSnapshot>> {
@@ -2030,14 +2031,20 @@ export interface AgentSessionState {
   status: "running" | "idle" | "waiting" | "ended";
   result?: "success" | "interrupted";
   turnId?: string;
+  submittedInput?: { text: string; timestamp: string };
 }
 
 /** A terminal is missing when its session or recorded state is not known. */
 export async function getAgentSessionStates(
   claudeTerminalIds: string[],
   grokTerminalIds: string[],
+  inputTerminalIds?: string[],
 ): Promise<Record<string, AgentSessionState>> {
-  return invoke("get_agent_session_states", { claudeTerminalIds, grokTerminalIds });
+  return invoke("get_agent_session_states", {
+    claudeTerminalIds,
+    grokTerminalIds,
+    inputTerminalIds,
+  });
 }
 
 export interface ClaudeTurnRequest {

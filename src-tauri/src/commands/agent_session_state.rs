@@ -14,6 +14,7 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::wsl_probe::snapshot::GuestObservation;
 
+use super::agent_submitted_input::{read_last_input, Provider, SubmittedAgentInput};
 use super::claude_session::{get_claude_session_records_impl, ClaudeSessionStatus};
 use super::grok_session::get_grok_session_records_impl;
 use super::session_attribution::ProviderSessionLookup;
@@ -47,21 +48,41 @@ pub struct AgentSessionState {
     result: Option<AgentTurnResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    submitted_input: Option<SubmittedAgentInput>,
 }
 
 #[tauri::command(async)]
 pub fn get_agent_session_states(
     claude_terminal_ids: Vec<String>,
     grok_terminal_ids: Vec<String>,
+    input_terminal_ids: Option<Vec<String>>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, AgentSessionState>, String> {
-    get_agent_session_states_impl(&claude_terminal_ids, &grok_terminal_ids, &state)
+    match input_terminal_ids {
+        Some(ids) if !ids.is_empty() => get_agent_session_states_with_inputs(
+            &claude_terminal_ids,
+            &grok_terminal_ids,
+            &ids,
+            &state,
+        ),
+        _ => get_agent_session_states_impl(&claude_terminal_ids, &grok_terminal_ids, &state),
+    }
 }
 
 /// A terminal is missing from the result when its session or state is not known.
 pub(crate) fn get_agent_session_states_impl(
     claude_terminal_ids: &[String],
     grok_terminal_ids: &[String],
+    state: &AppState,
+) -> Result<HashMap<String, AgentSessionState>, String> {
+    get_agent_session_states_with_inputs(claude_terminal_ids, grok_terminal_ids, &[], state)
+}
+
+fn get_agent_session_states_with_inputs(
+    claude_terminal_ids: &[String],
+    grok_terminal_ids: &[String],
+    input_terminal_ids: &[String],
     state: &AppState,
 ) -> Result<HashMap<String, AgentSessionState>, String> {
     let generations = terminal_generations(state)?;
@@ -92,6 +113,21 @@ pub(crate) fn get_agent_session_states_impl(
                     status,
                     result: None,
                     turn_id: None,
+                    submitted_input: input_terminal_ids
+                        .contains(id)
+                        .then(|| {
+                            let root = records.config_roots.get(session_id)?;
+                            if !super::claude_session::is_valid_session_id(session_id) {
+                                return None;
+                            }
+                            match super::claude_turn_result::find_transcript(root, session_id) {
+                                super::claude_turn_result::Transcript::Found(path) => {
+                                    read_last_input(&path, Provider::Claude, session_id)
+                                }
+                                _ => None,
+                            }
+                        })
+                        .flatten(),
                 },
             );
         }
@@ -117,6 +153,16 @@ pub(crate) fn get_agent_session_states_impl(
                             status,
                             result,
                             turn_id,
+                            submitted_input: input_terminal_ids
+                                .contains(id)
+                                .then(|| {
+                                    read_last_input(
+                                        &directory.join("updates.jsonl"),
+                                        Provider::Grok,
+                                        session_id,
+                                    )
+                                })
+                                .flatten(),
                         },
                     );
                 }

@@ -54,7 +54,7 @@ impl Shell {
     fn phases(&self) -> Vec<(String, String)> {
         self.events()
             .into_iter()
-            .filter(|e| e.code == 133)
+            .filter(|e| e.code == 133 && e.param.as_deref() != Some("E"))
             .map(|e| (e.param.unwrap_or_default(), e.data))
             .collect()
     }
@@ -99,6 +99,36 @@ impl Shell {
 
 fn execution(result: &str) -> Vec<(String, String)> {
     vec![("C".into(), "".into()), ("D".into(), result.into())]
+}
+
+#[test]
+fn powershell_reports_the_submitted_command_after_tab_completion_and_history_recall() {
+    let mut shell = Shell::new();
+    shell.write("Get-Chil\t");
+    shell.collect(Duration::from_millis(300));
+    assert!(
+        !shell
+            .events()
+            .iter()
+            .any(|e| e.param.as_deref() == Some("E")),
+        "편집 중인 내용은 보내지 않는다"
+    );
+    shell.write("\r");
+    shell.until(|s| s.events().iter().any(|e| e.code == 7));
+    let commands: Vec<_> = shell
+        .events()
+        .into_iter()
+        .filter(|e| e.code == 133 && e.param.as_deref() == Some("E"))
+        .map(|e| e.data)
+        .collect();
+    assert_eq!(commands, ["Get-ChildItem"]);
+    shell.bytes.clear();
+    shell.write("\x1b[A\r");
+    shell.until(|s| s.events().iter().any(|e| e.code == 7));
+    assert!(shell
+        .events()
+        .iter()
+        .any(|e| e.param.as_deref() == Some("E") && e.data == "Get-ChildItem"));
 }
 
 #[test]

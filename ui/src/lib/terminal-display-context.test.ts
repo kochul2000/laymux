@@ -66,6 +66,21 @@ describe("daemon display context", () => {
     ).toBeUndefined();
   });
 
+  it("keeps cleared disk history cleared when an older daemon context arrives", async () => {
+    useTerminalDisplayStore.getState().setContext("t", { ...history, lastInputClearedAt: 200 });
+    register();
+    const stop = startTerminalDisplayContextSync();
+    try {
+      await flushTerminalDisplayContexts();
+      const context = useTerminalDisplayStore.getState().contexts.t;
+      expect(context.lastInputClearedAt).toBe(200);
+      expect(useTerminalStore.getState().instances[0].lastInputClearedAt).toBe(200);
+      expect(selectTerminalLastInputEntry(context)).toBeUndefined();
+    } finally {
+      stop();
+    }
+  });
+
   it("shows saved activity during unknown recovery and replaces saved tasks with live idle", () => {
     register();
     const instance = useTerminalStore.getState().instances[0];

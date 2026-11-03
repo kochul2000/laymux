@@ -11,6 +11,29 @@ fn append(file: &mut File, kind: &str, id: &str) {
     file.flush().unwrap();
 }
 
+#[test]
+fn completed_user_input_survives_incremental_reads_but_not_file_replacement() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    let mut reader = TurnReader::default();
+    append(file.as_file_mut(), "task_started", "first");
+    let message = serde_json::json!({"type":"event_msg","timestamp":"2026-11-03T00:00:00.123Z","payload":{"type":"item_completed","turn_id":"first","item":{"type":"UserMessage","content":[{"type":"text","text":"read @completed/path.ts"}]}}}).to_string();
+    write!(file, "{}", &message[..message.len() / 2]).unwrap();
+    reader.read(file.path()).unwrap();
+    assert!(reader.submitted_input.is_none());
+    writeln!(file, "{}", &message[message.len() / 2..]).unwrap();
+    reader.read(file.path()).unwrap();
+    assert_eq!(
+        reader.submitted_input.as_ref().unwrap().text,
+        "read @completed/path.ts"
+    );
+    append(file.as_file_mut(), "task_complete", "first");
+    reader.read(file.path()).unwrap();
+    assert!(reader.submitted_input.is_some());
+    std::fs::write(file.path(), b"").unwrap();
+    reader.read(file.path()).unwrap();
+    assert!(reader.submitted_input.is_none());
+}
+
 fn review_boundary(file: &mut File, paginated: bool, entering: bool, id: &str) {
     let payload = if paginated {
         serde_json::json!({

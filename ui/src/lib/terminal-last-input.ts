@@ -28,6 +28,7 @@ export interface TerminalLastInputSource {
   lastCommandAt?: number;
   lastUserInput?: string;
   lastUserInputAt?: number;
+  lastInputClearedAt?: number;
 }
 
 export interface SelectedTerminalLastInput {
@@ -38,8 +39,14 @@ export interface SelectedTerminalLastInput {
 export function selectTerminalLastInputEntry(
   value: TerminalLastInputSource,
 ): SelectedTerminalLastInput | undefined {
-  const command = normalizeSubmittedInput(value.lastCommand ?? "");
-  const userInput = normalizeSubmittedInput(value.lastUserInput ?? "");
+  const visible = (timestamp: number | undefined) =>
+    value.lastInputClearedAt === undefined || (timestamp ?? 0) > value.lastInputClearedAt;
+  const command = visible(value.lastCommandAt)
+    ? normalizeSubmittedInput(value.lastCommand ?? "")
+    : "";
+  const userInput = visible(value.lastUserInputAt)
+    ? normalizeSubmittedInput(value.lastUserInput ?? "")
+    : "";
   if (!userInput) {
     return command ? { text: command, timestamp: value.lastCommandAt ?? 0 } : undefined;
   }
