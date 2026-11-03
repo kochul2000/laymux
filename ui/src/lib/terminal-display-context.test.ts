@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useTerminalDisplayStore } from "@/stores/terminal-display-store";
+import { selectTerminalLastInputEntry } from "./terminal-last-input";
 import {
   projectTerminalDisplay,
   startTerminalDisplayContextSync,
@@ -80,6 +81,25 @@ describe("daemon display context", () => {
     );
     expect(refreshed.task?.state).toBe("idle");
     expect(refreshed.lastUserInput).toBe(history.lastUserInput);
+  });
+  it("does not retimestamp a saved command when the initial prompt only reports a result", () => {
+    register();
+    const instance = useTerminalStore.getState().instances[0];
+    const saved = { ...history, lastCommand: "codex --yolo", lastCommandAt: 50 };
+    const displayed = projectTerminalDisplay(
+      { ...instance, activity: { type: "shell" }, lastCommandAt: 300, lastExitCode: 0 },
+      saved,
+    );
+    expect(selectTerminalLastInputEntry(displayed)).toEqual({
+      text: history.lastUserInput,
+      timestamp: 100,
+    });
+    expect(displayed.lastCommandAt).toBe(50);
+    const newCommand = projectTerminalDisplay(
+      { ...instance, lastCommand: "npm test", lastCommandAt: 400 },
+      saved,
+    );
+    expect(selectTerminalLastInputEntry(newCommand)).toEqual({ text: "npm test", timestamp: 400 });
   });
 
   it("keeps disk history when a new daemon has no display context", async () => {

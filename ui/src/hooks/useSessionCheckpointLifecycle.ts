@@ -9,6 +9,7 @@ import {
 import {
   flushSessionCheckpoint,
   markSessionCheckpointMutation,
+  markSessionDisplayMutation,
   persistSession,
   cacheTerminalOutputs,
   setPreparingUpdate,
@@ -131,7 +132,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       });
 
     const unsubscribeDisplay = useTerminalDisplayStore.subscribe(() =>
-      markSessionCheckpointMutation(),
+      markSessionDisplayMutation(),
     );
     const unsubscribeWorkspace = useWorkspaceStore.subscribe((state, previous) => {
       if (

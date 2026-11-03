@@ -48,6 +48,8 @@ export function projectTerminalDisplay(
     (instance.activity.type !== history.activity.type ||
       instance.activity.name !== history.activity.name);
   const newerCommand = (instance.lastCommandAt ?? 0) > (history.lastCommandAt ?? 0);
+  const historicalCommand =
+    !Object.hasOwn(instance, "lastCommand") && history.lastCommand !== undefined;
   const fallback = Object.fromEntries(
     fields
       .filter(
@@ -68,6 +70,9 @@ export function projectTerminalDisplay(
   return {
     ...instance,
     ...fallback,
+    // A prompt/result may have a fresh timestamp without a command body. Keep
+    // the historical body and its timestamp together for last-input selection.
+    ...(historicalCommand ? { lastCommandAt: history.lastCommandAt } : {}),
     lastActivityAt: Math.max(instance.lastActivityAt, history.lastActivityAt ?? 0),
     task,
   };

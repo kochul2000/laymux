@@ -28,50 +28,50 @@ try {
       name: "Display-history-checkpoint",
     });
     const id = created.workspace.id;
-    const fixture = await page.evaluate(async (id) => {
-      const { useWorkspaceStore } =
-        await import("/src/stores/workspace-store.ts");
-      const { useTerminalDisplayStore } =
-        await import("/src/stores/terminal-display-store.ts");
-      const { flushSessionCheckpoint } =
-        await import("/src/lib/persist-session.ts");
-      const store = useWorkspaceStore.getState();
-      const ws = store.workspaces.find((w) => w.id === id);
-      const layer = ws.panes[0].layers[0];
-      store.setPaneView(
-        0,
-        { type: "TerminalView", profile: "PowerShell" },
-        layer.id,
-        id,
-      );
-      const terminalId = `terminal-${layer.id}`;
-      const context = {
-        version: 1,
-        profile: "PowerShell",
-        lastUserInput: "remember submitted input",
-        lastUserInputAt: Date.now(),
-        activity: { type: "interactiveApp", name: "Codex" },
-        task: {
-          source: "saved",
-          taskId: "saved-turn",
-          sequence: 1,
-          state: "ended",
-          result: "success",
-          observation: "confirmed",
-          observedAt: Date.now(),
-          notificationId: 0,
-        },
-      };
-      useTerminalDisplayStore.getState().setContext(terminalId, context);
-      await flushSessionCheckpoint({ reason: "mutation" });
-      return {
-        id,
-        terminalId,
-        paneId: layer.id,
-        originalActive: store.activeWorkspaceId,
-        context,
-      };
-    }, id);
+    const fixture = await page.evaluate(
+      async ({ id, profile }) => {
+        const { useWorkspaceStore } =
+          await import("/src/stores/workspace-store.ts");
+        const { useTerminalDisplayStore } =
+          await import("/src/stores/terminal-display-store.ts");
+        const { flushSessionCheckpoint } =
+          await import("/src/lib/persist-session.ts");
+        const store = useWorkspaceStore.getState();
+        const ws = store.workspaces.find((w) => w.id === id);
+        const layer = ws.panes[0].layers[0];
+        store.setPaneView(0, { type: "TerminalView", profile }, layer.id, id);
+        const terminalId = `terminal-${layer.id}`;
+        const context = {
+          version: 1,
+          profile,
+          lastUserInput: "remember submitted input",
+          lastUserInputAt: Date.now(),
+          lastCommand: "codex --yolo",
+          lastCommandAt: Date.now() - 60000,
+          activity: { type: "interactiveApp", name: "Codex" },
+          task: {
+            source: "saved",
+            taskId: "saved-turn",
+            sequence: 1,
+            state: "ended",
+            result: "success",
+            observation: "confirmed",
+            observedAt: Date.now(),
+            notificationId: 0,
+          },
+        };
+        useTerminalDisplayStore.getState().setContext(terminalId, context);
+        await flushSessionCheckpoint({ reason: "mutation" });
+        return {
+          id,
+          terminalId,
+          paneId: layer.id,
+          originalActive: store.activeWorkspaceId,
+          context,
+        };
+      },
+      { id, profile: process.env.LAYMUX_DISPLAY_PROFILE ?? "PowerShell" },
+    );
     await fs.mkdir(path.dirname(fixturePath), { recursive: true });
     await fs.writeFile(fixturePath, JSON.stringify(fixture, null, 2));
     console.log(JSON.stringify({ prepared: fixture.id, fixturePath }));
@@ -130,6 +130,10 @@ try {
     assert.equal(entered.live.activity.name, undefined);
     assert.equal(entered.live.lastUserInput, fixture.context.lastUserInput);
     assert.equal(entered.live.lastUserInputAt, fixture.context.lastUserInputAt);
+    assert.ok(
+      entered.row?.includes(fixture.context.lastUserInput),
+      JSON.stringify(entered),
+    );
     assert.notEqual(entered.live.task?.source, "saved");
     const enteredScreenshot = (await api("/screenshot", {})).path;
     console.log(

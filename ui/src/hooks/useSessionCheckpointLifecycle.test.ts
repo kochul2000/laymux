@@ -45,6 +45,7 @@ vi.mock("@/lib/persist-session", () => ({
   cacheTerminalOutputs: vi.fn().mockResolvedValue(undefined),
   setPreparingUpdate: vi.fn(),
   markSessionCheckpointMutation: vi.fn(),
+  markSessionDisplayMutation: vi.fn(),
   persistSession: vi.fn().mockResolvedValue(undefined),
   getReusableSessionCheckpointCommit: vi.fn().mockReturnValue(undefined),
 }));
@@ -61,6 +62,7 @@ import {
   cacheTerminalOutputs,
   setPreparingUpdate,
   markSessionCheckpointMutation,
+  markSessionDisplayMutation,
   persistSession,
   getReusableSessionCheckpointCommit,
 } from "@/lib/persist-session";
@@ -90,7 +92,7 @@ describe("useSessionCheckpointLifecycle", () => {
   });
   it("invalidates a reusable close checkpoint when display/input history changes", () => {
     const { unmount } = renderHook(() => useSessionCheckpointLifecycle(true));
-    vi.mocked(markSessionCheckpointMutation).mockClear();
+    vi.mocked(markSessionDisplayMutation).mockClear();
     act(() =>
       useTerminalDisplayStore.getState().setContext("terminal-pane", {
         version: 1,
@@ -99,10 +101,10 @@ describe("useSessionCheckpointLifecycle", () => {
         lastUserInputAt: 123,
       }),
     );
-    expect(markSessionCheckpointMutation).toHaveBeenCalledTimes(1);
+    expect(markSessionDisplayMutation).toHaveBeenCalledTimes(1);
     unmount();
     act(() => useTerminalDisplayStore.getState().setContext("terminal-pane", undefined));
-    expect(markSessionCheckpointMutation).toHaveBeenCalledTimes(1);
+    expect(markSessionDisplayMutation).toHaveBeenCalledTimes(1);
   });
   it("blocks background persistence for a forced update without a checkpoint request", () => {
     renderHook(() => useSessionCheckpointLifecycle(true));

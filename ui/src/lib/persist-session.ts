@@ -72,6 +72,8 @@ export interface SessionCheckpointOptions {
 export interface SessionCheckpointCommit {
   checkpointCommitId: number;
   frontendMutationRevision: number;
+  /** Display-only changes invalidate reuse without restarting attribution collection. */
+  displayMutationRevision?: number;
   coverage: TerminalAttributionCoverage[];
   receiptToken?: string;
   needsRetry?: boolean;
@@ -90,11 +92,13 @@ let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
 let trailingCheckpointRequested = false;
 let pendingOptions: SessionCheckpointOptions = {};
 let frontendMutationRevision = 0;
+let displayMutationRevision = 0;
 let lastCommittedCheckpoint: SessionCheckpointCommit | undefined;
 
 export function getReusableSessionCheckpointCommit(): SessionCheckpointCommit | undefined {
   if (
     activeCheckpoint ||
+    lastCommittedCheckpoint?.displayMutationRevision !== displayMutationRevision ||
     lastCommittedCheckpoint?.frontendMutationRevision !== frontendMutationRevision
   )
     return undefined;
@@ -105,6 +109,10 @@ export function markSessionCheckpointMutation(): void {
   frontendMutationRevision += 1;
 }
 
+export function markSessionDisplayMutation(): void {
+  displayMutationRevision += 1;
+}
+
 /** Reset closingDown flag (for tests only). */
 export function _resetClosingDown(): void {
   closingDown = false;
@@ -113,6 +121,7 @@ export function _resetClosingDown(): void {
   trailingCheckpointRequested = false;
   pendingOptions = {};
   frontendMutationRevision = 0;
+  displayMutationRevision = 0;
   lastCommittedCheckpoint = undefined;
   resetSessionConfiguration();
 }
@@ -221,6 +230,9 @@ async function persistSessionCore(
     await saveSettings(checkpoint.settings);
     seedSessionConfiguration(checkpoint.settings);
   }
+  // saveLocalSession captures display synchronously. Animation after this point
+  // prevents reuse but must not make close/update wait for titles to go quiet.
+  const capturedDisplayRevision = displayMutationRevision;
   const durable = await saveLocalSession(
     checkpoint.settings,
     checkpoint.coverage,
@@ -302,6 +314,7 @@ async function persistSessionCore(
   return {
     checkpointCommitId: durable.revision,
     frontendMutationRevision: collectedRevision + publicationRevision,
+    displayMutationRevision: capturedDisplayRevision,
     coverage: checkpoint.coverage,
     needsRetry: durable.needsRetry,
     unresolvedTerminalIds: durable.unresolvedTerminalIds,

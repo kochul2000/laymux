@@ -1595,6 +1595,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 ### 13.1 개요
 
+표시 이력 변경은 구조 변경과 별도의 revision으로 checkpoint 재사용만 무효화한다. 마지막 표시 수집 이후의 제목 애니메이션은 귀속 관측·DB 저장 전체 재시도를 만들지 않는다. 저장 명령 본문과 시각은 같은 이력에서 복원하므로, 새 명령 본문 없는 초기 prompt/종료 결과가 과거 명령을 마지막 사용자 입력보다 최신으로 만들지 않는다([ADR-0371](../adr/0371-durable-workspace-display-history.md)).
+
 앱 재시작 시 SQLite의 workspace/dock/pane·CWD·대화 ID·활성 workspace·파일 뷰어·terminal 표시 이력(마지막 제출 입력 포함)을 복원하고 출력은 독립된 캐시에서 읽는다. 프로파일 단위 복원 옵션을 적용한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).
 
 Rust `local_state`가 DB 연결과 짧은 트랜잭션을 소유한다. `settings/persistence`는 portable JSON과 DB 환경·세션을 유효 `Settings`로 합성한다. 생산 진입점은 OS 경로를 명시적으로 선택하고 내부 코어는 저장소를 주입받는다. 테스트는 settings 경로의 이웃 DB 또는 별도로 주입한 경로만 사용한다. read는 읽기 전용 연결이며, write는 WAL·synchronous=FULL·250ms busy timeout·IMMEDIATE transaction을 사용한다. 앱 상태 락과 프로세스/WSL 조회를 DB transaction 안에서 수행하지 않는다. schema 불일치·손상·잠금·디스크 부족은 오류로 전달하고 원본을 자동 삭제하거나 빈 상태로 재생성하지 않는다.
