@@ -1054,6 +1054,8 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 
 **고정 포트**: release = `19280`, dev = `19281`. 각 빌드 타입은 하나의 인스턴스만 실행 가능하며, 포트 충돌 시 시작 실패한다.
 
+**서버 실패 복구**([ADR-0374](../adr/0374-mcp-server-failure-recovery.md)): `AppState.automation_server`가 공유 HTTP 리스너(MCP·Automation·Remote)의 `starting | running | failed`, 오류·포트·revision과 실행 핸들을 소유한다. 초기 bind 실패와 serve task 종료(오류·panic·취소)를 데스크톱 상단 알림으로 표시한다. `get_automation_server_status` 네이티브 IPC를 3초마다 조회하므로 HTTP 서버가 없어도 알림이 동작한다. `retry_automation_server` IPC는 초기 시작과 같은 비동기 게이트로 직렬화하고, 정상 실행 중이면 기존 상태를 반환한다. 실패 알림의 **MCP 서버 다시 시작** 버튼은 같은 고정 포트의 공유 서버만 복구하며 앱·PTY는 유지한다. 복구 성공 후 에이전트 재연결을 안내한다. MCP 리소스 이벤트 브리지는 앱 수명에 한 번만 설치한다. 발견 파일은 bind 성공 후 게시하고 서버 종료 시 자기 PID 파일만 삭제한다. dev 전용 `POST /api/v1/dev/automation-server/fail-stop`은 응답 후 실제 서버 task를 중단해 복구 경로를 검증한다(release 403).
+
 - **Windows**: `%APPDATA%\laymux\automation.json` (dev: `%APPDATA%\laymux-dev\automation.json`)
 - **Linux**: `~/.config/laymux/automation.json` (dev: `~/.config/laymux-dev/automation.json`)
 - 환경변수: `LX_AUTOMATION_PORT` (터미널 spawn 시 자동 주입)
@@ -1094,6 +1096,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - 고정 포트는 발견 수단이지 인스턴스 신원이 아니다. 측정 전에 한 번의 health 응답에서 기대 PID/워크트리/commit을 검증한다.
 
 ### 12.3 엔드포인트
+
+서버 복구 시 구세대 MCP 취소 토큰을 취소하고 리소스 구독·peer를 비운 뒤 재시도를 허용한다. 새 터미널의 `LX_AUTOMATION_PORT`는 현재 리스너 가용 상태와 독립적으로 빌드의 고정 포트를 전달하므로, 서버 중단 중 시작한 셸도 복구 후 재시작 없이 훅 요청을 보낼 수 있다.
 
 > **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 62개 = REST 61 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
@@ -2264,7 +2268,7 @@ Frontend bridge action은 `session_checkpoint/mutation.rs`가 요청 ID별 종�
 5. known_claude_terminals → 6. known_codex_terminals →
 7. last_detected_interactive_app → 8. recently_exited_interactive_app →
 9. notifications → 10. sync_groups → 11. propagated_terminals →
-12. pty_handles / automation_channels / automation_port / ipc_socket_path →
+12. pty_handles / automation_channels / ipc_socket_path →
 13. remote_access → 14. remote_control → 15. cloud_tunnel →
 16. cloud → 17. exec_locks(table mutex only)
 ```
@@ -2431,6 +2435,8 @@ pub fn get_terminal_summaries_inner(
 - 새 View 추가 시 기존 공유 컴포넌트를 우선 검토하고, 없으면 인라인으로 작성 후 반복이 확인되면 추출한다.
 
 ### 15.4 컴포넌트 설계
+
+프로덕션 UI의 정적 import 청크는 500 KiB 예산을 유지한다. `ui/src/build/chunk-groups.ts`는 Settings·GitHub와 같은 기존 분리 방식으로 `TerminalView.tsx`도 `terminal-view` 청크에 둔다. 정적 import와 모듈 평가 순서는 유지하며, 의존성을 재귀 흡수하거나 런타임 상태 소유권을 바꾸지 않는다. 실제 번들 검증은 `production-bundle.test.ts`가 담당한다.
 
 파일 항목의 표시 규칙은 `ui/src/lib/file-kind-icon.ts`를 PC·Remote가 함께 import한다([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md) 직접 적용). 탐색기·FileViewer 내부 탐색기·압축파일 목록은 `FolderUp`/`Folder`/`Link`/`File`을 13px로 표시한다. 아이콘과 이름 모두 디렉터리(상위 폴더·디렉터리 링크 포함)는 `--accent`, 파일 링크는 `--green`, 일반 파일은 `--text-primary`를 쓴다. PC의 선택된 포커스 행은 기존 선택 대비색을 아이콘과 이름에 함께 적용한다. React의 `FileKindIcon`과 Remote의 Lucide DOM 경계는 같은 매핑·크기를 소비하고, Remote 생성 번들 드리프트 검사에는 이 공용 모듈도 포함한다.
 

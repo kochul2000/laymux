@@ -78,6 +78,9 @@ const NODE_MODULES_SEGMENT = "/node_modules/";
 export function resolveChunkGroup(id: string): string | undefined {
   const normalizedId = id.replaceAll("\\", "/");
 
+  // Preserve the existing static import and isolate this growing view using
+  // the same policy as Settings/GitHub, without absorbing its dependencies.
+  if (normalizedId.endsWith("/src/components/views/TerminalView.tsx")) return "terminal-view";
   if (normalizedId.endsWith(SETTINGS_VIEW_SUFFIX)) return "settings-view";
   // The entry chunk sits just under the size warning limit, so a whole new
   // view goes in its own group rather than pushing the entry over it.

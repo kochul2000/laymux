@@ -638,11 +638,10 @@ test.describe("remote mobile layout", () => {
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
-    const initialRow = await page.locator('[data-workspace-item="ws-b"]').elementHandle();
-    expect(initialRow).not.toBeNull();
     await page.locator("#navToggle").click();
-    // Opening the drawer refreshes its rows; begin the gesture on the new row.
-    await expect.poll(() => initialRow!.evaluate((row) => row.isConnected)).toBe(false);
+    // An unchanged navigation refresh preserves its rows. The gesture needs
+    // an open drawer, not a forced DOM replacement.
+    await expect(page.locator(".app")).toHaveClass(/nav-open/);
     let switches = 0;
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/remote/v1/workspaces/active") switches += 1;

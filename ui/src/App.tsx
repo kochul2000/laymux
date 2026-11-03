@@ -38,6 +38,7 @@ import { useTerminalDisplayContext } from "@/hooks/useTerminalDisplayContext";
 import { subscribeAgentHookUpdates } from "@/lib/agent-hook-updates";
 import { AgentHookUpdateNotice } from "@/components/layout/AgentHookUpdateNotice";
 import { LegacyWslNotice } from "@/components/layout/LegacyWslNotice";
+import { McpServerNotice } from "@/components/layout/McpServerNotice";
 import { CloseConfirmationModal } from "@/components/layout/CloseConfirmationModal";
 import { requestCloseConfirmation } from "@/stores/close-confirmation-store";
 
@@ -204,6 +205,7 @@ export function App() {
       <CloseConfirmationModal />
       <AgentHookUpdateNotice />
       <LegacyWslNotice />
+      <McpServerNotice />
       {!localMobileModeActive && <RemoteControlOverlay />}
     </div>
   );

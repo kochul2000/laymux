@@ -1656,6 +1656,7 @@ pub fn create_service(
     state: ServerState,
     subscriptions: SharedSubscriptionRegistry,
     is_dev: bool,
+    config: StreamableHttpServerConfig,
 ) -> StreamableHttpService<McpHandler, LocalSessionManager> {
     StreamableHttpService::new(
         move || {
@@ -1666,7 +1667,7 @@ pub fn create_service(
             ))
         },
         Arc::new(LocalSessionManager::default()),
-        StreamableHttpServerConfig::default().with_allowed_hosts(mcp_allowed_hosts()),
+        config.with_allowed_hosts(mcp_allowed_hosts()),
     )
 }
 

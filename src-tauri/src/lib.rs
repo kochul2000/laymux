@@ -167,14 +167,10 @@ pub fn run() {
             // Start automation HTTP server
             let app_handle = app.handle().clone();
             let auto_state = app_state.clone();
-            let lx_state = app_state.clone();
             tauri::async_runtime::spawn(async move {
                 match automation_server::start(auto_state, app_handle).await {
                     Ok(port) => {
                         tracing::info!(port, "Automation API ready");
-                        // The fixed port is held by one GUI per build kind, so
-                        // only that GUI takes over the lx endpoint file.
-                        lx_endpoint::publish_ipc_endpoint(&lx_state);
                     }
                     Err(e) => tracing::warn!(error = %e, "Automation server failed to start"),
                 }
@@ -294,6 +290,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_automation_server_status,
+            commands::retry_automation_server,
             commands::greet,
             commands::create_terminal_session,
             commands::reconnect_terminal_session,

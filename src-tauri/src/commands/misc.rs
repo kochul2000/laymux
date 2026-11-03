@@ -23,7 +23,7 @@ pub fn greet(name: &str) -> String {
 
 #[tauri::command]
 pub fn get_automation_info(state: State<Arc<AppState>>) -> Result<serde_json::Value, String> {
-    let port = state.automation_port.lock_or_err()?.unwrap_or(0);
+    let port = state.automation_server.running_port()?.unwrap_or(0);
 
     Ok(serde_json::json!({
         "port": port,

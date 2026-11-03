@@ -1,11 +1,15 @@
 mod agent_hooks;
 mod dev_activity;
+mod dev_server;
 mod dev_terminal_output;
 mod dev_update;
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
 mod instance_identity;
+pub mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 mod local_state;
 pub mod mcp;
 pub mod mcp_resources;
@@ -28,14 +32,12 @@ use axum::middleware;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tauri::AppHandle;
-use tokio::net::TcpListener;
 
-use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
 use handlers_backend::*;
 use handlers_bridge::*;
-use mcp_resources::{SharedSubscriptionRegistry, SubscriptionRegistry};
+use mcp_resources::SharedSubscriptionRegistry;
 use surface_router::{compose_surfaces, ip_allowlist_middleware};
 
 /// Shared state for the axum server.
@@ -66,7 +68,7 @@ pub fn write_discovery_file(port: u16) {
 
 /// Remove discovery file on shutdown.
 pub fn remove_discovery_file() {
-    remove_discovery_file_in(&discovery_dir());
+    lifecycle::remove_owned_discovery_file(&discovery_dir());
 }
 
 /// Directory that owns the discovery file — the settings directory
@@ -100,6 +102,7 @@ fn write_discovery_file_in(base: &std::path::Path, port: u16) {
     );
 }
 
+#[cfg(test)]
 fn remove_discovery_file_in(base: &std::path::Path) {
     let _ = std::fs::remove_file(discovery_file_path_in(base));
 }
@@ -107,56 +110,46 @@ fn remove_discovery_file_in(base: &std::path::Path) {
 /// Start the automation HTTP server on a fixed port.
 /// Release = 19280, Dev = 19281. No fallback — fails if port is occupied.
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
+    let status = retry(app_state, app_handle).await?;
+    if status.phase == lifecycle::Phase::Running {
+        Ok(status.port)
+    } else {
+        Err(status
+            .error
+            .unwrap_or_else(|| "Automation server unavailable".into()))
+    }
+}
+
+pub async fn retry(
+    app_state: Arc<AppState>,
+    app_handle: AppHandle,
+) -> Result<lifecycle::ServerStatus, crate::error::AppError> {
     let server_state = ServerState {
         app_state: app_state.clone(),
         app_handle: app_handle.clone(),
     };
 
-    // MCP resource subscription registry — shared between the MCP service
-    // (used inside `build_router`) and the Tauri→MCP event bridge spawned
-    // below. The bridge converts Tauri events into
-    // `notifications/resources/updated` for subscribed peers.
-    let subscriptions = SubscriptionRegistry::new();
-    mcp_resources::spawn_resource_event_bridge(app_handle.clone(), subscriptions.clone());
-
     let port = automation_port();
     let is_dev = port == DEV_PORT;
-    let app = build_router(server_state, subscriptions, is_dev);
-
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
-
-    // Store port in AppState
-    if let Ok(mut p) = app_state.automation_port.lock_or_err() {
-        *p = Some(port);
-    } else {
-        tracing::error!("Failed to store automation port in AppState (lock poisoned)");
+    let status = app_state
+        .automation_server
+        .start(addr, &discovery_dir(), |mcp_config| {
+            let subscriptions = app_state.automation_server.subscriptions(app_handle);
+            build_router(server_state, subscriptions, is_dev, mcp_config)
+        })
+        .await?;
+    if status.phase == lifecycle::Phase::Running {
+        crate::lx_endpoint::publish_ipc_endpoint(&app_state);
     }
-
-    write_discovery_file(port);
-
-    tracing::info!(port, "Automation server listening on 0.0.0.0:{port}");
-
-    tokio::spawn(async move {
-        if let Err(e) = axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        {
-            tracing::error!(error = %e, "Automation server error");
-        }
-    });
-
-    Ok(port)
+    Ok(status)
 }
 
 pub fn build_router(
     state: ServerState,
     subscriptions: SharedSubscriptionRegistry,
     is_dev: bool,
+    mcp_config: rmcp::transport::streamable_http_server::StreamableHttpServerConfig,
 ) -> Router {
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
@@ -191,6 +184,10 @@ pub fn build_router(
         )
         .route("/api/v1/diagnostics/frontend", get(diagnostics_frontend))
         .route("/api/v1/dev/activity-metrics", get(dev_activity::metrics))
+        .route(
+            "/api/v1/dev/automation-server/fail-stop",
+            post(dev_server::fail_stop),
+        )
         .route(
             "/api/v1/dev/terminal-output/{id}/fail-stop",
             post(dev_terminal_output::fail_stop),
@@ -286,7 +283,7 @@ pub fn build_router(
         .route("/api/v1/screenshot", post(screenshot_capture))
         .nest_service(
             "/mcp",
-            mcp::create_service(state.clone(), subscriptions.clone(), is_dev),
+            mcp::create_service(state.clone(), subscriptions.clone(), is_dev, mcp_config),
         )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/remote-access", post(ui_remote_access))

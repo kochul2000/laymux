@@ -782,7 +782,9 @@ test("Android foreground resumes transport without reloading the Remote document
     target.__androidLifecycleState.holdNextNavigation = true;
     (document.getElementById("refresh") as HTMLButtonElement).click();
   });
-  await expect.poll(async () => (await state()).navigationRequests).toBe(2);
+  // Background navigation polling may already have refreshed the drawer.
+  // Wait for the deliberately held request, rather than a global call count.
+  await expect.poll(async () => (await state()).holdNextNavigation).toBe(false);
 
   const heartbeatBefore = (await state()).heartbeatRequests;
   const handled = await page.evaluate(() => {

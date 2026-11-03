@@ -40,7 +40,7 @@ async function openDock(page: Page, position = "right", size = 240, withTerminal
     };
   `,
   );
-  await page.goto("/", { waitUntil: "networkidle" });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const view = page.locator('[data-testid="view-worktree"][data-pane-id="dock-worktrees"]');
   await expect(
     view.getByRole("button", { name: `정리 후보 ${withTerminals ? 8 : 9}`, exact: true }),

@@ -197,6 +197,10 @@ export const TAURI_MOCK_SCRIPT = `
         case 'get_automation_info':
           return Promise.resolve({ port: 19280, key: 'mock-key' });
 
+        case 'get_automation_server_status':
+        case 'retry_automation_server':
+          return Promise.resolve({ phase: 'running', port: 19281, error: null, revision: 1 });
+
         case 'load_terminal_output_cache':
           // Return test cache data if configured, otherwise empty
           return Promise.resolve(window.__testCacheData || '');
