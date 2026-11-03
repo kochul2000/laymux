@@ -944,7 +944,17 @@ test("Pane action 키는 아이콘으로 올라오고 PC의 Stack·Close pane �
   await page.locator('#mainActionRow [data-key="stackPane"]').click();
   await expect.poll(() => actions.length).toBe(1);
   await expect(page.locator("#status")).toContainText("Stacked a new layer.");
-  await page.locator('#mainActionRow [data-key="closePane"]').click();
+  const closeKey = page.locator('#mainActionRow [data-key="closePane"]');
+  const editor = page.locator("#composerInput");
+  await editor.fill("보존할 초안");
+  await editor.focus();
+  await closeKey.click();
+  await expect(closeKey).toHaveAttribute("data-confirming", "true");
+  expect(actions).toHaveLength(1);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveText("보존할 초안");
+  await page.screenshot({ path: "test-results/remote-close-pane-confirming.png" });
+  await closeKey.click();
   await expect.poll(() => actions.length).toBe(2);
   expect(actions).toEqual([
     { path: "/remote/v1/panes/pane-1/stack", body: { leaseId: "lease-1" } },
@@ -952,6 +962,117 @@ test("Pane action 키는 아이콘으로 올라오고 PC의 Stack·Close pane �
   ]);
   await page.screenshot({ path: "test-results/remote-pane-action-keys.png" });
 });
+
+test.describe("Close pane 터치 확인", () => {
+  test.use({ hasTouch: true, isMobile: true });
+  test("첫 탭의 위험 강조가 터치 active 스타일보다 우선한다", async ({ page }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({
+          zones: {
+            main: { left: ["soft:closePane"], center: [], right: [] },
+            expanded: { left: [], center: [], right: [] },
+          },
+        }),
+      ),
+    );
+    await installRemotePage(page, { coarse: true });
+    await connect(page);
+    const key = page.locator('#mainActionRow [data-key="closePane"]');
+    await key.tap();
+    await expect(key).toHaveAttribute("data-confirming", "true");
+    // Browser computed color is a channel-formatted boundary value.
+    await expect(key).toHaveCSS("color", "rgb(243, 139, 168)");
+    await expect(key).toHaveCSS("background-color", "rgba(243, 139, 168, 0.18)");
+    await key.hover();
+    await expect(key).toHaveCSS("background-color", "rgba(243, 139, 168, 0.18)");
+  });
+});
+
+for (const placement of ["main", "expanded", "floating"] as const) {
+  test(`Close pane 확인은 ${placement}에서 취소·재시도·중복 탭을 처리한다`, async ({ page }) => {
+    await page.addInitScript((placement) => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({
+          zones: {
+            main: {
+              left: placement === "main" ? ["soft:closePane", "soft:q"] : ["soft:q"],
+              center: [],
+              right: ["keys"],
+            },
+            expanded: {
+              left: placement === "expanded" ? ["soft:closePane"] : [],
+              center: [],
+              right: [],
+            },
+          },
+          floating: {
+            pads: { dpad: { enabled: false }, navPad: { enabled: false } },
+            buttons:
+              placement === "floating"
+                ? [{ id: "f-close", actionId: "soft:closePane", x: 0.8, y: 0.5 }]
+                : [],
+          },
+        }),
+      );
+    }, placement);
+    const state = await installRemotePage(page, { coarse: true });
+    let closes = 0;
+    let releaseClose: (() => Promise<void>) | undefined;
+    await page.route("**/remote/v1/panes/*/close", async (route) => {
+      closes += 1;
+      if (closes === 1) {
+        await route.fulfill({ status: 500, json: { error: "close refused" } });
+        return;
+      }
+      await new Promise<void>((done) => {
+        releaseClose = async () => {
+          await route.fulfill({ json: { ok: true } });
+          done();
+        };
+      });
+    });
+    await connect(page);
+    if (placement === "expanded") await page.locator("#keyBarToggle").click();
+    const scope =
+      placement === "main"
+        ? "#mainActionRow"
+        : placement === "expanded"
+          ? "#keyRow"
+          : "#floatingControls";
+    const key = page.locator(`${scope} [data-key="closePane"]`);
+    await key.click();
+    await expect(key).toHaveAttribute("data-confirming", "true");
+    await page.locator('#mainActionRow [data-key="q"]').click();
+    await expect.poll(() => state.writes.length).toBe(1);
+    await expect(key).not.toHaveAttribute("data-confirming", "true");
+    expect(closes).toBe(0);
+    await key.click();
+    await page.keyboard.press("Escape");
+    await expect(key).not.toHaveAttribute("data-confirming", "true");
+    await key.click();
+    await key.dispatchEvent("pointerleave", { pointerType: "touch" });
+    await expect(key).toHaveAttribute("data-confirming", "true");
+    expect(closes).toBe(0);
+    await key.click();
+    await expect(page.locator("#status")).toHaveText("Close failed: close refused");
+    await expect(key).toBeEnabled();
+    await expect(key).not.toHaveAttribute("data-confirming", "true");
+    await key.click();
+    await expect(key).toHaveAttribute("data-confirming", "true");
+    expect(closes).toBe(1);
+    await key.click();
+    await expect.poll(() => closes).toBe(2);
+    await expect(key).toBeDisabled();
+    await key.evaluate((button: HTMLButtonElement) => button.click());
+    expect(closes).toBe(2);
+    await releaseClose!();
+    await expect(key).toBeEnabled();
+    await expect(key).not.toHaveAttribute("data-confirming", "true");
+  });
+}
 
 test("기본 Clear pane 키는 pane clear API를 호출하고 초안과 포커스를 보존한다", async ({
   page,

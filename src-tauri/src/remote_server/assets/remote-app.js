@@ -4,7 +4,7 @@ import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createRemoteWorktrees } from "../../../../ui/src/remote/remote-worktrees.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
 import { createWorkspaceCloseToasts } from "../../../../ui/src/remote/remote-workspace-close-toasts.js";
-import { createPaneManager, installWorkspaceRenameGesture } from "../../../../ui/src/remote/remote-pane-controls.js";
+import { createPaneCloseKeyConfirmation, createPaneManager, installWorkspaceRenameGesture } from "../../../../ui/src/remote/remote-pane-controls.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
@@ -32,6 +32,7 @@ import {
       (() => {
         hydrateRemoteIcons(document);
         const $ = (id) => document.getElementById(id);
+        const paneCloseKeyConfirmation = createPaneCloseKeyConfirmation(document);
         const tokenInput = $("token");
         const clientNameInput = $("clientName");
         const navToggleButton = $("navToggle");
@@ -9347,6 +9348,7 @@ import {
         function enqueueRemoteNavigation(task, button = null, { move = true } = {}) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
+          updateKeyBarControls();
           if (move) {
             navMovePending += 1;
             renderTerminalTransition();
@@ -9362,6 +9364,7 @@ import {
             .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
+              updateKeyBarControls();
               if (move) {
                 navMovePending -= 1;
                 if (navMovePending === 0) flushLandingInput();
@@ -12005,6 +12008,18 @@ import {
           const def = keyDef(id);
           if (!def) return;
           if (def.paneAction) {
+            if (def.paneAction === "close") {
+              if (navStepPending > 0) return;
+              const pane = activePaneTarget();
+              const selectedLeaseId = leaseId;
+              if (!paneCloseKeyConfirmation.activate(button, pane, selectedLeaseId)) return;
+              enqueueRemoteNavigation(() => {
+                if (leaseId === selectedLeaseId && activePaneTarget()?.id === pane.id) {
+                  return runRemotePaneAction("close");
+                }
+              }, button, { move: false });
+              return;
+            }
             enqueueRemoteNavigation(() => runRemotePaneAction(def.paneAction), button, { move: false });
             return;
           }
@@ -12309,11 +12324,13 @@ import {
               btn.disabled = !connected || (isAlertKey && unread <= 0);
             } else if (def.paneAction) {
               // The PC hides Delete pane / Stack where they cannot apply.
-              btn.disabled = !canControl || !canRunRemotePaneAction(def.paneAction);
+              btn.disabled = !canControl || !canRunRemotePaneAction(def.paneAction) ||
+                (def.paneAction === "close" && navStepPending > 0);
             } else {
               btn.disabled = !canControl;
             }
           }
+          paneCloseKeyConfirmation.update(activePaneTarget(), leaseId);
           updateNavKeyBadge(unread);
         }
 
