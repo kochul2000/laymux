@@ -292,10 +292,8 @@ pub(crate) async fn create_terminal_session_inner(
             }
         }
     }
-    if let Ok(port_lock) = state.automation_port.lock_or_err() {
-        if let Some(port) = *port_lock {
-            env.push((ENV_LX_AUTOMATION_PORT.to_string(), port.to_string()));
-        }
+    if let Ok(Some(port)) = state.automation_server.running_port() {
+        env.push((ENV_LX_AUTOMATION_PORT.to_string(), port.to_string()));
     }
 
     // Look up the profile's command_line, startup_command, and starting_directory from settings

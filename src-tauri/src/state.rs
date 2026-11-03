@@ -30,7 +30,7 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// 10. `notifications`
 /// 11. `sync_groups`
 /// 12. `propagated_terminals`
-/// 13. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 13. `pty_handles` / `automation_channels` / `ipc_socket_path`
 /// 14. `remote_access`
 /// 15. `remote_control`
 /// 16. `cloud_tunnel`
@@ -124,7 +124,9 @@ pub struct AppState {
     pub terminal_protocol_states: SharedTerminalProtocolStates,
     pub automation_channels:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>,
-    pub automation_port: Mutex<Option<u16>>,
+    /// Isolated startup/retry gate; its status mutex is a leaf. Never enter the
+    /// gate while holding an ordered AppState lock (ADR-0374).
+    pub automation_server: Arc<crate::automation_server::lifecycle::ServerLifecycle>,
     /// Terminals that recently received a propagated command (e.g., cd from sync-cwd).
     /// Used to suppress OSC echo loops. Entries expire after PROPAGATION_TIMEOUT.
     pub propagated_terminals: Mutex<HashMap<String, Instant>>,
@@ -415,7 +417,7 @@ impl AppState {
             output_buffers: Arc::new(Mutex::new(HashMap::new())),
             terminal_protocol_states: SharedTerminalProtocolStates::default(),
             automation_channels: Mutex::new(HashMap::new()),
-            automation_port: Mutex::new(None),
+            automation_server: Default::default(),
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),

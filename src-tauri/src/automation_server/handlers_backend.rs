@@ -27,6 +27,7 @@ pub async fn api_docs() -> impl IntoResponse {
         "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), link-local (169.254.x, fe80::).",
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
+            {"method":"POST","path":"/api/v1/dev/automation-server/fail-stop","description":"Dev-only: stop the HTTP/MCP server after responding to verify native failure notification and retry. Release returns 403."},
             {"method":"GET","path":"/api/v1/worktrees","description":"현재 저장소의 Git 워크트리와 laymux 사용 정보를 조회합니다. 사용 정보가 불완전하면 usageWarnings로 알립니다.","query":{"workingDir":"저장소 안의 절대 경로"}},
             {"method":"POST","path":"/api/v1/worktrees/inspect","description":"워크트리의 변경·미추적·ignored 파일과 laymux 사용 상태, 제거 차단 사유를 검사합니다.","body":{"workingDir":"string","path":"string"}},
             {"method":"POST","path":"/api/v1/worktrees/remove","description":"확인한 HEAD와 Git·laymux 사용 상태를 재검증해 워크트리 하나를 제거합니다. 브랜치는 보존합니다. 강제 제거는 지원하지 않습니다.","body":{"workingDir":"string","path":"string","expectedHead":"검사한 HEAD"}},
@@ -523,10 +524,10 @@ fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> R
 pub async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     let port = state
         .app_state
-        .automation_port
-        .lock_or_err()
+        .automation_server
+        .running_port()
         .ok()
-        .and_then(|p| *p)
+        .flatten()
         .unwrap_or(0);
     Json(HealthResponse {
         status: "ok".into(),

@@ -1054,6 +1054,8 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 
 **고정 포트**: release = `19280`, dev = `19281`. 각 빌드 타입은 하나의 인스턴스만 실행 가능하며, 포트 충돌 시 시작 실패한다.
 
+**서버 실패 복구**([ADR-0374](../adr/0374-mcp-server-failure-recovery.md)): `AppState.automation_server`가 공유 HTTP 리스너(MCP·Automation·Remote)의 `starting | running | failed`, 오류·포트·revision과 실행 핸들을 소유한다. 초기 bind 실패와 serve task 종료(오류·panic·취소)를 데스크톱 상단 알림으로 표시한다. `get_automation_server_status` 네이티브 IPC를 3초마다 조회하므로 HTTP 서버가 없어도 알림이 동작한다. `retry_automation_server` IPC는 초기 시작과 같은 비동기 게이트로 직렬화하고, 정상 실행 중이면 기존 상태를 반환한다. 실패 알림의 **MCP 서버 다시 시작** 버튼은 같은 고정 포트의 공유 서버만 복구하며 앱·PTY는 유지한다. 복구 성공 후 에이전트 재연결을 안내한다. MCP 리소스 이벤트 브리지는 앱 수명에 한 번만 설치한다. 발견 파일은 bind 성공 후 게시하고 서버 종료 시 자기 PID 파일만 삭제한다. dev 전용 `POST /api/v1/dev/automation-server/fail-stop`은 응답 후 실제 서버 task를 중단해 복구 경로를 검증한다(release 403).
+
 - **Windows**: `%APPDATA%\laymux\automation.json` (dev: `%APPDATA%\laymux-dev\automation.json`)
 - **Linux**: `~/.config/laymux/automation.json` (dev: `~/.config/laymux-dev/automation.json`)
 - 환경변수: `LX_AUTOMATION_PORT` (터미널 spawn 시 자동 주입)
@@ -2264,7 +2266,7 @@ Frontend bridge action은 `session_checkpoint/mutation.rs`가 요청 ID별 종�
 5. known_claude_terminals → 6. known_codex_terminals →
 7. last_detected_interactive_app → 8. recently_exited_interactive_app →
 9. notifications → 10. sync_groups → 11. propagated_terminals →
-12. pty_handles / automation_channels / automation_port / ipc_socket_path →
+12. pty_handles / automation_channels / ipc_socket_path →
 13. remote_access → 14. remote_control → 15. cloud_tunnel →
 16. cloud → 17. exec_locks(table mutex only)
 ```

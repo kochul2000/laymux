@@ -116,6 +116,17 @@
     }
   },
   "settings": {
+    "mcpServer": {
+      "unknownTitle": "Unable to check the MCP server",
+      "unknownDescription": "The app and running terminals stay open. Use the button below to request another server start.",
+      "title": "MCP connection server is unavailable",
+      "description": "Agent MCP connections and remote access are unavailable. Restart the server to recover. The app and running terminals stay open.",
+      "retry": "Restart MCP server",
+      "retrying": "Starting server…",
+      "recoveredTitle": "MCP connection server recovered",
+      "recoveredDescription": "Reconnect MCP in agents such as Codex that failed to connect. Remote access is available again.",
+      "dismiss": "Dismiss"
+    },
     "legacyWsl": {
       "title": "Legacy WSL detected",
       "description": "This PC uses the inbox WSL client, so every WSL check laymux runs creates a console host (conhost.exe). If WSL stops cleaning those up, the Windows session runs out of resources and apps can freeze. Install the current WSL from PowerShell with the command below, then restart laymux.",

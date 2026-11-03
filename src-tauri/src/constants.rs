@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+/// Allow the dev failure-injection HTTP response to leave before server abort.
+pub const AUTOMATION_FAILURE_INJECTION_DELAY: Duration = Duration::from_millis(300);
+
 /// Static Linux x64 companion, staged beside the Windows application.
 pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
 

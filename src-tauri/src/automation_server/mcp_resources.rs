@@ -263,8 +263,8 @@ pub fn new_peer_id() -> PeerId {
 /// Subscribe to the Tauri events that mutate MCP-visible state and translate
 /// them into `notifications/resources/updated` pushes.
 ///
-/// Called once at server startup. The listener handles are leaked because
-/// they must outlive the entire process.
+/// Called once per app by the server lifecycle, even after listener retries.
+/// The listeners and shared registry must outlive the entire process.
 ///
 /// Generic over `tauri::Runtime` so integration tests can drive the bridge
 /// with a `MockRuntime` while production uses the default `Wry` runtime.

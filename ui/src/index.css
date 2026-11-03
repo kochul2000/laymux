@@ -454,6 +454,38 @@
   color: var(--accent);
   background: var(--accent-20);
 }
+.mcp-server-notice {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  z-index: 9500;
+  padding: 16px;
+  border: 1px solid var(--yellow);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 4px 18px #00000066;
+  font-size: var(--settings-label-size);
+}
+.mcp-server-notice p {
+  margin: 8px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mcp-server-notice__error {
+  max-height: 120px;
+  overflow: auto;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+.mcp-server-notice__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
 .agent-hook-update-notice {
   display: flex;
   flex-direction: column;
