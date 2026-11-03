@@ -5,8 +5,19 @@ import { heuristicTask } from "./terminal-task-detection";
 import type { TaskState } from "./terminal-task";
 import { useSettingsStore } from "@/stores/settings-store";
 import { onTaskStateRefresh } from "./task-state-refresh";
+import { correctTerminalInputFromAgent } from "./terminal-input-history";
 
 const POLL_MS = 1000;
+const INPUT_CORRECTION_MS = 15_000;
+
+function needsInputCorrection(instance: TerminalInstance, now: number): boolean {
+  const submittedAt = instance.lastInputSubmissionAt ?? instance.lastUserInputAt;
+  return (
+    submittedAt !== undefined &&
+    submittedAt > (instance.lastInputClearedAt ?? 0) &&
+    now - submittedAt <= INPUT_CORRECTION_MS
+  );
+}
 
 function recordedAgent(instance: TerminalInstance): "Claude" | "Grok" | undefined {
   if (instance.sessionReady === false || instance.activity?.type !== "interactiveApp") return;
@@ -21,6 +32,8 @@ function stamp(instance: TerminalInstance): string {
     instance.generation,
     instance.taskEpoch,
     instance.lastUserInputAt,
+    instance.lastInputClearedAt,
+    instance.lastInputSubmissionAt,
     recordedAgent(instance),
     task?.source,
     task?.sequence,
@@ -113,9 +126,16 @@ export function subscribeAgentSessionStates(): () => void {
       .getState()
       .instances.filter(
         (instance) =>
-          needsRecord(instance, now) || (recordedAgent(instance) && requested.has(instance.id)),
+          needsRecord(instance, now) ||
+          (recordedAgent(instance) &&
+            (requested.has(instance.id) || needsInputCorrection(instance, now))),
       );
     if (targets.length === 0) return;
+    const stateRequests = new Set(
+      targets
+        .filter((instance) => needsRecord(instance, now) || requested.has(instance.id))
+        .map(({ id }) => id),
+    );
     for (const target of targets) requested.delete(target.id);
     inFlight = true;
     const stamps = new Map(targets.map((instance) => [instance.id, stamp(instance)]));
@@ -123,6 +143,7 @@ export function subscribeAgentSessionStates(): () => void {
       const records = await getAgentSessionStates(
         targets.filter((instance) => recordedAgent(instance) === "Claude").map(({ id }) => id),
         targets.filter((instance) => recordedAgent(instance) === "Grok").map(({ id }) => id),
+        targets.filter((instance) => needsInputCorrection(instance, now)).map(({ id }) => id),
       );
       if (disposed) return;
       for (const [id, before] of stamps) {
@@ -130,7 +151,8 @@ export function subscribeAgentSessionStates(): () => void {
         const record = records[id];
         if (!current || !record || stamp(current) !== before) continue;
         if (current.generation !== undefined && record.generation !== current.generation) continue;
-        apply(current, record);
+        if (stateRequests.has(id)) apply(current, record);
+        if (record.submittedInput) correctTerminalInputFromAgent(id, record.submittedInput);
       }
     } catch {
       // A failed read keeps the current state; the title still observes.
@@ -147,7 +169,14 @@ export function subscribeAgentSessionStates(): () => void {
     for (const id of owned.keys())
       if (!state.instances.some((instance) => instance.id === id)) owned.delete(id);
     const now = Date.now();
-    if (state.instances.some((instance) => needsRecord(instance, now))) schedule(0);
+    if (
+      state.instances.some(
+        (instance) =>
+          needsRecord(instance, now) ||
+          (recordedAgent(instance) && needsInputCorrection(instance, now)),
+      )
+    )
+      schedule(0);
   });
   schedule(0);
   const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {

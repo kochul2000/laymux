@@ -55,6 +55,75 @@ afterEach(() => {
 });
 
 describe("agent session record observation", () => {
+  it.each(["Claude", "Grok"] as const)(
+    "%s는 키 조립 문장이 없는 제출 경계도 보정한다",
+    async (provider) => {
+      agent(provider);
+      const submittedAt = Date.now();
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("pane", { lastInputSubmissionAt: submittedAt });
+      recorded({
+        ...record("running"),
+        submittedInput: {
+          text: "recalled complete input",
+          timestamp: new Date(submittedAt + 10).toISOString(),
+        },
+      });
+      stop = subscribeAgentSessionStates();
+      await tick();
+      expect(instance().lastUserInput).toBe("recalled complete input");
+      expect(instance().lastUserInputAt).toBe(submittedAt);
+      expect(getAgentSessionStates).toHaveBeenCalledWith(
+        provider === "Claude" ? ["pane"] : [],
+        provider === "Grok" ? ["pane"] : [],
+        ["pane"],
+      );
+    },
+  );
+  it("입력 보정을 위한 조회는 확정된 제목 작업을 오래된 idle 기록으로 종료하지 않는다", async () => {
+    agent("Claude");
+    observeTaskTitle("pane", "✻ Working");
+    const inputAt = Date.now();
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("pane", { lastUserInput: "@par", lastUserInputAt: inputAt });
+    recorded({
+      ...record("idle"),
+      submittedInput: { text: "@partial/path.ts", timestamp: new Date(inputAt + 10).toISOString() },
+    });
+    stop = subscribeAgentSessionStates();
+    await tick();
+    expect(instance().lastUserInput).toBe("@partial/path.ts");
+    expect(instance().task?.state).toBe("running");
+  });
+  it.each(["Claude", "Grok"] as const)(
+    "%s의 실제 제출 기록으로 Tab 완성 문자열을 보정한다",
+    async (provider) => {
+      agent(provider);
+      const inputAt = Date.now();
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("pane", { lastUserInput: "read @par", lastUserInputAt: inputAt });
+      recorded({
+        ...record("running"),
+        submittedInput: {
+          text: "read @partial/path.ts",
+          timestamp: new Date(inputAt + 10).toISOString(),
+        },
+      });
+      stop = subscribeAgentSessionStates();
+      await tick();
+      expect(instance().lastUserInput).toBe("read @partial/path.ts");
+      expect(instance().lastUserInputAt).toBe(inputAt);
+      expect(getAgentSessionStates).toHaveBeenCalledWith(
+        provider === "Claude" ? ["pane"] : [],
+        provider === "Grok" ? ["pane"] : [],
+        ["pane"],
+      );
+    },
+  );
+
   it.each(["removed", "shell", "not-ready"])(
     "재확인 대상이 %s이면 다른 pane의 정상 1초 조회를 유지한다",
     async (mode) => {
@@ -141,7 +210,7 @@ describe("agent session record observation", () => {
     recorded(record("idle"));
     stop = subscribeAgentSessionStates();
     await tick();
-    expect(getAgentSessionStates).toHaveBeenCalledWith(["pane"], []);
+    expect(getAgentSessionStates).toHaveBeenCalledWith(["pane"], [], []);
     expect(instance().task).toMatchObject({ state: "idle", observation: "confirmed" });
     expect(terminalTaskPolicy(instance()).clearAllowed).toBe(true);
     expect(notifications()).toHaveLength(0);

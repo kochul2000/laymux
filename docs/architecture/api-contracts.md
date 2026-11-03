@@ -2518,7 +2518,7 @@ Direct Remote 페이지도 이 원칙을 따른다. 기본 조합과 매칭 규�
 
 **이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. D의 데이터는 `종료 코드[;옵션...]`이며 첫 칸이 정수일 때만 종료 코드다. 옵션 `lx=interrupted`(laymux PowerShell 통합이 Ctrl+C로 멈춘 명령에 보냄)가 있으면 exitCode 없이 `result: "interrupted"`를 싣는다([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)). title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
 
-PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine이 없거나 제한 언어 모드인 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. reader 래핑은 `FullLanguage`에서만 설치한다. 명령 본문 E나 새 endpoint/필드는 추가하지 않는다.
+PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine이 없거나 제한 언어 모드인 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. reader 래핑은 `FullLanguage`에서만 설치한다. ADR-0373에 따라 C 다음에 OSC 133 E로 PSReadLine의 실제 제출 명령을 전달한다. C0/C1을 공백으로 정규화한 최대 16,384 UTF-16 단위의 표시 사본이며 실행 원문은 유지한다. Rust의 기존 command-status.command 계약을 사용하고 endpoint/이벤트 필드를 추가하지 않는다.
 
 현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 
@@ -2591,3 +2591,14 @@ Settings의 명시적 환경별 조회는 `manage_agent_hooks({request:{provider
 installed일 때 기존 훅 status를 조회한다. missing은 에이전트 이름·설치 후 재확인을 표시하고, unknown은 확인 불가·진단을 표시한다. 두 경우 훅 설치 버튼을 비활성화한다. 환경 전환·재확인은 재검사하며 이전 응답은 폐기한다. 이 연산은 훅 설치 캐시·자동 검사·작업 상태·설정 파일을 변경하지 않는다.
 
 dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"wsl:<distribution>"}`는 열린 Settings 훅 패널에서 기존 선택지로 전환하고 같은 change 이벤트 경로로 재검사한다. 미마운트·비활성·없는 선택지는 거부한다. Rust debug와 frontend DEV gate로 release에서는 차단하며 설치·설정 저장을 실행하지 않는다. 이 경로와 기존 Settings 열기·navigate·screenshot을 조합해 환경별 안내를 자율 검증한다.
+
+
+### 마지막 입력의 clear 경계 (ADR-0373)
+
+표시 문맥 version 1에는 선택적 `lastInputClearedAt: number`를 포함한다. 기존 데몬 opaque 문맥과 로컬 SQLite checkpoint를 그대로 사용하며 마지막 입력 계산은 이 경계 이하 시각의 `lastUserInput`/`lastCommand`를 제외한다. 복원 병합은 큰 경계를 보존하고 새 제출은 경계보다 큰 시각을 기록한다. 명시적 Ctrl+L·clear/cls/Clear-Host·/clear 제출과 기존 pane/workspace clear의 성공 경로가 공통 표시 초기화를 수행한다. 실패/skip·일반 PTY 화면 지우기는 초기화하지 않는다. 활동별 실제 clear 입력과 권한·busy 정책, REST/Remote 응답 shape는 유지한다. 셸 명령 본문 없는 시작/종료 이벤트는 기존 본문의 제출 시각을 갱신하지 않는다. 임의 TUI 자동완성은 관측 계약이 없어 정확성을 보장하지 않는다.
+
+
+**에이전트 제출 본문 보정(ADR-0373).** 기존 `get_agent_session_states`는 선택적 `inputTerminalIds`를 받아 해당 Claude/Grok 응답에 `submittedInput?: {text:string,timestamp:string}`을 포함한다. 사용자 제출 뒤 15초 동안만 요청하며 이미 귀속된 파일의 마지막 1 MiB를 읽고 텍스트 앞 2048 code point를 반환한다. Claude는 실제 user의 문자열/텍스트 블록을, Grok은 같은 promptIndex의 user_message_chunk를 사용한다. tool_result·메타·sidechain·요약·미완성/손상/불일치는 제외한다. `get_codex_turn_states`도 같은 선택적 본문을 기존 증분 reader의 user_message 또는 item_completed/UserMessage에서 얻는다. 새 OS/WSL probe는 없다. 프론트는 generation·task/input/clear 경계를 확인하고 제출 이전·clear 이전·미래 5초 초과 기록을 거절한다. 실제 제출 문자열만 보정하며 제출 시각·작업 권위·상태를 바꾸지 않는다. 입력 보정 때문에 추가된 조회에는 기존 상태 적용 권한을 부여하지 않아 확정된 제목 작업을 오래된 idle 기록으로 종료하지 않는다. 본문은 로그에 남기지 않는다. 기록을 읽을 수 없거나 지원하지 않는 TUI는 기존 입력 조립을 유지한다.
+
+
+ADR-0373의 입력 보정은 런타임 `lastInputSubmissionAt`으로 성공한 Enter를 문자열 유무와 별개로 추적한다. 이력/Tab으로 채운 입력의 기록도 이 경계와 비교하며, 빈 Enter는 실제 본문이 확인되기 전에는 표시·작업을 만들지 않는다. 이 제출 경계와 실제 초안 폐기를 알리는 `inputDraftResetRevision`은 영속하지 않는다. Ctrl+L/workspace clear는 조립 초안을 보존하고 pane의 실제 clear만 초안을 폐기한다. 지연 clear 완료는 그사이 새 사용자 제출과 새 OSC 명령을 모두 보호하며 자신이 제출한 설정 clear 명령의 본문만 예외로 허용한다.

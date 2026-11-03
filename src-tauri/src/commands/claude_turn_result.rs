@@ -480,7 +480,7 @@ fn prune(tracked: &mut HashMap<String, Vec<Tracked>>, generations: &HashMap<Stri
 
 /// The transcript is `projects/<any>/<sessionId>.jsonl` under the config root
 /// that attributed the session. Claude's directory naming is not derived.
-fn find_transcript(root: &Path, session_id: &str) -> Transcript {
+pub(super) fn find_transcript(root: &Path, session_id: &str) -> Transcript {
     let name = format!("{session_id}.jsonl");
     let entries = match std::fs::read_dir(root.join("projects")) {
         Ok(entries) => entries,
@@ -504,7 +504,7 @@ fn find_transcript(root: &Path, session_id: &str) -> Transcript {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Transcript {
+pub(super) enum Transcript {
     Found(PathBuf),
     /// Every project directory was read and none holds the session yet.
     Absent,

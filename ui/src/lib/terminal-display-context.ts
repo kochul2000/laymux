@@ -15,6 +15,7 @@ export type TerminalDisplayContext = Partial<
     | "lastCommandAt"
     | "lastUserInput"
     | "lastUserInputAt"
+    | "lastInputClearedAt"
     | "task"
     | "lastActivityAt"
   >
@@ -31,6 +32,7 @@ const fields = [
   "lastCommandAt",
   "lastUserInput",
   "lastUserInputAt",
+  "lastInputClearedAt",
   "lastActivityAt",
 ] as const;
 
@@ -70,6 +72,8 @@ export function projectTerminalDisplay(
   return {
     ...instance,
     ...fallback,
+    lastInputClearedAt:
+      Math.max(instance.lastInputClearedAt ?? 0, history.lastInputClearedAt ?? 0) || undefined,
     // A prompt/result may have a fresh timestamp without a command body. Keep
     // the historical body and its timestamp together for last-input selection.
     ...(historicalCommand ? { lastCommandAt: history.lastCommandAt } : {}),
@@ -137,6 +141,8 @@ function mergeHistory(
   return {
     ...previous,
     ...next,
+    lastInputClearedAt:
+      Math.max(previous.lastInputClearedAt ?? 0, next.lastInputClearedAt ?? 0) || undefined,
     ...((previous.lastUserInputAt ?? 0) > (next.lastUserInputAt ?? 0)
       ? {
           lastUserInput: previous.lastUserInput,
@@ -247,18 +253,25 @@ export function startTerminalDisplayContextSync(): () => void {
                   : undefined;
             useTerminalDisplayStore.getState().setContext(instance.id, history);
             const latest = useTerminalStore.getState().instances.find((i) => i.id === instance.id)!;
-            if (
+            const restoreInput =
               history?.lastUserInput !== undefined &&
-              (history.lastUserInputAt ?? 0) > (latest.lastUserInputAt ?? 0)
-            ) {
+              (history.lastUserInputAt ?? 0) > (latest.lastUserInputAt ?? 0);
+            const restoreClear =
+              (history?.lastInputClearedAt ?? 0) > (latest.lastInputClearedAt ?? 0);
+            if (history && (restoreInput || restoreClear)) {
               // Historical input is not a newly submitted command or task input.
               useTerminalStore.setState((state) => ({
                 instances: state.instances.map((i) =>
                   i.id === instance.id && i.generation === initializing.generation
                     ? {
                         ...i,
-                        lastUserInput: history.lastUserInput,
-                        lastUserInputAt: history.lastUserInputAt,
+                        ...(restoreInput
+                          ? {
+                              lastUserInput: history.lastUserInput,
+                              lastUserInputAt: history.lastUserInputAt,
+                            }
+                          : {}),
+                        ...(restoreClear ? { lastInputClearedAt: history.lastInputClearedAt } : {}),
                       }
                     : i,
                 ),

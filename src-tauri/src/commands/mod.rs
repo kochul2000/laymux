@@ -1,6 +1,7 @@
 mod agent_clear;
 mod agent_hooks;
 mod agent_session_state;
+mod agent_submitted_input;
 mod android_pairing;
 mod app_update;
 mod archive_listing;

@@ -12,6 +12,7 @@ use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+use crate::commands::agent_submitted_input::SubmittedAgentInput;
 use reader::TurnReader;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -44,6 +45,8 @@ pub struct CodexTurnSnapshot {
     selection_key: Option<String>,
     #[serde(flatten)]
     turn: Turn,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    submitted_input: Option<SubmittedAgentInput>,
 }
 
 #[derive(PartialEq)]
@@ -169,6 +172,7 @@ pub(crate) fn get_codex_turn_states_impl(
                     session_id: Some(entry.source.session_id.clone()),
                     selection_key: Some(entry.source.selection_key.clone()),
                     turn,
+                    submitted_input: entry.reader.submitted_input.clone(),
                 },
             );
         }
@@ -198,6 +202,7 @@ pub(crate) fn get_codex_turn_states_impl(
             session_id: None,
             selection_key: None,
             turn: Turn::default(),
+            submitted_input: None,
         });
     }
     Ok(snapshots)

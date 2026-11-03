@@ -687,7 +687,23 @@ describe("useSyncEvents", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.lastExitCode).toBe(0);
-    expect(instance?.lastCommandAt).toBeDefined();
+    expect(instance?.lastCommandAt).toBeUndefined();
+  });
+
+  it("keeps the completed shell command when an input write settles later and does not revive it after clear", () => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
+    renderHook(() => useSyncEvents());
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", command: "Get-ChildItem" });
+    expect(useTerminalStore.getState().instances[0].lastCommand).toBe("Get-ChildItem");
+    callback({ terminalId: "t1", command: "Clear-Host" });
+    expect(useTerminalStore.getState().instances[0].lastCommand).toBeUndefined();
+    expect(useTerminalStore.getState().instances[0].lastInputClearedAt).toBeGreaterThan(0);
+    callback({ terminalId: "t1", exitCode: 0 });
+    callback({ terminalId: "t1", command: "__preexec__" });
+    expect(useTerminalStore.getState().instances[0].lastCommandAt).toBeUndefined();
   });
 
   it("does NOT send OS notification when IDE focused and notification workspace is active", () => {
