@@ -841,7 +841,12 @@ async fn remote_session_heartbeat(
             "remote controller lease is not active",
         );
     }
-    match heartbeat_success_body(status, device_settings, &server.app_state) {
+    match heartbeat_success_body(
+        status,
+        device_settings,
+        &server.app_state,
+        crate::settings::load_settings().terminal.pane_link_enabled,
+    ) {
         Ok(response) => Json(response).into_response(),
         Err(error) => internal_error(error),
     }
@@ -854,6 +859,7 @@ fn heartbeat_success_body(
     status: RemoteControlStatus,
     device_settings: Option<Result<Option<serde_json::Value>, String>>,
     app_state: &crate::state::AppState,
+    pane_link_enabled: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut response = serde_json::to_value(status)?;
     match device_settings {
@@ -862,6 +868,8 @@ fn heartbeat_success_body(
         _ => {}
     }
     super::attach_heartbeat_signal(&mut response, app_state);
+    // 기존 heartbeat가 host 토글을 전달하므로 drawer를 닫아도 밑줄을 해제한다.
+    response["paneLinkEnabled"] = serde_json::json!(pane_link_enabled);
     Ok(response)
 }
 
@@ -1302,15 +1310,25 @@ mod tests {
             status,
             Some(Ok(Some(serde_json::json!({ "requestId": "r1" })))),
             &state,
+            true,
         )
         .unwrap();
 
         assert_eq!(body["active"], serde_json::json!(false));
         assert_eq!(body["deviceSettingsCommand"]["requestId"], "r1");
+        assert_eq!(body["paneLinkEnabled"], true);
         assert_eq!(
             body["fileViewer"],
             serde_json::json!({ "open": true, "epoch": "epoch-a", "revision": 2 })
         );
+    }
+
+    #[test]
+    fn heartbeat_carries_disabled_pane_links_without_a_navigation_drawer() {
+        let state = AppState::new();
+        let status = status_from_state(&RemoteControlState::default(), 15);
+        let body = heartbeat_success_body(status, None, &state, false).unwrap();
+        assert_eq!(body["paneLinkEnabled"], false);
     }
 
     fn enabled_settings() -> RemoteSettings {

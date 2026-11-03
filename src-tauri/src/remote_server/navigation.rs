@@ -24,6 +24,7 @@ pub(super) struct RemoteNavigationHostState<'a> {
     /// Remote 페이지는 자기 표면의 탭 처리에만 쓴다(ADR-0218 과 같은 경로).
     pub url_link_activation: &'a str,
     pub path_link_activation: &'a str,
+    pub pane_link_enabled: bool,
     /// 사용자 키바인딩 재정의(`settings.json` `keybindings`). 기본값은 Remote
     /// 번들이 공유 키바인딩 코어에서 가진다(ADR-0269).
     pub keybindings: &'a [Keybinding],
@@ -184,6 +185,7 @@ pub(super) fn build_remote_navigation_payload(
         "codexTranscriptScrollEnabled": host_state.codex_transcript_scroll_enabled,
         "urlLinkActivation": host_state.url_link_activation,
         "pathLinkActivation": host_state.path_link_activation,
+        "paneLinkEnabled": host_state.pane_link_enabled,
         "keybindings": host_state.keybindings,
         "agentCommands": {
             "claude": { "command": host_state.agent_commands[0] },
@@ -856,6 +858,7 @@ mod tests {
             codex_transcript_scroll_enabled: true,
             url_link_activation: "immediate",
             path_link_activation: "immediate",
+            pane_link_enabled: true,
             keybindings: &[],
             agent_commands: ["claude", "codex", "grok"],
         }
@@ -912,6 +915,7 @@ mod tests {
                 codex_transcript_scroll_enabled: false,
                 url_link_activation: "chip",
                 path_link_activation: "immediate",
+                pane_link_enabled: true,
                 keybindings: &keybindings,
                 agent_commands: ["claude", "codex", "grok"],
             },
@@ -946,6 +950,7 @@ mod tests {
                 codex_transcript_scroll_enabled: false,
                 url_link_activation: "chip",
                 path_link_activation: "immediate",
+                pane_link_enabled: true,
                 keybindings: &keybindings,
                 agent_commands: ["claude", "codex", "grok"],
             },
@@ -1084,6 +1089,7 @@ mod tests {
                 codex_transcript_scroll_enabled: false,
                 url_link_activation: "chip",
                 path_link_activation: "immediate",
+                pane_link_enabled: true,
                 keybindings: &keybindings,
                 agent_commands: [
                     "claude --dangerously-skip-permissions",
@@ -1106,6 +1112,7 @@ mod tests {
         // ADR-0224: 두 키는 독립이므로 payload 도 따로 실린다.
         assert_eq!(payload["urlLinkActivation"], "chip");
         assert_eq!(payload["pathLinkActivation"], "immediate");
+        assert_eq!(payload["paneLinkEnabled"], true);
         // ADR-0269: Remote 단축키는 PC 재정의를 그대로 받는다.
         assert_eq!(
             payload["keybindings"],

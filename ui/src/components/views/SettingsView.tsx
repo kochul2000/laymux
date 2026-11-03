@@ -1721,6 +1721,13 @@ function TerminalSection() {
       {/* ADR-0224: 실행 게이트는 URL 과 경로를 따로 고른다. 발견(밑줄)은 어느
           모드에서도 게이트되지 않으므로 여기에 노출하지 않는다. */}
       <SettingsGroup title={t("terminal.linkActivationGroup")}>
+        <SettingsToggleField
+          label={t("terminal.paneLinkEnabled")}
+          desc={t("terminal.paneLinkEnabledDesc")}
+          testId="pane-link-enabled-toggle"
+          checked={terminal.paneLinkEnabled}
+          onChange={(v) => update({ paneLinkEnabled: v })}
+        />
         <SettingsField
           label={t("terminal.urlLinkActivation")}
           desc={t("terminal.urlLinkActivationDesc")}

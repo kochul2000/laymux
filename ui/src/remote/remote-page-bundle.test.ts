@@ -58,7 +58,7 @@ describe("remote page bundle", () => {
       `// Keyboard-SHA256: ${fileHash(path.resolve(__dirname, "remote-keyboard.js"))}`,
     );
     expect(banner).toContain(
-      `// Resume-SHA256: ${["remote/remote-agent-resume.ts", "lib/agent-resume-link.ts", "lib/agent-command.ts"].map((file) => `${file}=${fileHash(path.resolve(__dirname, "..", file))}`).join(" ")}`,
+      `// Resume-SHA256: ${["remote/remote-agent-resume.ts", "lib/agent-resume-link.ts", "lib/agent-command.ts", "lib/pane-link.ts", "lib/pane-link-provider.ts", "remote/remote-pane-links.ts", "lib/terminal-url.ts"].map((file) => `${file}=${fileHash(path.resolve(__dirname, "..", file))}`).join(" ")}`,
     );
     expect(stamp).toBe(
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +

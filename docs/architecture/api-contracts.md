@@ -250,7 +250,10 @@ URL=브라우저·복사이고, Remote 는 같은 목록에서 OS 열기와 CWD 
 `urlLinkActivation`·`pathLinkActivation` 로 받는다(ADR-0218 과 같은 전파 경로) — 호스트 설정이
 정본이고 Remote 는 기기 로컬 사본을 갖지 않는다.
 
+`terminal.paneLinkEnabled: boolean`(기본 true)은 터미널 > 링크 실행 방식의 `Pane 링크 인식` 토글이다. PC와 Remote가 함께 사용하는 호스트 설정이며 false이면 pane 식별자 밑줄·클릭을 모두 해제한다. URL/파일 링크 실행 방식과 독립이다. `/remote/v1/navigation`의 `paneLinkEnabled`로 전달하고 성공 heartbeat에도 같은 값을 실어 drawer를 닫은 연결 기기에서 다음 heartbeat에 밑줄을 갱신한다. Remote 클릭은 최신 navigation을 조회해 설정·대상을 다시 검증하므로 이전 snapshot의 링크로 비활성 설정을 우회하지 않는다. [ADR-0370](../adr/0370-pane-identifier-navigation-links.md).
+
 ### 사용량 모니터 설정
+
 
 ```jsonc
 {

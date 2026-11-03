@@ -3,6 +3,21 @@ import { useSettingsStore, makeDefaultColorScheme, type TerminalSettings } from 
 import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
+  it("pane 링크는 기본 켬이며 끔을 저장하고 누락된 snapshot은 켬으로 보완한다", () => {
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(true);
+    useSettingsStore.getState().setTerminal({ paneLinkEnabled: false });
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(false);
+    const legacy: Partial<TerminalSettings> = { ...useSettingsStore.getState().terminal };
+    delete legacy.paneLinkEnabled;
+    useSettingsStore.getState().loadFromSettings({ terminal: legacy as TerminalSettings });
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(true);
+    useSettingsStore
+      .getState()
+      .loadFromSettings({
+        terminal: { ...useSettingsStore.getState().terminal, paneLinkEnabled: false },
+      });
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(false);
+  });
   it("워크트리의 원본 CWD 선택은 기본 true이고 false를 보존한다", () => {
     expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(true);
     useSettingsStore.getState().loadFromSettings({

@@ -198,6 +198,8 @@ export interface TerminalSettings {
    * Ctrl+Shift keep going straight to the host OS in both modes (ADR-0100).
    */
   pathLinkActivation: LinkActivationMode;
+  /** Recognize pane identifiers as navigation links on PC and Remote. */
+  paneLinkEnabled: boolean;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
   /**
@@ -853,6 +855,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   pathLinkOsOpenConfirm: true,
   urlLinkActivation: DEFAULT_LINK_ACTIVATION,
   pathLinkActivation: DEFAULT_LINK_ACTIVATION,
+  paneLinkEnabled: true,
   showScrollToBottomButton: true,
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
   fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,

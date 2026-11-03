@@ -2759,6 +2759,7 @@
         pointer-events: none;
       }
       .remote-path-link-decoration,
+      .pane-link-decoration,
       .remote-resume-link-decoration {
         box-sizing: border-box;
         border-bottom: 1px solid currentColor;

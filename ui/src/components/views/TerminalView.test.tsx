@@ -442,7 +442,11 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     element = document.createElement("div");
-    buffer = { active: mockBufferActive, normal: mockBufferActive };
+    buffer = {
+      active: mockBufferActive,
+      normal: mockBufferActive,
+      onBufferChange: vi.fn(() => ({ dispose: vi.fn() })),
+    };
     modes = mockModes;
     parser = {
       registerOscHandler: mockRegisterOscHandler.mockImplementation(

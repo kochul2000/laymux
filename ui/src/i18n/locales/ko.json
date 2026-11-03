@@ -479,6 +479,8 @@
       "pathLinkOsOpenConfirm": "OS에서 열기 전에 항상 확인",
       "pathLinkOsOpenConfirmDesc": "파일을 연결 프로그램으로 열 때마다 확인합니다. 끄면 실행 파일·스크립트 등 위험한 확장자만 확인합니다. 위치 보여주기와 폴더 열기는 확인하지 않습니다. Ctrl+클릭뿐 아니라 파일 뷰어의 버튼에도 같이 적용됩니다.",
       "linkActivationGroup": "링크 실행 방식",
+      "paneLinkEnabled": "Pane 링크 인식",
+      "paneLinkEnabledDesc": "터미널 출력의 lx:pane:워크스페이스:번호, terminal-pane-ID, pane-ID에 밑줄을 표시합니다. 클릭·탭하면 해당 터미널로 이동하고 포커스합니다. PC와 리모트에 함께 적용됩니다. 기본은 켬입니다.",
       "linkActivationImmediate": "즉시 열기(기본)",
       "linkActivationChip": "액션 칩 띄우기",
       "urlLinkActivation": "URL 링크",

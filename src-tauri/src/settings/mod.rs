@@ -1425,6 +1425,33 @@ mod tests {
     }
 
     #[test]
+    fn pane_link_defaults_round_trip_and_description() {
+        let missing: models::TerminalSettings =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(missing.pane_link_enabled);
+        let disabled: models::TerminalSettings =
+            serde_json::from_value(serde_json::json!({ "paneLinkEnabled": false })).unwrap();
+        assert!(!disabled.pane_link_enabled);
+        assert_eq!(
+            serde_json::to_value(disabled).unwrap()["paneLinkEnabled"],
+            false
+        );
+        let description =
+            contract::describe_settings(&["/terminal/paneLinkEnabled".into()]).unwrap();
+        assert_eq!(description["defaults"]["/terminal/paneLinkEnabled"], true);
+        assert_eq!(
+            description["metadata"]["/terminal/paneLinkEnabled"]["applyMode"],
+            "live"
+        );
+        assert!(
+            description["metadata"]["/terminal/paneLinkEnabled"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("Remote")
+        );
+    }
+
+    #[test]
     fn saved_control_bar_modes_and_right_dock_layout_survive_loading() {
         for mode in ["hover", "minimized"] {
             let dir = tempfile::tempdir().unwrap();

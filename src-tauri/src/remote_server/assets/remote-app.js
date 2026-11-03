@@ -13,6 +13,8 @@ import {
 import { installRemoteToolSwipes, resolveToolSwipe, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
+import { createPaneLinkProvider, installPaneLinkUnderlines } from "../../../../ui/src/lib/pane-link-provider.ts";
+import { remotePaneLinkDependencies } from "../../../../ui/src/remote/remote-pane-links.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { getPaneInstanceId } from "../../../../ui/src/lib/view-instance-id.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
@@ -575,6 +577,7 @@ import {
         let pathLinkScreenContextDirty = true;
         let pathLinkPress = null;
         let terminal = null;
+        let paneLinkUnderlines = null;
         // The xterm instance is reused across disconnects and pane switches.
         // Keep the id whose snapshot currently occupies it so a recovery can
         // preserve surface-local viewport state only for that same terminal.
@@ -6813,6 +6816,19 @@ import {
           // Link providers are additive. Keep the Remote terminal usable when
           // a minimal or older xterm surface does not expose this optional API.
           if (typeof terminal.registerLinkProvider === "function") {
+            const paneLinks = remotePaneLinkDependencies({
+              getSnapshot: () => navigationState,
+              getContext: () => ({
+                terminalId: activeTerminalId, leaseId, outputEpoch: terminalOutputGeneration,
+                ready: composerReady && terminalReplayDepth === 0 && navMovePending === 0 && socket?.readyState === 1,
+              }),
+              loadSnapshot: () => remoteFetch("/remote/v1/navigation"),
+              installSnapshot: (data) => installNavigationSnapshot(data),
+              select: (target) => selectTerminal(target.terminalId, { focusHost: true, refreshNavigation: true }),
+              onError: (error) => setStatus(`Pane navigation failed: ${error.message || error}`, true),
+            });
+            terminal.registerLinkProvider(createPaneLinkProvider(terminal, paneLinks));
+            paneLinkUnderlines = installPaneLinkUnderlines(terminal, paneLinks);
             terminal.registerLinkProvider(createRemoteAgentResumeLinkProvider(terminal, {
               getContext: () => ({
                 terminalId: activeTerminalId,
@@ -7101,6 +7117,10 @@ import {
             if (leaseId !== heartbeatLeaseId || heartbeatAbortController !== controller) return;
             settingsReplyPending = remoteSettingsAgentBridge.receive(response?.deviceSettingsCommand, heartbeatLeaseId, requestStartedAt);
             applyHostViewerSignal(response?.fileViewer);
+            if (navigationState && typeof response?.paneLinkEnabled === "boolean") {
+              navigationState.paneLinkEnabled = response.paneLinkEnabled;
+              paneLinkUnderlines?.refresh();
+            }
             lastHeartbeatOkAt = Date.now();
             if (heartbeatRetryTimer) {
               clearTimeout(heartbeatRetryTimer);
@@ -9081,6 +9101,7 @@ import {
 
         function installNavigationSnapshot(data, { render = true } = {}) {
           navigationState = data;
+          paneLinkUnderlines?.refresh();
           workspaceCloseToasts.sync(data.pendingWorkspaceCloses, data.workspaceCloseServerTime);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));

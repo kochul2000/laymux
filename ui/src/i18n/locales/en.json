@@ -479,6 +479,8 @@
       "pathLinkOsOpenConfirm": "Always confirm before opening in the OS",
       "pathLinkOsOpenConfirmDesc": "Ask every time a file is opened with its associated app. When off, only risky extensions (executables, scripts) still ask. Showing a location and opening a folder never ask. Applies to the file viewer buttons as well, not just Ctrl+click.",
       "linkActivationGroup": "Link Activation",
+      "paneLinkEnabled": "Pane Links",
+      "paneLinkEnabledDesc": "Underline lx:pane:workspace:number, terminal-pane-ID, and pane-ID references in terminal output. Click or tap to navigate to and focus that terminal. Applies to PC and Remote. Enabled by default.",
       "linkActivationImmediate": "Open immediately (default)",
       "linkActivationChip": "Show an action chip",
       "urlLinkActivation": "URL Links",
