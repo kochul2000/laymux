@@ -38,6 +38,8 @@ import { useTerminalDisplayContext } from "@/hooks/useTerminalDisplayContext";
 import { subscribeAgentHookUpdates } from "@/lib/agent-hook-updates";
 import { AgentHookUpdateNotice } from "@/components/layout/AgentHookUpdateNotice";
 import { LegacyWslNotice } from "@/components/layout/LegacyWslNotice";
+import { CloseConfirmationModal } from "@/components/layout/CloseConfirmationModal";
+import { requestCloseConfirmation } from "@/stores/close-confirmation-store";
 
 export function App() {
   useKeyboardShortcuts();
@@ -77,6 +79,7 @@ export function App() {
         const appWindow = getCurrentWindow();
         const handler = createCloseHandler({
           beforeClose: async () => {
+            if (!(await requestCloseConfirmation())) return false;
             try {
               await beginAppClose();
             } catch {
@@ -155,6 +158,7 @@ export function App() {
           <div style={{ marginBottom: 12, fontSize: 16 }}>Laymux</div>
           <div style={{ opacity: 0.5 }}>Loading session...</div>
         </div>
+        <CloseConfirmationModal />
       </div>
     );
   }
@@ -197,6 +201,7 @@ export function App() {
       )}
       <LocalMobileModeOverlay />
       <LifecycleModal />
+      <CloseConfirmationModal />
       <AgentHookUpdateNotice />
       <LegacyWslNotice />
       {!localMobileModeActive && <RemoteControlOverlay />}

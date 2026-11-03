@@ -1,10 +1,28 @@
 import { getAppUpdateStatus } from "./tauri-api";
 import { useLifecycleStore } from "@/stores/lifecycle-store";
 import type { LifecycleStage } from "./lifecycle-progress";
+import { useCloseConfirmationStore } from "@/stores/close-confirmation-store";
 
-/** Only imported by the dev Automation bridge; never executes lifecycle work. */
+/** Only imported by the dev bridge; request/confirm-close use the real close path. */
 export async function previewLifecycle(params: Record<string, unknown>) {
   if (!import.meta.env.DEV) throw new Error("Lifecycle preview is dev-only");
+  if (params.action === "request-close") {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+    return { requested: true };
+  }
+  if (params.action === "cancel-close" || params.action === "confirm-close") {
+    if (!useCloseConfirmationStore.getState().open)
+      throw new Error("No close confirmation is open");
+    if (params.action === "cancel-close") useCloseConfirmationStore.getState().cancel();
+    else {
+      if (typeof params.dontShowAgain === "boolean")
+        useCloseConfirmationStore.setState({ dontShowAgain: params.dontShowAgain });
+      await useCloseConfirmationStore.getState().confirm();
+    }
+    const { open, saving, error } = useCloseConfirmationStore.getState();
+    return { open, saving, error };
+  }
   if (params.action === "close") {
     useLifecycleStore.setState({
       open: false,

@@ -702,6 +702,9 @@ fn default_grok_command() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExitSettings {
+    /// Ask before closing the desktop app. Default: on.
+    #[serde(default = "default_true")]
+    pub confirm_before_exit: bool,
     /// Send Ctrl+C to all terminals on app exit. Default: off (destructive, opt-in).
     #[serde(default)]
     pub interrupt_terminals: bool,
@@ -717,6 +720,7 @@ pub struct ExitSettings {
 impl Default for ExitSettings {
     fn default() -> Self {
         Self {
+            confirm_before_exit: true,
             interrupt_terminals: false,
             interrupt_rounds: default_interrupt_rounds(),
             settle_ms: default_exit_settle_ms(),

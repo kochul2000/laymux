@@ -3,6 +3,16 @@ import { useSettingsStore, makeDefaultColorScheme, type TerminalSettings } from 
 import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
+  it("종료 확인은 생략된 키에 기본 true를 채우고 명시적 false는 보존한다", () => {
+    const legacy = { interruptTerminals: false, interruptRounds: 3, settleMs: 700 };
+    useSettingsStore.getState().setExit({ confirmBeforeExit: false });
+    useSettingsStore
+      .getState()
+      .loadFromSettings({ exit: legacy as ReturnType<typeof useSettingsStore.getState>["exit"] });
+    expect(useSettingsStore.getState().exit.confirmBeforeExit).toBe(true);
+    useSettingsStore.getState().loadFromSettings({ exit: { ...legacy, confirmBeforeExit: false } });
+    expect(useSettingsStore.getState().exit.confirmBeforeExit).toBe(false);
+  });
   it("pane 링크는 기본 켬이며 끔을 저장하고 누락된 snapshot은 켬으로 보완한다", () => {
     expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(true);
     useSettingsStore.getState().setTerminal({ paneLinkEnabled: false });
@@ -11,11 +21,9 @@ describe("settings-store", () => {
     delete legacy.paneLinkEnabled;
     useSettingsStore.getState().loadFromSettings({ terminal: legacy as TerminalSettings });
     expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(true);
-    useSettingsStore
-      .getState()
-      .loadFromSettings({
-        terminal: { ...useSettingsStore.getState().terminal, paneLinkEnabled: false },
-      });
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { ...useSettingsStore.getState().terminal, paneLinkEnabled: false },
+    });
     expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(false);
   });
   it("워크트리의 원본 CWD 선택은 기본 true이고 false를 보존한다", () => {
