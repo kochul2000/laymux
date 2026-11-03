@@ -4,6 +4,7 @@ import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers
 import { taskSource } from "./terminal-task";
 import { heuristicTask } from "./terminal-task-detection";
 import { onTaskStateRefresh } from "./task-state-refresh";
+import { correctTerminalInputFromAgent } from "./terminal-input-history";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -61,6 +62,7 @@ export function subscribeCodexTurnStates(): () => void {
         {
           epoch: epochs.get(instance.id) ?? 0,
           inputAt: instance.lastUserInputAt,
+          clearedAt: instance.lastInputClearedAt,
           taskEpoch: instance.taskEpoch,
         },
       ]),
@@ -73,6 +75,7 @@ export function subscribeCodexTurnStates(): () => void {
         isCodex(current) &&
         stamp.epoch === (epochs.get(id) ?? 0) &&
         stamp.inputAt === current.lastUserInputAt &&
+        stamp.clearedAt === current.lastInputClearedAt &&
         stamp.taskEpoch === current.taskEpoch
         ? current
         : undefined;
@@ -135,6 +138,7 @@ export function subscribeCodexTurnStates(): () => void {
                   ? "interrupted"
                   : undefined,
         });
+        if (snapshot.submittedInput) correctTerminalInputFromAgent(id, snapshot.submittedInput);
         if (
           deferred?.observation &&
           deferred.source === source &&

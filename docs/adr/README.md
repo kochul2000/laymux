@@ -395,6 +395,7 @@ ADR 이 필요한 대표 기준:
 | [0369](0369-remote-close-key-two-activations.md) | Remote Close pane 키는 같은 버튼을 두 번 활성화해야 실행한다 | Accepted |
 | [0370](0370-pane-identifier-navigation-links.md) | Pane 식별자 링크는 PC와 Remote가 같은 규칙으로 해석한다 | Accepted |
 | [0371](0371-durable-workspace-display-history.md) | 워크스페이스의 마지막 표시와 제출 입력을 로컬 세션에 보존한다 | Accepted |
+| [0373](0373-submitted-shell-input-and-clear-history.md) | 완성된 셸 제출 명령과 명시적 clear 경계로 마지막 입력을 표시한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

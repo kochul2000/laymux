@@ -3,6 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::{Turn, TurnState};
+use crate::commands::agent_submitted_input::{codex_input, SubmittedAgentInput};
 
 const READ_LIMIT: usize = 1024 * 1024;
 const ANCHOR_LEN: usize = 64;
@@ -17,6 +18,7 @@ pub(super) struct TurnReader {
     created: Option<std::time::SystemTime>,
     modified: Option<std::time::SystemTime>,
     turn: Turn,
+    pub(super) submitted_input: Option<SubmittedAgentInput>,
 }
 
 impl TurnReader {
@@ -89,6 +91,9 @@ impl TurnReader {
             self.turn = Turn::default();
             return;
         };
+        if let Some(input) = codex_input(&record) {
+            self.submitted_input = Some(input);
+        }
         if record["type"] != "event_msg" {
             return;
         }

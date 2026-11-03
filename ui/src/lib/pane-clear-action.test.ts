@@ -19,6 +19,7 @@ import { runPaneClearFromUi } from "./pane-clear-action";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { selectTerminalLastInput } from "./terminal-last-input";
 
 function seedTerminal() {
   useWorkspaceStore.setState({
@@ -65,11 +66,16 @@ describe("runPaneClearFromUi", () => {
 
   it("uses the configured shell command for the named pane", async () => {
     seedTerminal();
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+      lastUserInput: "previous input",
+      lastUserInputAt: 10,
+    });
     useSettingsStore.getState().setPaneClear({ shellCommand: "cls" });
 
     const result = await runPaneClearFromUi("pane-a");
 
     expect(result?.cleared).toEqual(["terminal-pane-a"]);
+    expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBeUndefined();
     expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledExactlyOnceWith(
       "terminal-pane-a",
       "cls",

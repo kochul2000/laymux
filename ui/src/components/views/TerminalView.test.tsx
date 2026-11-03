@@ -4737,6 +4737,36 @@ describe("TerminalView", () => {
     });
   });
 
+  it("clears last input on successful human Ctrl+L and discards a delayed older submission", async () => {
+    const terminalId = "t-history-clear";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("previous\r", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+      ).toBe("previous"),
+    );
+    let finish!: () => void;
+    mockWriteToTerminal.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    act(() => terminal.emitCoreData("late\r", true));
+    act(() => terminal.emitCoreData("\x0c", true));
+    await vi.waitFor(() =>
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastInputClearedAt,
+      ).toBeGreaterThan(0),
+    );
+    await act(async () => finish());
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === terminalId)?.lastUserInput,
+    ).toBeUndefined();
+  });
+
   it("coalesces rejected human onData alerts while counting every exactly-once attempt", async () => {
     const terminalId = "t-human-write-rejected";
     mockWriteToTerminal.mockRejectedValue(new Error("IPC response lost"));

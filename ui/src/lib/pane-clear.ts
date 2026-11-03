@@ -5,6 +5,7 @@ import { agentClearInput, beginAgentClear } from "./agent-clear-input-api";
 import { isTaskObservedAgent, terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
+import { captureInputHistoryScope, clearTerminalInputHistory } from "./terminal-input-history";
 import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
 import {
   getTerminalStates,
@@ -364,6 +365,7 @@ export async function clearPane(
     action,
     config,
     submit: async (id, text) => {
+      const historyScope = captureInputHistoryScope(id);
       const submit = async () => {
         if (deadlineAt !== undefined && Date.now() >= deadlineAt)
           throw new Error("Agent clear deadline elapsed before submission");
@@ -416,15 +418,18 @@ export async function clearPane(
           clearDeadline,
           () => step("submitClear"),
         );
+        clearTerminalInputHistory(id, historyScope);
         return;
       }
       await submit();
+      clearTerminalInputHistory(id, historyScope);
     },
     interrupt: (id) =>
       remoteLeaseId === undefined
         ? writeToTerminal(id, CTRL_C)
         : writeToTerminalForRemote(id, CTRL_C, remoteLeaseId),
     restart: (id) => {
+      clearTerminalInputHistory(toTerminalId(id));
       const pane = findTerminalPane(id);
       useTerminalRestartStore
         .getState()

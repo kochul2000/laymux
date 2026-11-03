@@ -50,6 +50,8 @@ export interface TerminalInstance {
   /** Latest submitted user text; retained in the local display checkpoint (ADR-0371). */
   lastUserInput?: string;
   lastUserInputAt?: number;
+  /** Display-only clear boundary, retained with the local input history. */
+  lastInputClearedAt?: number;
   /** Detected terminal activity state. */
   activity?: TerminalActivityInfo;
   /**
@@ -112,6 +114,7 @@ interface TerminalStoreState {
         | "lastCommandAt"
         | "lastUserInput"
         | "lastUserInputAt"
+        | "lastInputClearedAt"
         | "deferredTaskInput"
         | "activity"
         | "activitySequence"

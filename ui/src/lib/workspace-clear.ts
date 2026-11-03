@@ -1,4 +1,5 @@
 import { toTerminalId } from "./pane-ids";
+import { captureInputHistoryScope, clearTerminalInputHistory } from "./terminal-input-history";
 import { writeToTerminal, writeToTerminalForRemote } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -82,9 +83,11 @@ async function writeCtrlL(
     return { skipped: { terminalId, reason: "notReady" } };
   }
   try {
+    const historyScope = captureInputHistoryScope(terminalId);
     await (remoteLeaseId === undefined
       ? writeToTerminal(terminalId, CTRL_L)
       : writeToTerminalForRemote(terminalId, CTRL_L, remoteLeaseId));
+    clearTerminalInputHistory(terminalId, historyScope);
     return { cleared: terminalId };
   } catch (error) {
     return {

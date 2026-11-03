@@ -34,6 +34,7 @@ import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
 import { subscribeAgentHookStates } from "@/lib/agent-hook-state-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 import { subscribeTaskStateRecovery } from "@/lib/task-state-recovery";
+import { clearTerminalInputHistory, isInputHistoryClear } from "@/lib/terminal-input-history";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -362,7 +363,11 @@ export function useSyncEvents() {
 
         if (data.command !== undefined && data.command !== "__preexec__") {
           update.lastCommand = data.command;
-          update.lastCommandAt = Date.now();
+          update.lastCommandAt = Math.max(
+            Date.now(),
+            (owner?.lastInputClearedAt ?? 0) + 1,
+            (owner?.lastCommandAt ?? 0) + 1,
+          );
           const appActivity = detectActivityFromCommand(data.command);
           if (appActivity && owner?.activity?.type !== "interactiveApp" && !staleActivity) {
             update.activity = appActivity;
@@ -378,7 +383,6 @@ export function useSyncEvents() {
             }
           }
         } else if (data.command === "__preexec__") {
-          update.lastCommandAt = Date.now();
           const instance = useTerminalStore
             .getState()
             .instances.find((i) => i.id === data.terminalId);
@@ -389,7 +393,6 @@ export function useSyncEvents() {
 
         if (data.exitCode !== undefined && data.phase === undefined) {
           update.lastExitCode = data.exitCode;
-          update.lastCommandAt = Date.now();
           const instance = useTerminalStore
             .getState()
             .instances.find((i) => i.id === data.terminalId);
@@ -410,6 +413,9 @@ export function useSyncEvents() {
         else if (data.activitySequence !== undefined)
           update.activitySequence = data.activitySequence;
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, update);
+        if (data.command !== undefined && isInputHistoryClear(data.command)) {
+          clearTerminalInputHistory(data.terminalId);
+        }
         const current = useTerminalStore
           .getState()
           .instances.find((entry) => entry.id === data.terminalId);
