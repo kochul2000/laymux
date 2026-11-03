@@ -2597,3 +2597,6 @@ dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"
 
 
 **에이전트 제출 본문 보정(ADR-0373).** 기존 `get_agent_session_states`는 선택적 `inputTerminalIds`를 받아 해당 Claude/Grok 응답에 `submittedInput?: {text:string,timestamp:string}`을 포함한다. 사용자 제출 뒤 15초 동안만 요청하며 이미 귀속된 파일의 마지막 1 MiB를 읽고 텍스트 앞 2048 code point를 반환한다. Claude는 실제 user의 문자열/텍스트 블록을, Grok은 같은 promptIndex의 user_message_chunk를 사용한다. tool_result·메타·sidechain·요약·미완성/손상/불일치는 제외한다. `get_codex_turn_states`도 같은 선택적 본문을 기존 증분 reader의 user_message 또는 item_completed/UserMessage에서 얻는다. 새 OS/WSL probe는 없다. 프론트는 generation·task/input/clear 경계를 확인하고 제출 이전·clear 이전·미래 5초 초과 기록을 거절한다. 실제 제출 문자열만 보정하며 제출 시각·작업 권위·상태를 바꾸지 않는다. 입력 보정 때문에 추가된 조회에는 기존 상태 적용 권한을 부여하지 않아 확정된 제목 작업을 오래된 idle 기록으로 종료하지 않는다. 본문은 로그에 남기지 않는다. 기록을 읽을 수 없거나 지원하지 않는 TUI는 기존 입력 조립을 유지한다.
+
+
+ADR-0373의 입력 보정은 런타임 `lastInputSubmissionAt`으로 성공한 Enter를 문자열 유무와 별개로 추적한다. 이력/Tab으로 채운 입력의 기록도 이 경계와 비교하며, 빈 Enter는 실제 본문이 확인되기 전에는 표시·작업을 만들지 않는다. 이 제출 경계와 실제 초안 폐기를 알리는 `inputDraftResetRevision`은 영속하지 않는다. Ctrl+L/workspace clear는 조립 초안을 보존하고 pane의 실제 clear만 초안을 폐기한다. 지연 clear 완료는 그사이 새 사용자 제출과 새 OSC 명령을 모두 보호하며 자신이 제출한 설정 clear 명령의 본문만 예외로 허용한다.

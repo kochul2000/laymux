@@ -414,7 +414,7 @@ export function useSyncEvents() {
           update.activitySequence = data.activitySequence;
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, update);
         if (data.command !== undefined && isInputHistoryClear(data.command)) {
-          clearTerminalInputHistory(data.terminalId);
+          clearTerminalInputHistory(data.terminalId, undefined, { discardDraft: true });
         }
         const current = useTerminalStore
           .getState()

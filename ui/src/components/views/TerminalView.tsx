@@ -156,6 +156,7 @@ import { createDirectInputCapture, normalizeSubmittedInput } from "@/lib/termina
 import {
   captureInputHistoryScope,
   clearTerminalInputHistory,
+  noteTerminalInputSubmission,
   recordTerminalInput,
 } from "@/lib/terminal-input-history";
 import {
@@ -3764,7 +3765,7 @@ export function TerminalView({
     // additionally cover focus reports that xterm emits without wasUserInput.
     // Without the internal signal, ambiguous live-write data stays human.
     const directInputCapture = createDirectInputCapture();
-    let captureClearedAt = captureInputHistoryScope(instanceId)?.lastInputClearedAt;
+    let captureResetRevision = captureInputHistoryScope(instanceId)?.inputDraftResetRevision;
     terminal.onData((data) => {
       trace("terminal-onData", {
         bytes: data.length,
@@ -3796,8 +3797,9 @@ export function TerminalView({
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
         const historyScope = captureInputHistoryScope(instanceId);
-        if (captureClearedAt !== historyScope?.lastInputClearedAt) directInputCapture.reset();
-        captureClearedAt = historyScope?.lastInputClearedAt;
+        if (captureResetRevision !== historyScope?.inputDraftResetRevision)
+          directInputCapture.reset();
+        captureResetRevision = historyScope?.inputDraftResetRevision;
         const submittedInputs = directInputCapture.push(data);
         const byteLength = textEncoder.encode(data).length;
         const attempt = beginTerminalInputDelivery(instanceId, byteLength);
@@ -3807,7 +3809,10 @@ export function TerminalView({
             if (cancelled) return;
             if (data.includes("\x0c")) clearTerminalInputHistory(instanceId, historyScope);
             const lastUserInput = submittedInputs.at(-1);
-            if (!lastUserInput) return;
+            if (!lastUserInput) {
+              if (/[\r\n]/u.test(data)) noteTerminalInputSubmission(instanceId, historyScope);
+              return;
+            }
             recordTerminalInput(instanceId, lastUserInput, historyScope);
           },
           (error: unknown) => {

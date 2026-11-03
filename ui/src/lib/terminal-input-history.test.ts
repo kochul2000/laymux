@@ -6,6 +6,7 @@ import {
   clearTerminalInputHistory,
   recordTerminalInput,
   correctTerminalInputFromAgent,
+  noteTerminalInputSubmission,
 } from "./terminal-input-history";
 
 beforeEach(() => {
@@ -65,6 +66,46 @@ it("keeps an input submitted while a clear write was pending", () => {
   recordTerminalInput("t", "new input");
   clearTerminalInputHistory("t", before);
   expect(selectTerminalLastInput(current())).toBe("new input");
+});
+
+it("keeps a shell command observed while a clear write was pending", () => {
+  const before = captureInputHistoryScope("t");
+  useTerminalStore
+    .getState()
+    .updateInstanceInfo("t", { lastCommand: "new shell command", lastCommandAt: 20 });
+  clearTerminalInputHistory("t", before);
+  expect(selectTerminalLastInput(current())).toBe("new shell command");
+});
+
+it("accepts confirmed agent input after an empty key capture submission", () => {
+  const submittedAt = Date.now();
+  useTerminalStore.getState().updateInstanceInfo("t", { lastInputSubmissionAt: submittedAt });
+  correctTerminalInputFromAgent("t", {
+    text: "recalled completed input",
+    timestamp: new Date(submittedAt + 10).toISOString(),
+  });
+  expect(current().lastUserInput).toBe("recalled completed input");
+  expect(current().lastUserInputAt).toBe(submittedAt);
+});
+
+it("an empty Enter records intent without inventing display text or a task", () => {
+  recordTerminalInput("t", "previous");
+  const before = current();
+  noteTerminalInputSubmission("t");
+  expect(current().lastInputSubmissionAt).toBeGreaterThanOrEqual(before.lastUserInputAt!);
+  expect(current().lastUserInput).toBe("previous");
+  expect(current().lastUserInputAt).toBe(before.lastUserInputAt);
+  expect(current().task).toBe(before.task);
+});
+
+it("allows a pane clear's own submitted command while preserving unrelated new commands", () => {
+  const before = captureInputHistoryScope("t");
+  useTerminalStore
+    .getState()
+    .updateInstanceInfo("t", { lastCommand: "custom clear", lastCommandAt: 20 });
+  clearTerminalInputHistory("t", before, { discardDraft: true, submittedCommand: "custom clear" });
+  expect(selectTerminalLastInput(current())).toBeUndefined();
+  expect(current().inputDraftResetRevision).toBe(1);
 });
 
 it("accepts the next input even when it arrives in the clear clock tick", () => {

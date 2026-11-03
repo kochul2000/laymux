@@ -126,18 +126,48 @@ try {
     await page.waitForTimeout(300);
     await page.keyboard.press("Enter");
     await waitInput(prefix + fixture);
-    await page.waitForFunction(
-      async (id) => {
-        const { useTerminalStore } =
-          await import("/src/stores/terminal-store.ts");
-        return ["idle", "ended"].includes(
-          useTerminalStore.getState().instances.find((i) => i.id === id)?.task
-            ?.state,
+    const waitForIdle = () =>
+      page.waitForFunction(
+        async (id) => {
+          const { useTerminalStore } =
+            await import("/src/stores/terminal-store.ts");
+          return ["idle", "ended"].includes(
+            useTerminalStore.getState().instances.find((i) => i.id === id)?.task
+              ?.state,
+          );
+        },
+        terminalId,
+        { timeout: 60000 },
+      );
+    await waitForIdle();
+    const retainedDraft = "Reply OK without using tools. Retained draft";
+    await page.keyboard.type(retainedDraft);
+    await page.keyboard.press("Control+l");
+    await page.waitForTimeout(300);
+    const keptDraft = await page.evaluate(
+      async ({ id, text }) => {
+        const { getTerminalInspector } =
+          await import("/src/lib/terminal-serialize-registry.ts");
+        return getTerminalInspector(id)?.(0).lines.some((line) =>
+          line.text.includes(text),
         );
       },
-      terminalId,
-      { timeout: 60000 },
+      { id: terminalId, text: retainedDraft },
     );
+    assert.ok(keptDraft, "screen clear must retain the app's draft");
+    await submit(" suffix");
+    await waitInput(retainedDraft + " suffix");
+    await waitForIdle();
+    await page.evaluate(async (id) => {
+      const { clearTerminalInputHistory } =
+        await import("/src/lib/terminal-input-history.ts");
+      clearTerminalInputHistory(id);
+    }, terminalId);
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await waitInput(retainedDraft + " suffix");
+    await waitForIdle();
     const cleared = await api(
       `/panes/${terminalId.replace(/^terminal-/, "")}/clear`,
       {},
@@ -146,7 +176,16 @@ try {
     await waitInput(null);
     await page.waitForTimeout(1500);
     await waitInput(null);
-    Object.assign(proof, { claudeTab: true, claudeClear: true });
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1500);
+    await waitInput(null);
+    Object.assign(proof, {
+      claudeTab: true,
+      claudeClear: true,
+      retainedDraft: true,
+      recalledInput: true,
+      emptyEnter: true,
+    });
   }
   const screenshot = await api("/screenshot", {});
   console.log(JSON.stringify({ ...proof, screenshot: screenshot.path }));

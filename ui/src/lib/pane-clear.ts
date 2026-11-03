@@ -418,18 +418,18 @@ export async function clearPane(
           clearDeadline,
           () => step("submitClear"),
         );
-        clearTerminalInputHistory(id, historyScope);
+        clearTerminalInputHistory(id, historyScope, { discardDraft: true, submittedCommand: text });
         return;
       }
       await submit();
-      clearTerminalInputHistory(id, historyScope);
+      clearTerminalInputHistory(id, historyScope, { discardDraft: true, submittedCommand: text });
     },
     interrupt: (id) =>
       remoteLeaseId === undefined
         ? writeToTerminal(id, CTRL_C)
         : writeToTerminalForRemote(id, CTRL_C, remoteLeaseId),
     restart: (id) => {
-      clearTerminalInputHistory(toTerminalId(id));
+      clearTerminalInputHistory(toTerminalId(id), undefined, { discardDraft: true });
       const pane = findTerminalPane(id);
       useTerminalRestartStore
         .getState()

@@ -11,10 +11,11 @@ const POLL_MS = 1000;
 const INPUT_CORRECTION_MS = 15_000;
 
 function needsInputCorrection(instance: TerminalInstance, now: number): boolean {
+  const submittedAt = instance.lastInputSubmissionAt ?? instance.lastUserInputAt;
   return (
-    !!instance.lastUserInput &&
-    instance.lastUserInputAt !== undefined &&
-    now - instance.lastUserInputAt <= INPUT_CORRECTION_MS
+    submittedAt !== undefined &&
+    submittedAt > (instance.lastInputClearedAt ?? 0) &&
+    now - submittedAt <= INPUT_CORRECTION_MS
   );
 }
 
@@ -32,6 +33,7 @@ function stamp(instance: TerminalInstance): string {
     instance.taskEpoch,
     instance.lastUserInputAt,
     instance.lastInputClearedAt,
+    instance.lastInputSubmissionAt,
     recordedAgent(instance),
     task?.source,
     task?.sequence,

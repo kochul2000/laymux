@@ -52,6 +52,10 @@ export interface TerminalInstance {
   lastUserInputAt?: number;
   /** Display-only clear boundary, retained with the local input history. */
   lastInputClearedAt?: number;
+  /** Successful Enter boundary, including app-completed text absent from key capture. Runtime only. */
+  lastInputSubmissionAt?: number;
+  /** Actual draft deletion, independent of a screen-only history clear. Runtime only. */
+  inputDraftResetRevision?: number;
   /** Detected terminal activity state. */
   activity?: TerminalActivityInfo;
   /**
@@ -115,6 +119,8 @@ interface TerminalStoreState {
         | "lastUserInput"
         | "lastUserInputAt"
         | "lastInputClearedAt"
+        | "lastInputSubmissionAt"
+        | "inputDraftResetRevision"
         | "deferredTaskInput"
         | "activity"
         | "activitySequence"

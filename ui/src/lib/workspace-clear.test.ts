@@ -121,6 +121,27 @@ describe("clearWorkspace", () => {
     expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBe("previous");
   });
 
+  it("keeps a newer OSC command when a pending clear write settles", async () => {
+    seedWorkspace();
+    registerReady("pane-a");
+    let finish!: () => void;
+    vi.mocked(writeToTerminal).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const clearing = clearWorkspace("ws-1");
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("terminal-pane-a", {
+        lastCommand: "new command",
+        lastCommandAt: Date.now(),
+      });
+    finish();
+    await clearing;
+    expect(selectTerminalLastInput(useTerminalStore.getState().instances[0])).toBe("new command");
+  });
+
   it("broadcasts as the Remote lease holder when one requested the clear", async () => {
     seedWorkspace();
     registerReady("pane-a");

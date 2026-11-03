@@ -59,15 +59,30 @@ afterEach(() => {
 });
 
 describe("Codex turn observation", () => {
-  it("Codex의 실제 제출 기록으로 Tab 완성 문자열을 보정하고 제출 시각을 유지한다", async () => {
-    const inputAt = Date.now();
+  it("빈 키 조립 제출도 실제 Codex 사용자 본문으로 보정한다", async () => {
+    const submittedAt = Date.now();
     useTerminalStore
       .getState()
-      .updateInstanceInfo("pane", {
-        generation: 1,
-        lastUserInput: "read @par",
-        lastUserInputAt: inputAt,
-      });
+      .updateInstanceInfo("pane", { generation: 1, lastInputSubmissionAt: submittedAt });
+    result({
+      ...snapshot("running"),
+      submittedInput: {
+        text: "recalled complete input",
+        timestamp: new Date(submittedAt + 10).toISOString(),
+      },
+    });
+    stop = subscribeCodexTurnStates();
+    await tick();
+    expect(instance().lastUserInput).toBe("recalled complete input");
+    expect(instance().lastUserInputAt).toBe(submittedAt);
+  });
+  it("Codex의 실제 제출 기록으로 Tab 완성 문자열을 보정하고 제출 시각을 유지한다", async () => {
+    const inputAt = Date.now();
+    useTerminalStore.getState().updateInstanceInfo("pane", {
+      generation: 1,
+      lastUserInput: "read @par",
+      lastUserInputAt: inputAt,
+    });
     result({
       ...snapshot("running"),
       submittedInput: {

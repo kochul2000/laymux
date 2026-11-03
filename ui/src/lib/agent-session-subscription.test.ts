@@ -55,6 +55,32 @@ afterEach(() => {
 });
 
 describe("agent session record observation", () => {
+  it.each(["Claude", "Grok"] as const)(
+    "%s는 키 조립 문장이 없는 제출 경계도 보정한다",
+    async (provider) => {
+      agent(provider);
+      const submittedAt = Date.now();
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("pane", { lastInputSubmissionAt: submittedAt });
+      recorded({
+        ...record("running"),
+        submittedInput: {
+          text: "recalled complete input",
+          timestamp: new Date(submittedAt + 10).toISOString(),
+        },
+      });
+      stop = subscribeAgentSessionStates();
+      await tick();
+      expect(instance().lastUserInput).toBe("recalled complete input");
+      expect(instance().lastUserInputAt).toBe(submittedAt);
+      expect(getAgentSessionStates).toHaveBeenCalledWith(
+        provider === "Claude" ? ["pane"] : [],
+        provider === "Grok" ? ["pane"] : [],
+        ["pane"],
+      );
+    },
+  );
   it("입력 보정을 위한 조회는 확정된 제목 작업을 오래된 idle 기록으로 종료하지 않는다", async () => {
     agent("Claude");
     observeTaskTitle("pane", "✻ Working");

@@ -1,6 +1,6 @@
 # 0373. 완성된 셸 제출 명령과 명시적 clear 경계로 마지막 입력을 표시한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 - Source: 사용자 요구(Tab 완성 문자열 누락·clear 후 이전 입력 잔상); [data-flow.md §9](../architecture/data-flow.md); [ADR-0194](0194-workspace-pane-last-input-second-line.md); [ADR-0262](0262-powershell-command-lifecycle.md); [ADR-0371](0371-durable-workspace-display-history.md)
 - 관계: ADR-0262의 PowerShell 명령 본문 미관측 범위와 ADR-0194·0371의 입력 표시/보존 범위를 확장한다.
@@ -21,6 +21,9 @@ Direct 입력은 사람이 보낸 키만 조립한다. Tab 자동완성과 이�
 - Claude/Grok은 사용자 제출 뒤 15초 동안만 기존 상태 조회에 `inputTerminalIds`를 보내 이미 귀속된 파일의 마지막 1 MiB를 읽는다. Codex는 기존 증분 reader에서 본문을 최대 2048 code point로 보유한다. 새 OS/WSL 실행은 추가하지 않는다. 입력 본문을 로그에 남기지 않는다. 프론트는 기존 로컬 제출보다 이전이거나 미래 5초 초과의 기록, clear 이전 기록을 거절하고 문자열만 보정한다. 원래 제출 시각·작업 상태는 유지한다. 응답 적용에는 세대·작업·입력·삭제 경계를 검증한다.
 - 선택적 `lastInputClearedAt` 이하의 사용자 입력·셸 명령은 표시하지 않는다. 경계는 기존 데몬 문맥과 로컬 SQLite 표시 checkpoint에 포함한다. 데몬/디스크 병합은 큰 삭제 경계를 유지하고 이후 제출은 경계보다 큰 시각을 갖는다. 새 설정이나 마이그레이션은 추가하지 않는다.
 - 사람의 Ctrl+L 및 정확히 `clear`·`cls`·`Clear-Host`·`/clear`인 제출, workspace clear의 성공한 Ctrl+L 쓰기, pane clear의 성공한 제출/재시작은 공통 입력 표시 초기화를 사용한다. 실패·skip에는 적용하지 않는다. clear 자체의 활동별 입력·busy·권한 정책은 유지한다.
+- 성공한 Enter의 런타임 제출 경계 `lastInputSubmissionAt`은 키 조립 문자열이 비어 있어도 기록한다. 이력 탐색/앱 완성으로 채운 입력도 해당 경계 이후의 실제 사용자 본문으로 보정한다. 빈 Enter는 그 자체로 표시 문자열·제출 시각·작업을 새로 만들지 않는다. 본문 확인 후에만 보정 문자열과 그 제출 경계 시각을 표시한다. 이 경계는 영속하지 않는다.
+- Ctrl+L/workspace clear는 앱 초안을 보존하므로 Direct 조립 초안도 보존한다. 실제 pane clear 및 clear 명령의 초안 폐기만 런타임 `inputDraftResetRevision`으로 조립기를 초기화한다. 표시 삭제 경계와 초안 폐기 신호는 독립이다.
+- 지연 clear 완료는 그사이의 사용자 제출·셸 명령을 모두 보호한다. pane clear가 직접 제출한 설정 명령 본문만 자기 clear의 관측으로 허용한다.
 - 입력 쓰기는 시작 당시 PTY generation과 삭제 경계를 보유한다. clear 이전 또는 교체된 PTY의 늦은 완료는 기록하지 않는다. 비동기 clear 동안 새 사용자 제출이 관측됐다면 그 입력을 지우지 않는다. 작업 상태·결과·활동은 삭제 대상이 아니다.
 - PTY 출력의 화면 지우기·TUI redraw는 삭제 신호가 아니다. 전달 성공은 기존 clear API와 같은 입력 전달 성공이며 앱의 대화 초기화 완료를 별도 확인하는 것은 아니다.
 
