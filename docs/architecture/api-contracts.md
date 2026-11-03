@@ -2518,7 +2518,7 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 
-**메모리 모델**: terminal instance의 `taskObservation`은 source·taskId·sequence·state·선택적 result·입력 해소 여부·타이틀 만료 시간을 담는다. `task`는 공통 계산 결과와 마지막 유효 관측 시각·알림 전이 번호를 보관한다. 입력 관측은 `kind: input`으로 구분하며 다른 source/taskId는 거부한다. 작업·관측 상태와 중복 제거 이력은 세션 파일에 영속하지 않는다. 표시 메시지는 상태 마커를 담지 않는다.
+**메모리 모델**: terminal instance의 `taskObservation`은 source·taskId·sequence·state·선택적 result·입력 해소 여부·타이틀 만료 시간을 담는다. `task`는 공통 계산 결과와 마지막 유효 관측 시각·알림 전이 번호를 보관한다. 입력 관측은 `kind: input`으로 구분하며 다른 source/taskId는 거부한다. live 작업·관측 상태와 중복 제거 이력은 세션 파일에 영속하지 않는다. ADR-0371의 로컬 SQLite uiState.terminalDisplayContexts는 표시 전용 stale 이력이며 제어 정책에 사용하지 않는다. 마지막 제출 입력도 이 로컬 표시 이력에 보존하고 상태 재확인은 입력을 갱신하지 않는다. 표시 메시지는 상태 마커를 담지 않는다.
 
 `deferredTaskInput`은 Codex 종료 뒤 제출 경계(source·이전 taskId·inputAt)와 선택적 보류 입력 관측을 보관하는 메모리 전용 어댑터 입력이다. 새 턴 확인 전에는 기존 task를 변경하지 않으며, 같은 source의 새 running 턴에 한 번 재귀속한 뒤 소모한다. 표시/정책 소비자는 이 버퍼를 입력 대기 상태로 읽지 않는다.
 

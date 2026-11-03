@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, schemars::JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalUiState {
+    /// Display-only history, excluded from portable settings and live task policy.
+    #[serde(default)]
+    pub terminal_display_contexts: std::collections::BTreeMap<String, serde_json::Value>,
     pub active_workspace_id: Option<String>,
     pub file_viewer: Option<FileViewerRestore>,
 }

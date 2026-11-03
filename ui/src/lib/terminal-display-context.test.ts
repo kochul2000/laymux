@@ -65,6 +65,57 @@ describe("daemon display context", () => {
     ).toBeUndefined();
   });
 
+  it("shows saved activity during unknown recovery and replaces saved tasks with live idle", () => {
+    register();
+    const instance = useTerminalStore.getState().instances[0];
+    const recovering = projectTerminalDisplay(
+      { ...instance, activity: { type: "unknown" } },
+      history,
+    );
+    expect(recovering.activity).toEqual({ type: "shell" });
+    expect(recovering.task).toMatchObject({ state: "ended", observation: "stale" });
+    const refreshed = projectTerminalDisplay(
+      { ...instance, task: { ...history.task, state: "idle" } },
+      history,
+    );
+    expect(refreshed.task?.state).toBe("idle");
+    expect(refreshed.lastUserInput).toBe(history.lastUserInput);
+  });
+
+  it("keeps disk history when a new daemon has no display context", async () => {
+    useTerminalDisplayStore.getState().setContext("t", history);
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "get_terminal_display_context" ? null : false,
+    );
+    const store = register();
+    const stop = startTerminalDisplayContextSync();
+    try {
+      await flushTerminalDisplayContexts();
+      expect(useTerminalDisplayStore.getState().contexts.t.lastUserInput).toBe(
+        history.lastUserInput,
+      );
+      expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+      store.updateInstanceInfo("t", { lastUserInput: "new question", lastUserInputAt: 900 });
+      await flushTerminalDisplayContexts();
+      expect(useTerminalDisplayStore.getState().contexts.t.lastUserInput).toBe("new question");
+    } finally {
+      stop();
+    }
+  });
+  it("retains saved display across hidden terminal unmounts", async () => {
+    const store = register();
+    const stop = startTerminalDisplayContextSync();
+    try {
+      await flushTerminalDisplayContexts();
+      store.unregisterInstance("t");
+      expect(useTerminalDisplayStore.getState().contexts.t.lastUserInput).toBe(
+        history.lastUserInput,
+      );
+    } finally {
+      stop();
+    }
+  });
+
   it("does not resurrect messages or results explicitly cleared by a live event", () => {
     register();
     const instance = {
@@ -140,6 +191,22 @@ describe("daemon display context", () => {
       await flushTerminalDisplayContexts();
       expect(useTerminalStore.getState().instances[0].lastUserInput).toBe("new question");
       expect(useTerminalDisplayStore.getState().contexts.t.lastUserInput).toBe("new question");
+    } finally {
+      stop();
+    }
+  });
+  it("does not replace newer disk input with an older daemon input during entry", async () => {
+    useTerminalDisplayStore
+      .getState()
+      .setContext("t", { ...history, lastUserInput: "saved latest input", lastUserInputAt: 500 });
+    register();
+    const stop = startTerminalDisplayContextSync();
+    try {
+      await flushTerminalDisplayContexts();
+      expect(useTerminalStore.getState().instances[0]).toMatchObject({
+        lastUserInput: "saved latest input",
+        lastUserInputAt: 500,
+      });
     } finally {
       stop();
     }

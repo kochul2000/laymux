@@ -71,6 +71,7 @@ import { claimHiddenEvictionEligibility } from "@/lib/hidden-eviction-eligibilit
 import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 import { captureWindowGeometry } from "./useWindowGeometry";
+import { useTerminalDisplayStore } from "@/stores/terminal-display-store";
 
 describe("useSessionCheckpointLifecycle", () => {
   beforeEach(() => {
@@ -86,6 +87,22 @@ describe("useSessionCheckpointLifecycle", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+  it("invalidates a reusable close checkpoint when display/input history changes", () => {
+    const { unmount } = renderHook(() => useSessionCheckpointLifecycle(true));
+    vi.mocked(markSessionCheckpointMutation).mockClear();
+    act(() =>
+      useTerminalDisplayStore.getState().setContext("terminal-pane", {
+        version: 1,
+        profile: "PowerShell",
+        lastUserInput: "new input",
+        lastUserInputAt: 123,
+      }),
+    );
+    expect(markSessionCheckpointMutation).toHaveBeenCalledTimes(1);
+    unmount();
+    act(() => useTerminalDisplayStore.getState().setContext("terminal-pane", undefined));
+    expect(markSessionCheckpointMutation).toHaveBeenCalledTimes(1);
   });
   it("blocks background persistence for a forced update without a checkpoint request", () => {
     renderHook(() => useSessionCheckpointLifecycle(true));
