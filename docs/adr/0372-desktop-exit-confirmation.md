@@ -1,6 +1,6 @@
 # 0372. PC 앱 종료 전에 기본 활성 확인을 받는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-03
 - Source: 사용자 요청(종료 확인·설정·다시 보지 않기), architecture/api-contracts.md §10·§15, ADR-0264·0279
 
