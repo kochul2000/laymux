@@ -836,7 +836,9 @@ test("a native edge flick does not swallow the next pane-row tap", async ({ cont
     (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented = seen;
     window.addEventListener("touchmove", (event) => seen.push(event.defaultPrevented));
   });
-  await flickSurface(page, "#terminal", 120, "left");
+  // The viewport owns edge gestures even when the terminal is cropped or
+  // still settling its attach geometry.
+  await flickSurface(page, "#terminalViewport", 120, "left");
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
   const prevented = await page.evaluate(
     () => (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented,
