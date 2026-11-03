@@ -19,12 +19,25 @@ export interface PaneLinkTarget {
 // 더 긴 terminal ID부터 소비해 그 안의 pane ID를 별도 링크로 만들지 않는다.
 // 이름에는 콜론·한글을 허용하고 마지막 콜론 뒤 양수를 공간 번호로 해석한다.
 const TOKEN =
-  /(?<![\p{L}\p{N}_/\\:.-])(?:lx:pane:[^\s`'"<>()[\]{}│|,;]+:[1-9]\d*|(?:terminal-)?pane-[0-9a-f]{8})(?![\p{L}\p{N}_/\\:-]|\.[\p{L}\p{N}_])/gu;
+  /(?<![\p{L}\p{N}_/\\:.-])(?:lx:pane:\S+:[1-9]\d*|(?:terminal-)?pane-[0-9a-f]{8})(?![\p{L}\p{N}_/\\:-]|\.[\p{L}\p{N}_])/gu;
 
 /** UTF-16 오프셋만 반환한다. 화면 좌표 변환은 셀 매핑을 사용하는 호출자 소유다. */
-export function findPaneTokens(text: string) {
+export function findPaneTokens(text: string, workspaceNames?: readonly string[]) {
   const urls = matchTerminalUrls(text);
-  return [...text.matchAll(TOKEN)]
+  // 화면에서는 실제 이름을 리터럴로 매칭한다. 이름의 구두점과 표·백틱 경계를
+  // 추측하지 않으며 공백 없는 인접 locator도 하나의 긴 이름으로 삼키지 않는다.
+  const names = workspaceNames
+    ?.filter((name) => name && !/\s/.test(name))
+    .sort((a, b) => b.length - a.length)
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern =
+    names && text.includes("lx:pane:")
+      ? new RegExp(
+          TOKEN.source.replace("\\S+", names.length ? `(?:${names.join("|")})` : "(?!)"),
+          TOKEN.flags,
+        )
+      : TOKEN;
+  return [...text.matchAll(pattern)]
     .filter(
       (match) =>
         !urls.some(

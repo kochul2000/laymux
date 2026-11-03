@@ -25,6 +25,7 @@ export function remotePaneLinkDependencies(deps: Dependencies): PaneLinkDependen
   let pending = false;
   return {
     enabled: () => deps.getSnapshot()?.paneLinkEnabled !== false,
+    workspaceNames: () => deps.getSnapshot()?.workspaces?.map((workspace) => workspace.name) ?? [],
     resolve: (text) => resolvePaneLink(text, deps.getSnapshot()?.workspaces ?? []),
     navigate: (_target, text, isCurrent) => {
       const context = deps.getContext();

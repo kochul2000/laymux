@@ -13,6 +13,22 @@ const workspaces: PaneLinkWorkspace[] = [
 ];
 
 describe("pane 링크", () => {
+  it("실제 이름 목록으로 인접 locator를 각각 인식하고 정규식 문자를 이스케이프한다", () => {
+    const refs = ["lx:pane:API(v2):1", "lx:pane:API,v2:2", "lx:pane:API[v2]:3"];
+    expect(
+      findPaneTokens(refs.join(","), ["API(v2)", "API,v2", "API[v2]"]).map((token) => token.text),
+    ).toEqual(refs);
+    expect(findPaneTokens("lx:pane:APIv2:1", ["API(v2)"])).toEqual([]);
+  });
+  it.each(["API(v2)", "API[v2]", "API,v2", "API;v2", "API|v2", "API`v2"])(
+    "복사 가능한 workspace 이름 %s를 탐지한다",
+    (name) => {
+      const reference = `lx:pane:${name}:1`;
+      expect(findPaneTokens(`(${reference})`)).toEqual([
+        { text: reference, start: 1, end: reference.length + 1 },
+      ]);
+    },
+  );
   it("표·백틱·괄호 안 세 형식을 토큰 전체로 추출한다", () => {
     const text = "│ 리뷰어 `terminal-pane-1b7d7a95` │ (pane-43b1b5af), lx:pane:laymux-0:1. │";
     expect(findPaneTokens(text).map((t) => text.slice(t.start, t.end))).toEqual([

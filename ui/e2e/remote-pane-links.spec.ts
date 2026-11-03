@@ -41,8 +41,9 @@ function pane(terminalId: string, workspaceId: string) {
   };
 }
 
-async function setup(page: Page, initiallyEnabled = true) {
+async function setup(page: Page, initiallyEnabled = true, initiallyHasTarget = true) {
   let enabled = initiallyEnabled;
+  let hasTarget = initiallyHasTarget;
   let active = sourceId;
   const focused: string[] = [];
   const attached: string[] = [];
@@ -74,18 +75,20 @@ async function setup(page: Page, initiallyEnabled = true) {
         json: {
           activeWorkspaceId: current.id,
           activeWorkspace: { ...current, focusedPaneNumber: 1 },
-          workspaces: workspaces.map((workspace) => ({
-            ...workspace,
-            isActive: workspace.id === current.id,
-            hidden: false,
-            collapsed: false,
-            paneCount: 1,
-            terminalPaneCount: 1,
-            liveTerminalCount: 1,
-            unreadCount: 0,
-          })),
+          workspaces: workspaces
+            .filter((workspace) => hasTarget || workspace.id === "ws-source")
+            .map((workspace) => ({
+              ...workspace,
+              isActive: workspace.id === current.id,
+              hidden: false,
+              collapsed: false,
+              paneCount: 1,
+              terminalPaneCount: 1,
+              liveTerminalCount: 1,
+              unreadCount: 0,
+            })),
           docks: [],
-          terminals: [sourcePane, targetPane].map((item) => ({
+          terminals: (hasTarget ? [sourcePane, targetPane] : [sourcePane]).map((item) => ({
             ...item,
             id: item.terminalId,
             appearance: {},
@@ -157,6 +160,9 @@ async function setup(page: Page, initiallyEnabled = true) {
   return {
     focused,
     attached,
+    addTarget: () => {
+      hasTarget = true;
+    },
     disable: () => {
       enabled = false;
     },
@@ -205,6 +211,15 @@ for (const touch of [false, true]) {
       await clickReference(page, 1, touch);
       expect(state.focused).not.toContain(targetId);
       expect(state.attached).not.toContain(targetId);
+    });
+    test("연결 뒤 생성한 pane도 drawer를 열지 않고 발견한다", async ({ page }) => {
+      const state = await setup(page, true, false);
+      await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+      await expect(page.locator(".pane-link-decoration")).toHaveCount(0);
+      state.addTarget();
+      await expect(page.locator(".pane-link-decoration")).toHaveCount(3, { timeout: 6000 });
+      await clickReference(page, 1, touch);
+      await expect.poll(() => state.focused).toContain(targetId);
     });
     test("최신 host 설정이 끔이면 기존 링크의 클릭도 무시한다", async ({ page }) => {
       const state = await setup(page);

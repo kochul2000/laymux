@@ -1508,6 +1508,8 @@ export function TerminalView({
 
     const paneLinkDeps = {
       enabled: () => useSettingsStore.getState().terminal.paneLinkEnabled,
+      workspaceNames: () =>
+        useWorkspaceStore.getState().workspaces.map((workspace) => workspace.name),
       resolve: resolveDesktopPaneLink,
       navigate: focusDesktopPaneLink,
     };

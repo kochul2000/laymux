@@ -7121,6 +7121,7 @@ import {
             if (navigationState && typeof response?.paneLinkEnabled === "boolean") {
               navigationState.paneLinkEnabled = response.paneLinkEnabled;
               paneLinkUnderlines?.refresh();
+              syncNavigationViewPolling();
             }
             lastHeartbeatOkAt = Date.now();
             if (heartbeatRetryTimer) {
@@ -7698,8 +7699,7 @@ import {
           navToggleButton.setAttribute("aria-expanded", String(nextOpen));
           navToggleButton.setAttribute("aria-label", nextOpen ? "Close navigation" : "Open navigation");
           navScrim.hidden = !nextOpen || pinned;
-          if (nextOpen) startNavigationViewPolling();
-          else stopNavigationViewPolling();
+          syncNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
           refreshSharedFilePrompt();
         }
@@ -7720,8 +7720,7 @@ import {
           navToggleButton.setAttribute("aria-expanded", String(open));
           navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
           navScrim.hidden = !open || pinned;
-          if (open) startNavigationViewPolling();
-          else stopNavigationViewPolling();
+          syncNavigationViewPolling();
           positionFloatingControls();
         }
 
@@ -9115,14 +9114,31 @@ import {
               terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
             }
           }
+          syncNavigationViewPolling();
         }
+
+        function navigationViewPollingNeeded() {
+          return document.querySelector(".app").classList.contains("nav-open") ||
+            Boolean(activeTerminalId && navigationState?.paneLinkEnabled !== false);
+        }
+
+        // Pane 링크가 켜져 있으면 닫힌 drawer에서도 기존 2초 메타데이터 폴링을
+        // 유지한다. 새 pane을 발견하되 출력 attach·포커스·drawer는 바꾸지 않는다.
+        function syncNavigationViewPolling() {
+          if (!leaseId || document.hidden || !navigationViewPollingNeeded()) {
+            stopNavigationViewPolling();
+          } else if (!navigationViewRefreshTimer) {
+            startNavigationViewPolling();
+          }
+        }
+        document.addEventListener("visibilitychange", syncNavigationViewPolling);
 
         async function refreshNavigationView() {
           if (
             navigationViewRefreshInFlight ||
             !leaseId ||
             document.hidden ||
-            !document.querySelector(".app").classList.contains("nav-open")
+            !navigationViewPollingNeeded()
           ) return;
           const selectedLeaseId = leaseId;
           const selectionRevision = terminalSelectionRevision;
@@ -9133,7 +9149,9 @@ import {
               leaseId !== selectedLeaseId ||
               terminalSelectionRevision !== selectionRevision
             ) return;
-            installNavigationSnapshot(data);
+            installNavigationSnapshot(data, {
+              render: document.querySelector(".app").classList.contains("nav-open"),
+            });
           } finally {
             navigationViewRefreshInFlight = false;
           }

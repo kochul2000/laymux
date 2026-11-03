@@ -4,6 +4,7 @@ import { findPaneTokens, type PaneLinkTarget } from "./pane-link";
 
 export interface PaneLinkDependencies {
   enabled: () => boolean;
+  workspaceNames?: () => readonly string[];
   resolve: (text: string) => PaneLinkTarget | null;
   navigate: (target: PaneLinkTarget, text: string, isCurrent: () => boolean) => void;
 }
@@ -47,7 +48,10 @@ export function findPaneLinks(
     }
     if (text.length > MAX_TEXT) return [];
     if (buffer.getLine(row + 1)?.isWrapped) continue;
-    return findPaneTokens(text).flatMap((token) => {
+    return findPaneTokens(
+      text,
+      text.includes("lx:pane:") ? deps.workspaceNames?.() : undefined,
+    ).flatMap((token) => {
       if (!deps.resolve(token.text) || points.slice(token.start, token.end).some((p) => p.linked))
         return [];
       const first = points[token.start];
