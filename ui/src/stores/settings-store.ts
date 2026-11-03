@@ -969,6 +969,7 @@ export const DEFAULT_UPDATE: UpdateSettings = { channel: "stable" };
 
 /** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
 export const DEFAULT_EXIT: ExitSettings = {
+  confirmBeforeExit: true,
   interruptTerminals: false,
   interruptRounds: 3,
   settleMs: 700,

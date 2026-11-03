@@ -1044,6 +1044,8 @@ export interface GrokSettings {
 
 /** App-exit behavior (issue #451). */
 export interface ExitSettings {
+  /** Ask before a desktop window close. Default: true. */
+  confirmBeforeExit: boolean;
   /** Send Ctrl+C to all terminals on app exit. Default: false (opt-in). */
   interruptTerminals: boolean;
   /** How many Ctrl+C presses to send per terminal. Clamped 1..=10. Default: 3. */

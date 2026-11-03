@@ -1761,6 +1761,13 @@ function TerminalSection() {
 
       <SettingsGroup title={t("terminal.exitGroup")}>
         <SettingsToggleField
+          label={t("terminal.confirmBeforeExit")}
+          desc={t("terminal.confirmBeforeExitDesc")}
+          testId="confirm-before-exit-toggle"
+          checked={exit.confirmBeforeExit}
+          onChange={(v) => updateExit({ confirmBeforeExit: v })}
+        />
+        <SettingsToggleField
           label={t("terminal.interruptOnExit")}
           desc={t("terminal.interruptOnExitDesc")}
           testId="interrupt-on-exit-toggle"
