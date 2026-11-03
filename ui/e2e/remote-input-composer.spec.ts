@@ -246,6 +246,12 @@ async function installBrowserMocks(
           element.append(screen);
           element.addEventListener("mousedown", () => textarea.focus());
           if (lateTerminalFocusAfterTouchTap) {
+            // Match xterm's real hit area: its helper is offscreen, rather
+            // than a visible textarea swallowing the test's terminal tap.
+            element.style.height = "100%";
+            screen.style.height = "100%";
+            textarea.style.position = "absolute";
+            textarea.style.left = "-9999px";
             // Android can deliver xterm's compatibility focus after the touch
             // bridge has handled pointerup. Model that late focus theft in the
             // gesture's next frame so the Composer handoff must outlive one call.
@@ -2044,12 +2050,9 @@ test.describe("mobile touch Composer focus", () => {
     // The output snapshot is still pending. The first real terminal tap must
     // nevertheless focus the visible editor, and keep it after xterm's helper
     // textarea tries to take focus later in the same touch turn.
-    const terminalBox = await page.locator("#terminal .xterm").boundingBox();
-    expect(terminalBox).not.toBeNull();
-    await page.touchscreen.tap(
-      terminalBox!.x + terminalBox!.width / 2,
-      terminalBox!.y + terminalBox!.height / 2,
-    );
+    // Attach can still fit the terminal here. Locator.tap waits for its hit
+    // area to settle instead of dispatching to an earlier bounding box.
+    await page.locator("#terminal .xterm").tap();
 
     await expect(page.locator(".xterm-helper-textarea")).toHaveAttribute(
       "data-late-touch-focus",
