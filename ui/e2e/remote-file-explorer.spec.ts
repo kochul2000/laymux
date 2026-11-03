@@ -828,6 +828,10 @@ test("a native edge flick does not swallow the next pane-row tap", async ({ cont
   await page.setViewportSize({ width: 390, height: 720 });
   await connectRemote(page, true);
   await expect(page.locator("#terminal .xterm")).toBeVisible();
+  await expect(page.locator("#terminal .xterm")).toHaveAttribute(
+    "data-touch-selection-bridge",
+    "true",
+  );
 
   // Timing-independent guard: the surface must cancel every native touchmove,
   // so no browser fling can start however slow the run is.
