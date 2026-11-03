@@ -43,8 +43,8 @@ export function createRemoteAgentResumeLinkProvider(terminal: Terminal, deps: Re
       .run(async () => {
         if (!stillAllowed()) return;
         // Only the host decides whether a shell owns the prompt: the local
-        // navigation snapshot is polled only while the drawer is open, so it
-        // can still show the agent that printed this hint.
+        // navigation snapshot can be stale between polls (or while the drawer
+        // is closed with pane links off), so re-read the shell state on click.
         const host = await deps.loadCommands(context);
         if (!stillAllowed() || !host.isShell || !host.commands) return;
         const command = buildAgentResumeCommand(hint, host.commands);

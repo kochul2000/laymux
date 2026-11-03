@@ -1033,6 +1033,9 @@ pub struct TerminalSettings {
     /// straight to the host OS in both modes (ADR-0100).
     #[serde(default = "default_link_activation")]
     pub path_link_activation: String,
+    /// Recognize pane identifiers as navigation links on PC and Remote.
+    #[serde(default = "default_true")]
+    pub pane_link_enabled: bool,
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
@@ -1086,6 +1089,7 @@ impl Default for TerminalSettings {
             path_link_os_open_confirm: true,
             url_link_activation: default_link_activation(),
             path_link_activation: default_link_activation(),
+            pane_link_enabled: true,
             show_scroll_to_bottom_button: true,
             scroll_sensitivity: default_scroll_sensitivity(),
             fast_scroll_sensitivity: default_fast_scroll_sensitivity(),

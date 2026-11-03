@@ -2170,3 +2170,8 @@
   color: var(--red);
   overflow-wrap: anywhere;
 }
+.pane-link-decoration {
+  box-sizing: border-box;
+  border-bottom: 1px solid currentColor;
+  pointer-events: none;
+}

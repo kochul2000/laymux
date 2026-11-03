@@ -68,6 +68,18 @@ let mockAppUpdateStatus: typeof DEFAULT_APP_UPDATE_STATUS & { channel: string } 
   DEFAULT_APP_UPDATE_STATUS;
 
 describe("SettingsView", () => {
+  it("pane 링크 토글은 기본 켬이며 저장 뒤 끔이 적용된다", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("pane-link-enabled-toggle");
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(true);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(false);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockCloudStatus = { connected: false, instanceId: null, lastError: null };

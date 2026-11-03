@@ -250,6 +250,8 @@ URL=브라우저·복사이고, Remote 는 같은 목록에서 OS 열기와 CWD 
 `urlLinkActivation`·`pathLinkActivation` 로 받는다(ADR-0218 과 같은 전파 경로) — 호스트 설정이
 정본이고 Remote 는 기기 로컬 사본을 갖지 않는다.
 
+`terminal.paneLinkEnabled: boolean`(기본 true)은 터미널 > 링크 실행 방식의 `Pane 링크 인식` 토글이다. PC와 Remote가 함께 사용하는 호스트 설정이며 false이면 pane 식별자 밑줄·클릭을 모두 해제한다. URL/파일 링크 실행 방식과 독립이다. `/remote/v1/navigation`의 `paneLinkEnabled`로 전달하고 성공 heartbeat에도 같은 값을 실어 drawer를 닫은 연결 기기에서 다음 heartbeat에 밑줄을 갱신한다. 켜진 Remote는 연결·페이지 표시 중 drawer가 닫혀도 2초마다 navigation 메타데이터를 갱신해 새 pane을 발견한다. 꺼지면 drawer 전용 폴링으로 돌아간다. Remote 클릭은 최신 navigation을 조회해 설정·대상을 다시 검증하므로 이전 snapshot의 링크로 비활성 설정을 우회하지 않는다. [ADR-0370](../adr/0370-pane-identifier-navigation-links.md).
+
 ### 사용량 모니터 설정
 
 ```jsonc
@@ -742,7 +744,7 @@ Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 �
 
 프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` / `<command> --resume <uuid>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. Claude는 `--resume`, Codex는 서브커맨드 `resume`, Grok는 플래그 `--resume`이며 Grok `<id>`는 하이픈 포함 UUID만 허용한다. 적용 시점은 `nextUse`(다음 자동 복원 또는 수동 복원 클릭)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
 
-종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 제어권·입력 fence를 따른다. Remote도 같은 파서를 번들에 포함하고 클릭 시 호스트 navigation 설정을 다시 조회한 뒤 기존 lease 전용 `/input`으로 제출한다. 조회 전후 terminal·lease·출력 generation·준비 상태·셀 유효성을 확인하며 실패를 자동 재전송하지 않는다. 셸 여부는 탭할 때 다시 조회한 호스트 상태(activity `shell`, 명령 실행 중 아님)로만 판정한다. Remote가 보관한 navigation 스냅샷은 drawer가 열려 있을 때만 갱신되어 종료된 에이전트를 계속 보여 줄 수 있기 때문이다([ADR-0315](../adr/0315-remote-resume-shell-state-from-host.md)).
+종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 제어권·입력 fence를 따른다. Remote도 같은 파서를 번들에 포함하고 클릭 시 호스트 navigation 설정을 다시 조회한 뒤 기존 lease 전용 `/input`으로 제출한다. 조회 전후 terminal·lease·출력 generation·준비 상태·셀 유효성을 확인하며 실패를 자동 재전송하지 않는다. 셸 여부는 탭할 때 다시 조회한 호스트 상태(activity `shell`, 명령 실행 중 아님)로만 판정한다. Remote가 보관한 navigation 스냅샷은 폴링 간격 사이에 오래될 수 있고 pane 링크를 끄면 drawer가 닫힌 동안 갱신되지 않기 때문이다([ADR-0315](../adr/0315-remote-resume-shell-state-from-host.md)).
 
 metadata apply mode는 `/codex/transcriptScrollEnabled`·`/codex/statusMessageMode`·`/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. transcript 스크롤은 데스크톱의 다음 휠 이벤트와 Remote의 다음 navigation snapshot부터, `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 

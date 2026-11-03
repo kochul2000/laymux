@@ -130,6 +130,7 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
             codex_transcript_scroll_enabled: settings.codex.transcript_scroll_enabled,
             url_link_activation: &settings.terminal.url_link_activation,
             path_link_activation: &settings.terminal.path_link_activation,
+            pane_link_enabled: settings.terminal.pane_link_enabled,
             keybindings: &settings.keybindings,
             agent_commands: [
                 &settings.claude.command,

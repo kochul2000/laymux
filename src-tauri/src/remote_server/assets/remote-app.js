@@ -13,6 +13,8 @@ import {
 import { installRemoteToolSwipes, resolveToolSwipe, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
+import { createPaneLinkProvider, installPaneLinkUnderlines } from "../../../../ui/src/lib/pane-link-provider.ts";
+import { remotePaneLinkDependencies } from "../../../../ui/src/remote/remote-pane-links.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { getPaneInstanceId } from "../../../../ui/src/lib/view-instance-id.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
@@ -576,6 +578,7 @@ import {
         let pathLinkScreenContextDirty = true;
         let pathLinkPress = null;
         let terminal = null;
+        let paneLinkUnderlines = null;
         // The xterm instance is reused across disconnects and pane switches.
         // Keep the id whose snapshot currently occupies it so a recovery can
         // preserve surface-local viewport state only for that same terminal.
@@ -6814,6 +6817,19 @@ import {
           // Link providers are additive. Keep the Remote terminal usable when
           // a minimal or older xterm surface does not expose this optional API.
           if (typeof terminal.registerLinkProvider === "function") {
+            const paneLinks = remotePaneLinkDependencies({
+              getSnapshot: () => navigationState,
+              getContext: () => ({
+                terminalId: activeTerminalId, leaseId, outputEpoch: terminalOutputGeneration,
+                ready: composerReady && terminalReplayDepth === 0 && navMovePending === 0 && socket?.readyState === 1,
+              }),
+              loadSnapshot: () => remoteFetch("/remote/v1/navigation"),
+              installSnapshot: (data) => installNavigationSnapshot(data),
+              select: (target) => selectTerminal(target.terminalId, { focusHost: true, refreshNavigation: true }),
+              onError: (error) => setStatus(`Pane navigation failed: ${error.message || error}`, true),
+            });
+            terminal.registerLinkProvider(createPaneLinkProvider(terminal, paneLinks));
+            paneLinkUnderlines = installPaneLinkUnderlines(terminal, paneLinks);
             terminal.registerLinkProvider(createRemoteAgentResumeLinkProvider(terminal, {
               getContext: () => ({
                 terminalId: activeTerminalId,
@@ -7102,6 +7118,11 @@ import {
             if (leaseId !== heartbeatLeaseId || heartbeatAbortController !== controller) return;
             settingsReplyPending = remoteSettingsAgentBridge.receive(response?.deviceSettingsCommand, heartbeatLeaseId, requestStartedAt);
             applyHostViewerSignal(response?.fileViewer);
+            if (navigationState && typeof response?.paneLinkEnabled === "boolean") {
+              navigationState.paneLinkEnabled = response.paneLinkEnabled;
+              paneLinkUnderlines?.refresh();
+              syncNavigationViewPolling();
+            }
             lastHeartbeatOkAt = Date.now();
             if (heartbeatRetryTimer) {
               clearTimeout(heartbeatRetryTimer);
@@ -7678,8 +7699,7 @@ import {
           navToggleButton.setAttribute("aria-expanded", String(nextOpen));
           navToggleButton.setAttribute("aria-label", nextOpen ? "Close navigation" : "Open navigation");
           navScrim.hidden = !nextOpen || pinned;
-          if (nextOpen) startNavigationViewPolling();
-          else stopNavigationViewPolling();
+          syncNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
           refreshSharedFilePrompt();
         }
@@ -7700,8 +7720,7 @@ import {
           navToggleButton.setAttribute("aria-expanded", String(open));
           navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
           navScrim.hidden = !open || pinned;
-          if (open) startNavigationViewPolling();
-          else stopNavigationViewPolling();
+          syncNavigationViewPolling();
           positionFloatingControls();
         }
 
@@ -9082,6 +9101,7 @@ import {
 
         function installNavigationSnapshot(data, { render = true } = {}) {
           navigationState = data;
+          paneLinkUnderlines?.refresh();
           workspaceCloseToasts.sync(data.pendingWorkspaceCloses, data.workspaceCloseServerTime);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
@@ -9094,14 +9114,31 @@ import {
               terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
             }
           }
+          syncNavigationViewPolling();
         }
+
+        function navigationViewPollingNeeded() {
+          return document.querySelector(".app").classList.contains("nav-open") ||
+            Boolean(activeTerminalId && navigationState?.paneLinkEnabled !== false);
+        }
+
+        // Pane 링크가 켜져 있으면 닫힌 drawer에서도 기존 2초 메타데이터 폴링을
+        // 유지한다. 새 pane을 발견하되 출력 attach·포커스·drawer는 바꾸지 않는다.
+        function syncNavigationViewPolling() {
+          if (!leaseId || document.hidden || !navigationViewPollingNeeded()) {
+            stopNavigationViewPolling();
+          } else if (!navigationViewRefreshTimer) {
+            startNavigationViewPolling();
+          }
+        }
+        document.addEventListener("visibilitychange", syncNavigationViewPolling);
 
         async function refreshNavigationView() {
           if (
             navigationViewRefreshInFlight ||
             !leaseId ||
             document.hidden ||
-            !document.querySelector(".app").classList.contains("nav-open")
+            !navigationViewPollingNeeded()
           ) return;
           const selectedLeaseId = leaseId;
           const selectionRevision = terminalSelectionRevision;
@@ -9112,7 +9149,9 @@ import {
               leaseId !== selectedLeaseId ||
               terminalSelectionRevision !== selectionRevision
             ) return;
-            installNavigationSnapshot(data);
+            installNavigationSnapshot(data, {
+              render: document.querySelector(".app").classList.contains("nav-open"),
+            });
           } finally {
             navigationViewRefreshInFlight = false;
           }

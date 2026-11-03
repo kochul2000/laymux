@@ -31,6 +31,13 @@ import {
   normalizeScrollSensitivity,
 } from "@/lib/scroll-sensitivity";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import {
+  createPaneLinkProvider,
+  installPaneLinkUnderlines,
+  paneLinkAtCell,
+} from "@/lib/pane-link-provider";
+import { resolveDesktopPaneLink, focusDesktopPaneLink } from "@/lib/pane-link-navigation";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import { createCodexTranscriptWheelHandler } from "@/lib/codex-transcript-wheel";
 import {
   _reserveWebglInitDelay,
@@ -1498,6 +1505,20 @@ export function TerminalView({
     };
     if (paneId) registerTerminalScroller(paneId, scrollViewport);
     registerTerminalScroller(instanceId, scrollViewport);
+
+    const paneLinkDeps = {
+      enabled: () => useSettingsStore.getState().terminal.paneLinkEnabled,
+      workspaceNames: () =>
+        useWorkspaceStore.getState().workspaces.map((workspace) => workspace.name),
+      resolve: resolveDesktopPaneLink,
+      navigate: focusDesktopPaneLink,
+    };
+    terminal.registerLinkProvider(createPaneLinkProvider(terminal, paneLinkDeps));
+    const paneLinkUnderlines = installPaneLinkUnderlines(terminal, paneLinkDeps);
+    const paneLinkSubscriptions = [
+      useSettingsStore.subscribe(paneLinkUnderlines.refresh),
+      useWorkspaceStore.subscribe(paneLinkUnderlines.refresh),
+    ];
 
     let resumeSubmissionPending = false;
     terminal.registerLinkProvider(
@@ -3684,7 +3705,8 @@ export function TerminalView({
         enableIndentedJoin: useSettingsStore.getState().paste.linkJoin,
         repoBase: repoBaseRef.current, // #439: 평문 #123 → issues URL
       });
-      if (!uri) return;
+      const paneLink = !uri && paneLinkAtCell(terminal, clickedLineNumber, col, paneLinkDeps);
+      if (!uri && !paneLink) return;
 
       // 링크를 찾았다 → 클릭이 TUI 로 전달되지 않도록 차단하고 브라우저로 연다.
       event.preventDefault();
@@ -3692,7 +3714,10 @@ export function TerminalView({
       (
         event as MouseEvent & { stopImmediatePropagation?: () => void }
       ).stopImmediatePropagation?.();
-      openExternal(uri).catch(() => {});
+      if (paneLink) {
+        const target = resolveDesktopPaneLink(paneLink.text);
+        if (target) focusDesktopPaneLink(target);
+      } else if (uri) openExternal(uri).catch(() => {});
     };
     const wrapperEl = wrapperRef.current;
     wrapperEl?.addEventListener("mousedown", handleModifierLinkClick, true);
@@ -6575,6 +6600,8 @@ export function TerminalView({
       unlistenOutputV3?.();
       unlistenOutputFailStopped?.();
       closeTerminalSession(instanceId).catch(() => {});
+      paneLinkSubscriptions.forEach((unsubscribe) => unsubscribe());
+      paneLinkUnderlines.dispose();
       terminal.dispose();
       renderCheckpointModel.dispose();
       terminalParserAdmission.dispose();

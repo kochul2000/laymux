@@ -204,6 +204,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/terminal/paneLinkEnabled",
+        description: "터미널 출력의 lx:pane:<workspaceName>:<paneNumber>, terminal-pane-<ID>, pane-<ID>를 밑줄 링크로 인식합니다. 클릭·탭하면 해당 터미널로 이동하고 포커스합니다. 기본 켬이며 PC와 Remote에 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/terminal/pathLinkActivation",
         description: "검증된 파일·디렉터리 경로 밑줄을 클릭·탭했을 때의 실행 방식입니다. \"immediate\"(기본)는 즉시 뷰어/CWD 이동을 수행하고, \"chip\"은 액션 칩을 띄웁니다. Ctrl / Ctrl+Shift 클릭은 두 모드 모두 칩 없이 호스트 OS 로 직행합니다. 즉시 적용됩니다.",
         sensitive: false,
