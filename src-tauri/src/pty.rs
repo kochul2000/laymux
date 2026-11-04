@@ -280,6 +280,34 @@ impl PtyHandle {
         let pending = self.control.submit_write(data, false, deadline)?;
         self.await_enqueued_control_job(pending, deadline, || true)
     }
+
+    /// Native-owner startup delegation uses the same exact-job OS cancellation
+    /// and fault policy as normal PTY input. A queued expired snapshot can be
+    /// dropped without faulting an unrelated job ahead of it.
+    pub(crate) fn write_startup_color_reply(&self, data: &[u8]) -> Result<(), String> {
+        self.ensure_input_healthy()?;
+        let deadline = Instant::now() + Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS);
+        let pending = self.control.submit_write(data, false, deadline)?;
+        match pending
+            .result
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Disconnected) => {
+                Err("PTY control worker stopped unexpectedly".into())
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                pending.cancelled.store(true, Ordering::Release);
+                if self.control.cancel_job(pending.id) {
+                    // Active synchronous WriteFile must acknowledge cancellation;
+                    // otherwise the existing bounded policy faults the PTY.
+                    self.await_enqueued_control_job(pending, deadline, || true)
+                } else {
+                    Err("queued startup color reply expired".into())
+                }
+            }
+        }
+    }
     /// Time budget `terminate()` gives the shell to exit on its own after the
     /// PTY is closed before falling back to a forced kill. Polled in small
     /// steps so well-behaved shells return almost immediately.

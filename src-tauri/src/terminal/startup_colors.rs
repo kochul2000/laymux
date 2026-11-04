@@ -1,11 +1,9 @@
 //! Initial-theme reply delegation for a validated native Codex launch (ADR-0375).
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::constants::CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS;
-use crate::pty_control::PtyControlWorker;
+use crate::pty::{PtyHandle, PtyOutputControl};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartupColorReplies {
@@ -56,31 +54,18 @@ impl StartupColorResponder {
     }
 
     /// Called by the native owner, before output reaches either GUI transport.
-    pub(crate) fn respond(&mut self, data: &[u8], writer: &Arc<PtyControlWorker>) {
+    pub(crate) fn respond(&mut self, data: &[u8], writer: &PtyHandle) {
         let replies = self.observe(data);
         if replies.is_empty() {
             return;
         }
-        let timeout = Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS);
-        let deadline = Instant::now() + timeout;
-        match writer.submit_write(&replies, false, deadline) {
-            Ok(job) => match job
-                .result
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            {
-                Ok(Ok(())) => tracing::debug!(
-                    bytes = replies.len(),
-                    "answered Codex startup colors in PTY owner"
-                ),
-                result => {
-                    job.cancelled.store(true, Ordering::Release);
-                    tracing::warn!(
-                        ?result,
-                        "Codex startup color write did not complete; not retrying"
-                    );
-                }
-            },
+        match writer.write_startup_color_reply(&replies) {
+            Ok(()) => tracing::debug!(
+                bytes = replies.len(),
+                "answered Codex startup colors in PTY owner"
+            ),
             Err(error) => {
+                self.pending = 0;
                 tracing::warn!(%error, "Codex startup color write was rejected; not retrying")
             }
         }
@@ -93,7 +78,13 @@ impl StartupColorResponder {
         }
         for &byte in data {
             if let Some(osc) = self.osc.as_mut() {
-                if byte == 7 || (self.escape && byte == b'\\') {
+                if self.escape && byte != b'\\' {
+                    // ESC cancels an OSC unless it is the exact ST terminator.
+                    // Never remove ESC and accidentally manufacture a query.
+                    self.osc = (byte == b']').then(Vec::new);
+                    self.escape = byte == 0x1b;
+                    self.overflow = false;
+                } else if byte == 7 || (self.escape && byte == b'\\') {
                     let osc = self.osc.take().unwrap_or_default();
                     let st = self.escape && byte == b'\\';
                     self.escape = false;
@@ -145,9 +136,45 @@ impl StartupColorResponder {
     }
 }
 
+/// Install only for the native owner. Release the temporary handle as soon as
+/// replies are complete/disarmed; ordinary readers retain no extra writer.
+pub(crate) fn startup_color_output<F>(
+    colors: Option<StartupColorReplies>,
+    handle: &PtyHandle,
+    on_output: F,
+) -> impl Fn(Vec<u8>) -> PtyOutputControl + Send + 'static
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
+    let responder = std::cell::RefCell::new(
+        colors.map(|colors| (StartupColorResponder::new(colors), handle.clone())),
+    );
+    move |data| {
+        {
+            let mut slot = responder.borrow_mut();
+            if let Some((responder, writer)) = slot.as_mut() {
+                responder.respond(&data, writer);
+                if responder.pending == 0 {
+                    slot.take();
+                }
+            }
+        }
+        let started = std::time::Instant::now();
+        let result = on_output(data);
+        // The next query may already be queued behind this blocked callback.
+        // Its app-side wait is not restarted when we eventually read it.
+        if started.elapsed() >= Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS) {
+            responder.borrow_mut().take();
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::time::Instant;
 
     fn colors() -> StartupColorReplies {
         StartupColorReplies {
@@ -219,6 +246,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn malformed_esc_inside_an_osc_never_becomes_an_exact_query() {
+        for data in [b"\x1b]10;\x1b?\x1b\\".as_slice(), b"\x1b]11;?\x1bX\x1b\\"] {
+            for split in 0..=data.len() {
+                let mut responder = StartupColorResponder::new(colors());
+                assert!(responder.observe(&data[..split]).is_empty());
+                assert!(responder.observe(&data[split..]).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn backpressure_before_a_query_disarms_owner_replies() {
+        let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handle =
+            crate::pty::PtyHandle::from_test_writer(Box::new(Recorder(Arc::clone(&bytes))));
+        let callback = startup_color_output(Some(colors()), &handle, |data| {
+            if data == b"startup output" {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            crate::pty::PtyOutputControl::Continue
+        });
+        assert_eq!(
+            callback(b"startup output".to_vec()),
+            PtyOutputControl::Continue
+        );
+        assert_eq!(
+            callback(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec()),
+            PtyOutputControl::Continue
+        );
+        assert!(
+            bytes.lock().unwrap().is_empty(),
+            "the query could have expired during backpressure"
+        );
+        handle.terminate().unwrap();
+    }
+
     struct Recorder(Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for Recorder {
         fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
@@ -233,11 +297,7 @@ mod tests {
     #[test]
     fn native_owner_writes_snapshot_without_waiting_for_a_gui_responder() {
         let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let writer = PtyControlWorker::spawn(
-            Box::new(Recorder(Arc::clone(&bytes))),
-            Arc::new(std::sync::Mutex::new(None)),
-        )
-        .unwrap();
+        let writer = PtyHandle::from_test_writer(Box::new(Recorder(Arc::clone(&bytes))));
         let mut responder = StartupColorResponder::new(colors());
         responder.respond(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\", &writer);
         assert_eq!(
@@ -250,7 +310,7 @@ mod tests {
         );
         responder.respond(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\", &writer);
         assert_eq!(bytes.lock().unwrap().len(), 50, "no duplicate owner reply");
-        writer.close();
+        writer.terminate().unwrap();
     }
 
     #[test]
@@ -277,17 +337,13 @@ mod tests {
         let bytes = Arc::new(Mutex::new(Vec::new()));
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let writer = PtyControlWorker::spawn(
-            Box::new(BusyWriter {
-                recorder: Recorder(Arc::clone(&bytes)),
-                started: started_tx,
-                release: Some(release_rx),
-            }),
-            Arc::new(Mutex::new(None)),
-        )
-        .unwrap();
+        let writer = PtyHandle::from_test_writer(Box::new(BusyWriter {
+            recorder: Recorder(Arc::clone(&bytes)),
+            started: started_tx,
+            release: Some(release_rx),
+        }));
         let busy = writer
-            .submit_write(b"busy", false, Instant::now() + Duration::from_secs(2))
+            .enqueue_write(b"busy", false, Instant::now() + Duration::from_secs(2))
             .unwrap();
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let mut responder = StartupColorResponder::new(colors());
@@ -298,7 +354,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let done = writer
-            .submit_write(b"done", false, Instant::now() + Duration::from_secs(1))
+            .enqueue_write(b"done", false, Instant::now() + Duration::from_secs(1))
             .unwrap();
         done.result
             .recv_timeout(Duration::from_secs(1))
@@ -309,6 +365,10 @@ mod tests {
             b"busydone",
             "no stale color bytes after FIFO unblocks"
         );
-        writer.close();
+        writer.terminate().unwrap();
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "startup_colors/windows_tests.rs"]
+mod windows_tests;

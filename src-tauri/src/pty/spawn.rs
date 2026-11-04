@@ -18,7 +18,7 @@ use crate::constants::{
 use crate::pty_control::PtyControlWorker;
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{
-    InitialExecutionHost, StartupColorReplies, StartupColorResponder, TerminalSession,
+    startup_color_output, InitialExecutionHost, StartupColorReplies, TerminalSession,
 };
 use crate::terminal_env::TerminalEnvPlan;
 
@@ -536,7 +536,7 @@ where
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         input_enqueue_gate: Arc::new(Mutex::new(())),
         session_restore: None,
-        control: Arc::clone(&control),
+        control,
         master,
         child_killer: Arc::new(Mutex::new(Some(child_killer))),
         child_pid,
@@ -553,15 +553,9 @@ where
 
     // Spawn reader thread
     let on_reader_end = hooks.on_reader_end;
+    let on_output = startup_color_output(options.startup_colors, &handle, on_output);
     thread::spawn(move || {
-        let responder =
-            std::cell::RefCell::new(options.startup_colors.map(StartupColorResponder::new));
-        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, move |data| {
-            if let Some(responder) = responder.borrow_mut().as_mut() {
-                responder.respond(&data, &control);
-            }
-            on_output(data)
-        });
+        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, on_output);
         if let Some(on_reader_end) = on_reader_end {
             on_reader_end();
         }
