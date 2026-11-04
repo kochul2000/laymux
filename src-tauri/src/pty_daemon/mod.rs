@@ -40,6 +40,8 @@ mod grace_tests;
 #[cfg(test)]
 mod handshake_tests;
 #[cfg(test)]
+mod startup_colors_tests;
+#[cfg(test)]
 mod tests;
 
 pub use backend::{is_enabled, session_key, terminal_backend, DaemonAdoption, DaemonEndpoint};

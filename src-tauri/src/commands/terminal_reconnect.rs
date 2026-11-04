@@ -52,6 +52,7 @@ pub(crate) async fn reconnect_terminal_session_inner(
         state,
         app,
         Some(generation),
+        None,
     )
     .await?;
     state

@@ -17,7 +17,9 @@ use crate::constants::{
 };
 use crate::pty_control::PtyControlWorker;
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
-use crate::terminal::{InitialExecutionHost, TerminalSession};
+use crate::terminal::{
+    InitialExecutionHost, StartupColorReplies, StartupColorResponder, TerminalSession,
+};
 use crate::terminal_env::TerminalEnvPlan;
 
 /// Spawn a PTY process for the given terminal session.
@@ -93,6 +95,19 @@ pub fn spawn_pty_on<F>(
 where
     F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
+    spawn_pty_on_with_startup_colors(backend, session, terminal_generation, None, on_output)
+}
+
+pub(crate) fn spawn_pty_on_with_startup_colors<F>(
+    backend: &PtyBackend,
+    session: &TerminalSession,
+    terminal_generation: u64,
+    startup_colors: Option<StartupColorReplies>,
+    on_output: F,
+) -> Result<SpawnedPty, String>
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
     let size = PtySize {
         rows: session.config.rows,
         cols: session.config.cols,
@@ -160,6 +175,7 @@ where
     let options = |kill_owner| SpawnOptions {
         wsl_backed: is_wsl,
         kill_owner,
+        startup_colors: startup_colors.clone(),
     };
     let mut display_context_owner = None;
     let mut daemon_reconnect_control = None;
@@ -185,6 +201,7 @@ where
                     SpawnOptions {
                         wsl_backed,
                         kill_owner: ChildKillOwner::Backend,
+                        startup_colors: None,
                     },
                     on_output,
                     PtyLifecycleHooks::default(),
@@ -235,7 +252,18 @@ where
                         endpoint.clone(),
                         crate::pty_daemon::session_key(&session.id, terminal_generation),
                         session.id.clone(),
-                        daemon_session_metadata(session, is_wsl, command_line),
+                        {
+                            let mut metadata =
+                                daemon_session_metadata(session, is_wsl, command_line);
+                            if let Some(colors) = startup_colors.as_ref() {
+                                metadata.insert(
+                                    crate::constants::PTY_DAEMON_METADATA_CODEX_STARTUP_COLORS
+                                        .into(),
+                                    serde_json::to_string(colors).map_err(|e| e.to_string())?,
+                                );
+                            }
+                            metadata
+                        },
                     );
                     match open_and_spawn(&system, size, cmd.clone()) {
                         Ok(opened) => {
@@ -268,6 +296,11 @@ where
                 SpawnOptions {
                     wsl_backed,
                     kill_owner,
+                    // A daemon proxy must never answer too. Only a native
+                    // fallback owns the actual reader/writer for a new child.
+                    startup_colors: (kill_owner == ChildKillOwner::Local)
+                        .then_some(startup_colors)
+                        .flatten(),
                 },
                 on_output,
                 PtyLifecycleHooks::default(),
@@ -348,6 +381,7 @@ pub(crate) enum ChildKillOwner {
 pub(crate) struct SpawnOptions {
     pub wsl_backed: bool,
     pub kill_owner: ChildKillOwner,
+    pub startup_colors: Option<StartupColorReplies>,
 }
 
 /// Optional observers for the two independent end-of-life signals of a PTY.
@@ -502,7 +536,7 @@ where
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         input_enqueue_gate: Arc::new(Mutex::new(())),
         session_restore: None,
-        control,
+        control: Arc::clone(&control),
         master,
         child_killer: Arc::new(Mutex::new(Some(child_killer))),
         child_pid,
@@ -520,7 +554,14 @@ where
     // Spawn reader thread
     let on_reader_end = hooks.on_reader_end;
     thread::spawn(move || {
-        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, on_output);
+        let responder =
+            std::cell::RefCell::new(options.startup_colors.map(StartupColorResponder::new));
+        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, move |data| {
+            if let Some(responder) = responder.borrow_mut().as_mut() {
+                responder.respond(&data, &control);
+            }
+            on_output(data)
+        });
         if let Some(on_reader_end) = on_reader_end {
             on_reader_end();
         }

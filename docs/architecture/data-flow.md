@@ -671,6 +671,14 @@ human-control permit은 등록 시점의 owner epoch·absolute deadline·operati
 
 [ADR-0236](../adr/0236-remote-composer-inline-attachments.md)에 따라 Remote의 입력 표면은 contenteditable이다(Desktop은 textarea 유지). terminal별 draft의 raw `text`와 `attachments`(원문 offset 범위·path·원래 파일명·이미지 여부)가 SoT이며, 편집 중 DOM을 raw text와 범위로 직렬화한다. 첨부 span은 `contenteditable=false`이고 이미지는 Image/번호, 그 외는 파일명으로 표시한다. Backspace/Delete·선택 삭제는 칩 전체를 제거하고 별도 제거 버튼·undo 바인딩은 없다. 일반 붙여넣기는 plain text만 수용하고 직접 입력한 경로는 칩으로 바꾸지 않는다. Send에는 원래 경로를 기존 quoting 그대로 보내며 성공 시 동일 revision의 text와 metadata만 함께 비운다. history는 실제 전송 원문을 보관하고 recall은 일반 텍스트다. 업로드와 전송 실패·terminal 전환·취소는 기존 draft 격리와 보존 규칙을 따른다. 칩을 제거해도 서버 파일은 기존 cache 정리 정책을 따른다.
 
+#### Windows Codex 복원 최초 색상 응답 위임
+
+[ADR-0375](../adr/0375-codex-startup-color-owner-reply.md)은 위 일반 응답 경로에 한정된 예외다. `TerminalView`는 visible xterm을 만드는 초기 theme의 foreground/background에서 OSC 10/11 RGB 응답 쌍을 만들어 내부 create IPC의 선택적 `startupColors`로 전달한다. backend는 기존 startup plan이 native Windows shell + native Codex 복원/빈 세션 복귀임을 검증한 경우에만 형식이 맞는 쌍을 사용한다. 일반 실행·viewer·WSL/SSH launcher와 reconnect에는 권한을 주지 않는다.
+
+실제 native PTY owner의 reader가 시작하기 전에 `StartupColorResponder`를 writer FIFO와 연결한다. exact ST-terminated 최초 색상 질의를 chunk 경계를 넘어 관측하면 미리 확정한 해당 응답을 코드별 한 번 전달하며, 50ms write deadline 이후 실행·재시도하지 않는다. daemon은 spawn metadata의 `codex_startup_colors`를 읽고 세션 catalog에 넣기 전에 제거한다. GUI의 daemon proxy·adoption·reconnect에는 responder가 없다. native fallback은 자기 reader에 설치한다. 초기 snapshot 뒤 OSC 10/11 setter 또는 OSC 110/111 reset을 관측하면 snapshot 권위를 잃었으므로 최적화를 포기한다. snapshot이 없거나 유효하지 않은 기존 내부 caller는 기존 guard 동작을 유지한다.
+
+visible xterm에서 뒤늦게 생성된 최초 대응 응답은 ADR-0131 guard가 계속 폐기하므로 WebView stall 뒤에도 중복 응답이 composer로 들어가지 않는다. frontend의 초기 테마가 색상 SoT이며 Rust가 다른 색을 합성하거나 모든 terminal 질의의 responder를 대체하지 않는다. OS scheduling의 hard deadline이나 실행 중 테마 변경 전파는 보장하지 않는다. Windows dev Codex 0.166.0에서 수정 전 일반 실행은 입력창 배경 `#292929`, 복원 실행은 기본 배경이었다. 실제 dev 검증은 초기 색상 동등성과 WebView 1.6초 stall 중 복원 색상 유지·입력 오염 부재를 함께 확인한다.
+
 ### 8.9 앱 blur/focus 왕복의 helper textarea focus 소유권 (issue #530)
 
 pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFocused` **변화**에만 `terminal.focus()`/`blur()` 를 호출한다. 앱이 Alt-Tab 으로 비활성화되면 WebView 가 xterm helper textarea 의 실제 DOM focus 를 `body`/`null` 로 떨어뜨릴 수 있는데, store 값은 그대로이므로 복귀 시 어떤 effect 도 재실행되지 않아 첫 키/첫 한글 조합이 유실된다. 이를 pane-local focus 소유권 기록으로 좁혀 복구한다([ADR-0057](../adr/0057-terminal-helper-focus-ownership.md)).

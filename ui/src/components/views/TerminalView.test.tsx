@@ -10783,6 +10783,15 @@ describe("TerminalView", () => {
           true,
           "/current",
           `${command} ${sessionId}`,
+          ...(field === "lastCodexSession"
+            ? [
+                undefined,
+                {
+                  foreground: "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+                  background: "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\",
+                },
+              ]
+            : []),
         );
         expect(consumed).toHaveBeenCalledOnce();
       });
@@ -10994,6 +11003,10 @@ describe("TerminalView", () => {
       );
       await vi.waitFor(() => expect(mockCreateTerminalSession).toHaveBeenCalled());
       expect(mockCreateTerminalSession.mock.calls.at(-1)?.[8]).toBe("codex");
+      expect(mockCreateTerminalSession.mock.calls.at(-1)?.[10]).toEqual({
+        foreground: "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+        background: "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\",
+      });
     });
 
     it("passes codex resume when lastCodexSession is set", async () => {
@@ -11019,6 +11032,11 @@ describe("TerminalView", () => {
           true,
           "/home/user/project",
           "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+          undefined,
+          {
+            foreground: "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+            background: "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\",
+          },
         );
       });
     });
@@ -11049,6 +11067,11 @@ describe("TerminalView", () => {
           true,
           undefined,
           "codex --yolo resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+          undefined,
+          {
+            foreground: "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+            background: "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\",
+          },
         );
       });
     });

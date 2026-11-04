@@ -415,12 +415,19 @@ impl DaemonServer {
             rows,
             cols,
             command,
-            metadata,
+            mut metadata,
         } = request;
         if rows == 0 || cols == 0 {
             return Err(format!("invalid PTY size {rows}x{cols}"));
         }
         let command = command.into_builder()?;
+        // Spawn-only delegation is not durable/adoptable session metadata.
+        let startup_colors = metadata
+            .remove(crate::constants::PTY_DAEMON_METADATA_CODEX_STARTUP_COLORS)
+            .and_then(|value| {
+                serde_json::from_str::<crate::terminal::StartupColorReplies>(&value).ok()
+            })
+            .and_then(crate::terminal::StartupColorReplies::validated);
         let created_seq = self.next_session_seq.fetch_add(1, Ordering::Relaxed);
         let session = Arc::new(Session::new(
             session_id.clone(),
@@ -466,6 +473,7 @@ impl DaemonServer {
             SpawnOptions {
                 wsl_backed: false,
                 kill_owner: ChildKillOwner::Local,
+                startup_colors,
             },
             move |data| output_session.deliver_output(&data),
             PtyLifecycleHooks {

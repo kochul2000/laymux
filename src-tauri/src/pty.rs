@@ -15,6 +15,7 @@ use crate::pty_reader::PtyReaderLifecycle;
 use crate::terminal::{NativeWindowsCodexColorProbeGuard, TerminalBootstrapDaReplyGuard};
 
 mod spawn;
+pub(crate) use spawn::spawn_pty_on_with_startup_colors;
 pub(crate) use spawn::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
 pub use spawn::{
     spawn_pty, spawn_pty_for_generation, spawn_pty_on, spawn_pty_with_metadata, PtyBackend,

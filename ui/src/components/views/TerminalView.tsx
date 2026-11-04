@@ -1,3 +1,4 @@
+import { terminalStartupColors } from "../../lib/terminal-startup-colors";
 import {
   useCallback,
   useEffect,
@@ -6265,6 +6266,12 @@ export function TerminalView({
     // Start PTY session immediately (don't wait for cache restore or a visual
     // surface). Cache restore runs in parallel so the shell starts booting ASAP.
     if (!cancelled) {
+      const startupArgs: [string?, ReturnType<typeof terminalStartupColors>?] =
+        startupOverride && !viewerStartup && (lastAgentFresh === "codex" || safeCodexSessionId)
+          ? [isRestartStart ? restartCwdSourceProfile : undefined, terminalStartupColors(theme)]
+          : isRestartStart && restartCwdSourceProfile
+            ? [restartCwdSourceProfile]
+            : [];
       createTerminalSession(
         instanceId,
         profile,
@@ -6275,7 +6282,7 @@ export function TerminalView({
         cwdReceiveRef.current,
         isRestartStart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
         viewerStartup ?? startupOverride,
-        ...(isRestartStart && restartCwdSourceProfile ? [restartCwdSourceProfile] : []),
+        ...startupArgs,
       )
         .then((createdSession) => {
           initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
