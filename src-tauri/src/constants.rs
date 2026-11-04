@@ -288,6 +288,11 @@ pub const PTY_WRITE_CHUNK_SIZE: usize = 1024;
 
 /// Maximum queued PTY input/resize jobs per terminal.
 pub const PTY_CONTROL_QUEUE_CAPACITY: usize = 64;
+/// Native Codex startup snapshot writes must not wait behind a busy stdin FIFO.
+pub const CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS: u64 = 50;
+/// Ephemeral daemon spawn metadata; removed before publishing session metadata.
+pub const PTY_DAEMON_METADATA_CODEX_STARTUP_COLORS: &str = "codex_startup_colors";
+
 /// Maximum age of the generation-local ConPTY bootstrap Primary DA exchange.
 /// A later replay reply could land in the shell's input editor after ConPTY has
 /// already abandoned its startup query, so the backend drops it fail-closed.

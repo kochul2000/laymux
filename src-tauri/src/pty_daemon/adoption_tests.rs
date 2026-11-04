@@ -55,6 +55,7 @@ fn output_reconnect_preserves_child_and_failed_retry_never_spawns() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         move |bytes| {
             let _ = tx.send(bytes);
@@ -143,6 +144,7 @@ fn display_context_follows_the_same_child_and_rejects_the_previous_owner() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         |_| PtyOutputControl::Continue,
         PtyLifecycleHooks::default(),
@@ -257,6 +259,7 @@ fn adoption_continues_the_same_child_and_returns_the_spawners_metadata() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         move |data| {
             let _ = tx.send(data);
@@ -307,6 +310,7 @@ fn an_adopting_terminal_reads_what_it_missed_first_and_knows_where_it_ends() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         move |data: Vec<u8>| {
             // What the terminal output callback does (ADR-0309).
@@ -509,6 +513,7 @@ fn app_exit_ends_daemon_terminals_registered_in_app_state() {
             SpawnOptions {
                 wsl_backed: false,
                 kill_owner: ChildKillOwner::Backend,
+                startup_colors: None,
             },
             |_| PtyOutputControl::Continue,
             PtyLifecycleHooks::default(),
@@ -540,6 +545,7 @@ fn state_with_daemon_terminal(daemon: &TestDaemon, session_id: &str) -> crate::s
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         |_| PtyOutputControl::Continue,
         PtyLifecycleHooks::default(),

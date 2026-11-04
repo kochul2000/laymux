@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { TerminalStartupColors } from "./terminal-startup-colors";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery-metrics";
@@ -75,6 +76,7 @@ export async function createTerminalSession(
   cwd?: string,
   startup?: TerminalStartupRequest,
   inheritCwdFromProfile?: string,
+  startupColors?: TerminalStartupColors,
 ): Promise<TerminalSessionResult> {
   const startupCommandOverride = typeof startup === "string" ? startup : null;
   const viewer = startup && typeof startup === "object" ? startup : null;
@@ -91,6 +93,7 @@ export async function createTerminalSession(
       startupCommandOverride,
       viewer,
       ...(inheritCwdFromProfile ? { inheritCwdFromProfile } : {}),
+      ...(startupColors ? { startupColors } : {}),
     }),
   );
 }

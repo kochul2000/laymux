@@ -71,6 +71,33 @@ beforeEach(() => {
 
 describe("tauri-api", () => {
   describe("createTerminalSession", () => {
+    it("passes the ephemeral initial-theme reply pair separately from the launch command", async () => {
+      const colors = {
+        foreground: "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+        background: "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\",
+      };
+      await createTerminalSession(
+        "restore",
+        "PowerShell",
+        80,
+        24,
+        "",
+        true,
+        true,
+        undefined,
+        "codex",
+        undefined,
+        colors,
+      );
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "create_terminal_session",
+        expect.objectContaining({
+          id: "restore",
+          startupCommandOverride: "codex",
+          startupColors: colors,
+        }),
+      );
+    });
     it("분할 CWD 표식만 별도 IPC 인자로 전달한다", async () => {
       await createTerminalSession(
         "inherited",

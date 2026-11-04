@@ -221,6 +221,7 @@ pub async fn create_terminal_session(
     inherit_cwd_from_profile: Option<String>,
     startup_command_override: Option<String>,
     viewer: Option<super::ViewerStartupRequest>,
+    startup_colors: Option<crate::terminal::StartupColorReplies>,
     state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -240,6 +241,7 @@ pub async fn create_terminal_session(
         &state,
         app,
         None,
+        startup_colors,
     )
     .await
 }
@@ -261,6 +263,7 @@ pub(crate) async fn create_terminal_session_inner(
     state: &Arc<AppState>,
     app: AppHandle,
     reconnect_generation: Option<u64>,
+    startup_colors: Option<crate::terminal::StartupColorReplies>,
 ) -> Result<TerminalSession, String> {
     let _checkpoint_permit = state
         .session_checkpoint
@@ -431,6 +434,11 @@ pub(crate) async fn create_terminal_session_inner(
     let codex_startup_color_probe = startup_plan
         .arm_native_windows_codex_color_probe
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
+    let startup_colors = startup_colors
+        .filter(|_| {
+            startup_plan.arm_native_windows_codex_color_probe && reconnect_generation.is_none()
+        })
+        .and_then(crate::terminal::StartupColorReplies::validated);
     let bootstrap_da_reply =
         cfg!(windows).then(|| Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed()));
     let mut session = TerminalSession::new(id.clone(), config);
@@ -574,7 +582,7 @@ pub(crate) async fn create_terminal_session_inner(
     // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
-    let spawned_pty = pty::spawn_pty_on(&backend, &session, terminal_generation, move |data| {
+    let on_output = move |data: Vec<u8>| {
         // Retirement may wake a callback parked in the fatal record-error gate
         // just before close terminates the PTY handle. Drop any final queued
         // master reads without re-locking poisoned protocol state or emitting
@@ -719,7 +727,14 @@ pub(crate) async fn create_terminal_session_inner(
         // 2. Task completion (working→idle) → extract from output buffer via claude_bullet (below)
 
         pty::PtyOutputControl::Continue
-    })?;
+    };
+    let spawned_pty = pty::spawn_pty_on_with_startup_colors(
+        &backend,
+        &session,
+        terminal_generation,
+        startup_colors,
+        on_output,
+    )?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
     if let Some(metadata) = spawned_pty.adopted.as_ref() {
         super::terminal_display_context::restore(&mut session, metadata);

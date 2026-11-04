@@ -283,6 +283,7 @@ fn pty_handle_runs_a_real_shell_inside_the_daemon() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         move |data| {
             let _ = tx.send(data);
@@ -409,6 +410,7 @@ fn an_exit_time_terminate_request_ends_the_session_without_any_cleanup() {
         SpawnOptions {
             wsl_backed: false,
             kill_owner: ChildKillOwner::Backend,
+            startup_colors: None,
         },
         |_| PtyOutputControl::Continue,
         PtyLifecycleHooks::default(),
