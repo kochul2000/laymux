@@ -284,9 +284,12 @@ impl PtyHandle {
     /// Native-owner startup delegation uses the same exact-job OS cancellation
     /// and fault policy as normal PTY input. A queued expired snapshot can be
     /// dropped without faulting an unrelated job ahead of it.
-    pub(crate) fn write_startup_color_reply(&self, data: &[u8]) -> Result<(), String> {
+    pub(crate) fn write_startup_color_reply(
+        &self,
+        data: &[u8],
+        deadline: Instant,
+    ) -> Result<(), String> {
         self.ensure_input_healthy()?;
-        let deadline = Instant::now() + Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS);
         let pending = self.control.submit_write(data, false, deadline)?;
         match pending
             .result

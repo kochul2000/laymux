@@ -40,6 +40,7 @@ pub(crate) struct StartupColorResponder {
     escape: bool,
     osc: Option<Vec<u8>>,
     overflow: bool,
+    remaining_budget: Duration,
 }
 
 impl StartupColorResponder {
@@ -50,16 +51,18 @@ impl StartupColorResponder {
             escape: false,
             osc: None,
             overflow: false,
+            remaining_budget: Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS),
         }
     }
 
     /// Called by the native owner, before output reaches either GUI transport.
     pub(crate) fn respond(&mut self, data: &[u8], writer: &PtyHandle) {
+        let deadline = std::time::Instant::now() + self.remaining_budget;
         let replies = self.observe(data);
         if replies.is_empty() {
             return;
         }
-        match writer.write_startup_color_reply(&replies) {
+        match writer.write_startup_color_reply(&replies, deadline) {
             Ok(()) => tracing::debug!(
                 bytes = replies.len(),
                 "answered Codex startup colors in PTY owner"
@@ -150,6 +153,7 @@ where
         colors.map(|colors| (StartupColorResponder::new(colors), handle.clone())),
     );
     move |data| {
+        let started = std::time::Instant::now();
         {
             let mut slot = responder.borrow_mut();
             if let Some((responder, writer)) = slot.as_mut() {
@@ -159,12 +163,16 @@ where
                 }
             }
         }
-        let started = std::time::Instant::now();
         let result = on_output(data);
         // The next query may already be queued behind this blocked callback.
         // Its app-side wait is not restarted when we eventually read it.
-        if started.elapsed() >= Duration::from_millis(CODEX_STARTUP_COLOR_WRITE_TIMEOUT_MS) {
-            responder.borrow_mut().take();
+        let mut slot = responder.borrow_mut();
+        if let Some((responder, _)) = slot.as_mut() {
+            responder.remaining_budget =
+                responder.remaining_budget.saturating_sub(started.elapsed());
+            if responder.remaining_budget.is_zero() {
+                slot.take();
+            }
         }
         result
     }
@@ -279,6 +287,68 @@ mod tests {
         assert!(
             bytes.lock().unwrap().is_empty(),
             "the query could have expired during backpressure"
+        );
+        handle.terminate().unwrap();
+    }
+
+    #[test]
+    fn cumulative_short_callbacks_cannot_restart_the_startup_reply_budget() {
+        let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handle = PtyHandle::from_test_writer(Box::new(Recorder(Arc::clone(&bytes))));
+        let callback = startup_color_output(Some(colors()), &handle, |data| {
+            if data == b"prefix" {
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            PtyOutputControl::Continue
+        });
+        for _ in 0..10 {
+            assert_eq!(callback(b"prefix".to_vec()), PtyOutputControl::Continue);
+        }
+        assert_eq!(
+            callback(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec()),
+            PtyOutputControl::Continue
+        );
+        assert!(
+            bytes.lock().unwrap().is_empty(),
+            "many short callbacks still outlive the app probe"
+        );
+        handle.terminate().unwrap();
+    }
+
+    #[test]
+    fn split_queries_share_the_budget_for_write_wait_and_output_callback() {
+        use std::io::Write;
+        struct SlowWriter(Recorder);
+        impl std::io::Write for SlowWriter {
+            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+                std::thread::sleep(Duration::from_millis(30));
+                self.0.write(data)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handle =
+            PtyHandle::from_test_writer(Box::new(SlowWriter(Recorder(Arc::clone(&bytes)))));
+        let callback = startup_color_output(Some(colors()), &handle, |data| {
+            if data.starts_with(b"\x1b]10;") {
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            PtyOutputControl::Continue
+        });
+        assert_eq!(
+            callback(b"\x1b]10;?\x1b\\".to_vec()),
+            PtyOutputControl::Continue
+        );
+        assert_eq!(
+            callback(b"\x1b]11;?\x1b\\".to_vec()),
+            PtyOutputControl::Continue
+        );
+        assert_eq!(
+            *bytes.lock().unwrap(),
+            colors().foreground.as_bytes(),
+            "background query cannot get a fresh budget after foreground wait + callback"
         );
         handle.terminate().unwrap();
     }

@@ -19,7 +19,7 @@ WebView가 정지한 동안에도 색상 응답을 전달하려면 실제 PTY I/
 - 내부 create IPC의 선택적 snapshot은 backend가 native shell과 native Codex override를 다시 검증한 경우에만 사용한다. 일반 터미널·WSL·SSH·viewer에는 응답 권한이 없다. 외부 HTTP·MCP·설정 계약은 추가하지 않는다.
 - 응답자는 실제 native PTY reader와 writer다. in-process는 GUI의 native owner, daemon은 daemon의 native owner에서 reader 시작 전에 연결한다. GUI proxy에는 responder를 만들지 않는다. daemon spawn metadata로 운반한 snapshot은 세션 catalog·adoption metadata에 보존하지 않는다. 살아 있는 세션 재결합에는 새 responder를 설치하지 않는다.
 - reader는 출력 publish 전에 chunk 경계를 넘어 exact ST-terminated OSC 10/11 질의를 관측한다. 코드별 최초 한 번만 snapshot을 기존 PTY writer FIFO에 넣고 50ms의 write deadline을 부여한다. 만료·실패 시 재시도하거나 늦게 주입하지 않는다. OS 스케줄링 전체의 시간 상한을 보장하지 않으며 이 deadline은 이미 지연된 write를 실행하지 않기 위한 제한이다.
-- 이전 output callback·transport backpressure가 50ms 이상 걸리면 남은 startup 위임을 영구 해제한다. 뒤에 쌓인 질의의 app-side probe가 이미 끝났을 수 있기 때문이다. 만료된 queued write는 취소 flag로 폐기하고, 진행 중인 native write는 기존 PTY exact-job OS 취소·완료 확인·실패 시 input fault/종료 정책을 재사용한다. 보호 경계는 query를 읽은 뒤 새로 시작하는 deadline만으로 판단하지 않는다.
+- 질의 인식·owner write 대기·output callback/transport backpressure의 **누적 처리 예산을 startup 전체에서 50ms로 공유**한다. 각 write는 남은 예산만 사용하며 여러 짧은 callback이나 분할된 두 질의도 예산을 다시 시작하지 않는다. 누적 처리 예산을 소진하면 남은 위임을 영구 해제한다. 뒤에 쌓인 질의의 app-side probe가 이미 끝났을 수 있기 때문이다. 무출력 native read 대기는 app-side probe와 같은 시계가 아니므로 차감하지 않는다. 만료된 queued write는 취소 flag로 폐기하고, 진행 중인 native write는 기존 PTY exact-job OS 취소·완료 확인·실패 시 input fault/종료 정책을 재사용한다.
 - startup 전에 OSC 10/11 setter/reset이 관측되면 초기 snapshot은 더 이상 권위가 없으므로 responder를 비활성화한다. 이 경우 복원 색상 최적화보다 잘못된 응답 방지를 우선한다. 다른 터미널 질의는 통과시킨다.
 - visible xterm은 출력 질의를 계속 파싱하지만 ADR-0131 guard가 최초 대응 RGB 응답을 버려 이중 응답과 WebView 지연 뒤 composer 오염을 막는다. guard의 generation 검증·adoption disarm·human/protocol 분리는 유지한다.
 
