@@ -5,6 +5,7 @@ import {
   clipboardWriteText,
   listDirectory,
   getHomeDirectory,
+  openInOs,
   handleLxMessage,
 } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -30,6 +31,7 @@ vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   listDirectory: vi.fn().mockResolvedValue([]),
   getHomeDirectory: vi.fn().mockResolvedValue("/home/fallback"),
+  openInOs: vi.fn().mockResolvedValue(undefined),
   onTerminalCwdChanged: vi
     .fn()
     .mockImplementation(
@@ -92,6 +94,7 @@ describe("FileExplorerView", () => {
     vi.mocked(clipboardWriteText).mockClear();
     vi.mocked(listDirectory).mockClear();
     vi.mocked(getHomeDirectory).mockClear();
+    vi.mocked(openInOs).mockReset().mockResolvedValue(undefined);
     vi.mocked(getHomeDirectory).mockResolvedValue("/home/fallback");
     mockListDir();
     useSettingsStore.setState(useSettingsStore.getInitialState());
@@ -116,6 +119,92 @@ describe("FileExplorerView", () => {
       await vi.runAllTimersAsync();
     });
     expect(screen.getByTestId("file-explorer-path-bar")).toHaveTextContent("/home/user");
+  });
+
+  it.each([
+    { name: "Windows 폴더", cwd: "D:\\작업 폴더", entries: mockDirEntries },
+    { name: "Windows 빈 폴더", cwd: "D:\\작업 폴더", entries: [] },
+    { name: "Windows 슬래시 경로", cwd: "D:/작업 폴더", entries: [] },
+    { name: "WSL Linux 폴더", cwd: "/home/user/작업 폴더", entries: mockDirEntries },
+    { name: "WSL 마운트 폴더", cwd: "/mnt/d/작업 폴더", entries: [] },
+    {
+      name: "WSL UNC 폴더",
+      cwd: "\\\\wsl.localhost\\Ubuntu-22.04\\home\\user\\작업 폴더",
+      entries: [],
+    },
+  ])("현재 폴더를 OS 파일 관리자로 연다: $name", async ({ cwd, entries }) => {
+    mockListDir(entries);
+    render(<FileExplorerView {...defaultProps} lastCwd={cwd} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    const confirm = vi.spyOn(window, "confirm");
+    fireEvent.click(screen.getByRole("button", { name: "Open current folder in file manager" }));
+    expect(openInOs).toHaveBeenCalledWith(cwd, "open");
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("선택한 파일 대신 탐색 중인 폴더를 열고 앞뒤 이동한 경로를 반영한다", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    fireEvent.click(screen.getByTestId("file-explorer-item-2"));
+    fireEvent.click(screen.getByTestId("file-explorer-open-directory"));
+    expect(openInOs).toHaveBeenLastCalledWith("/home/user", "open");
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    fireEvent.click(screen.getByTestId("file-explorer-open-directory"));
+    expect(openInOs).toHaveBeenLastCalledWith("/home/user/subdir", "open");
+    fireEvent.click(screen.getByTestId("file-explorer-back"));
+    fireEvent.click(screen.getByTestId("file-explorer-open-directory"));
+    expect(openInOs).toHaveBeenLastCalledWith("/home/user", "open");
+    fireEvent.click(screen.getByTestId("file-explorer-forward"));
+    fireEvent.click(screen.getByTestId("file-explorer-open-directory"));
+    expect(openInOs).toHaveBeenLastCalledWith("/home/user/subdir", "open");
+  });
+
+  it("현재 경로가 정해지기 전에는 폴더 열기를 비활성화한다", async () => {
+    vi.mocked(getHomeDirectory).mockReturnValue(new Promise(() => {}));
+    render(<FileExplorerView {...defaultProps} lastCwd="" syncGroup="" />);
+    const button = screen.getByTestId("file-explorer-open-directory");
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "The current folder is not available yet");
+    fireEvent.click(button);
+    expect(openInOs).not.toHaveBeenCalled();
+  });
+
+  it("버튼에서 Enter를 눌러도 목록의 포커스 항목은 활성화하지 않는다", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    fireEvent.click(screen.getByTestId("file-explorer-item-2"));
+    fireEvent.keyDown(screen.getByTestId("file-explorer-open-directory"), { key: "Enter" });
+    expect(useFileViewerStore.getState().open).toBe(false);
+    expect(screen.getByTestId("file-explorer-address")).toHaveTextContent("/home/user");
+  });
+
+  it("폴더 열기 실패를 표시하고 다른 폴더로 이동하면 이전 오류를 숨긴다", async () => {
+    vi.mocked(openInOs).mockRejectedValueOnce("탐색기 실행 실패");
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    fireEvent.click(screen.getByTestId("file-explorer-open-directory"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("탐색기 실행 실패");
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("calls listDirectory and shows entries", async () => {

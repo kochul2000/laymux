@@ -58,6 +58,9 @@
       "restart": "Restart terminal"
     },
     "osHandoff": {
+      "openDirectory": "Open current folder in file manager",
+      "openDirectoryTitle": "Open the current folder in this PC's file manager",
+      "directoryUnavailable": "The current folder is not available yet",
       "confirm": "Open this file with its associated app on this PC. Depending on the extension, that app may run it straight away.\n\n{{path}}\n\nContinue?",
       "confirmExecutable": "Warning: opening this extension runs it on this PC or changes the system (executable, script, installer, registry, …).\n\n{{path}}\n\nContinue?",
       "failed": "Failed to open in the OS: {{message}}",

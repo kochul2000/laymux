@@ -367,6 +367,8 @@ Remote는 PC 메모와 같은 키를 사용하는 Memo overlay를 제공한다. 
 
 Remote 우측 도구(메모·GitHub·Worktrees·파일 뷰어/탐색기)는 기기 로컬 `toolControlsBottom`(기본 true)으로 컨트롤바를 하단에 놓고, Panels에서 끄면 상단으로 돌린다. Remote settings MCP에서도 즉시 편집할 수 있다. 기본 닫기 모드에서 PRs의 오른쪽 플링은 Issues로 먼저 돌아가고, Issues에서 다시 오른쪽 플링하면 닫는다([ADR-0332](../adr/0332-remote-tool-bottom-controls-and-github-back.md)).
 
+FileExplorerView 주소창 오른쪽의 폴더 열기 버튼은 파일 선택과 무관하게 현재 `currentCwd`를 호스트 파일 관리자(Windows에서는 Windows 탐색기)에서 연다. 빈 폴더에서도 사용할 수 있고, 경로가 준비되지 않으면 이유를 tooltip으로 보여 주며 비활성화한다. `useOsHandoff.request(path, "open", { isDirectory: true })`와 기존 Rust 경로 해석을 그대로 사용하므로 부모에서 위치를 선택하는 `reveal`과 다르며, 디렉터리 열기에는 파일 실행 확인을 띄우지 않는다. 실행 실패는 탐색기 안에 현재 경로에 한정한 오류로 표시한다([ADR-0193](../adr/0193-viewer-os-handoff-buttons.md)의 공통 위임 정책 직접 적용). 데스크톱 버튼만 추가하며 Automation·MCP·Remote에 OS 실행 계약을 노출하지 않는다.
+
 ### 6.2 EmptyView
 
 Pane 또는 Dock에 View가 지정되지 않은 경우 표시된다.
