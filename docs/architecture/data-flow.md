@@ -673,6 +673,8 @@ human-control permit은 등록 시점의 owner epoch·absolute deadline·operati
 
 #### Windows Codex 복원 최초 색상 응답 위임
 
+색상 setter/reset의 OSC 번호는 선행 0을 정규화해 판정한다. 예를 들어 `OSC 011` setter와 `OSC 0111` reset도 초기 snapshot을 무효화한다. 응답을 위임하는 startup query 자체의 exact marker 제한은 유지한다.
+
 [ADR-0375](../adr/0375-codex-startup-color-owner-reply.md)은 위 일반 응답 경로에 한정된 예외다. `TerminalView`는 visible xterm을 만드는 초기 theme의 foreground/background에서 OSC 10/11 RGB 응답 쌍을 만들어 내부 create IPC의 선택적 `startupColors`로 전달한다. backend는 기존 startup plan이 native Windows shell + native Codex 복원/빈 세션 복귀임을 검증한 경우에만 형식이 맞는 쌍을 사용한다. 일반 실행·viewer·WSL/SSH launcher와 reconnect에는 권한을 주지 않는다.
 
 실제 native PTY owner의 reader가 시작하기 전에 `StartupColorResponder`를 writer FIFO와 연결한다. exact ST-terminated 최초 색상 질의를 chunk 경계를 넘어 관측하면 미리 확정한 해당 응답을 코드별 한 번 전달하며, 50ms write deadline 이후 실행·재시도하지 않는다. daemon은 spawn metadata의 `codex_startup_colors`를 읽고 세션 catalog에 넣기 전에 제거한다. GUI의 daemon proxy·adoption·reconnect에는 responder가 없다. native fallback은 자기 reader에 설치한다. 초기 snapshot 뒤 OSC 10/11 setter 또는 OSC 110/111 reset을 관측하면 snapshot 권위를 잃었으므로 최적화를 포기한다. snapshot이 없거나 유효하지 않은 기존 내부 caller는 기존 guard 동작을 유지한다.

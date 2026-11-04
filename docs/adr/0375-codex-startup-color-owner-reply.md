@@ -1,6 +1,6 @@
 # 0375. Codex 복원 최초 색상 응답은 초기 테마 snapshot으로 PTY 소유자가 전달한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-04
 - Source: 사용자 재현 및 수정·머지·릴리스 요청; Windows dev Codex 0.166.0 비교; [data-flow.md §8.8](../architecture/data-flow.md); [ADR-0131](0131-native-windows-codex-startup-color-reply-guard.md); [ADR-0054](0054-xterm-human-and-protocol-data-origin.md); [ADR-0300](0300-detached-pty-daemon-core.md)
 - Relation: ADR-0131의 최초 응답 차단은 중복·지연 응답 보호로 유지하면서, 초기 테마 응답을 PTY 소유자에게 위임하는 예외를 추가한다. 일반 live/replay 응답 및 Remote 단일 responder 계약은 유지한다.
@@ -20,7 +20,7 @@ WebView가 정지한 동안에도 색상 응답을 전달하려면 실제 PTY I/
 - 응답자는 실제 native PTY reader와 writer다. in-process는 GUI의 native owner, daemon은 daemon의 native owner에서 reader 시작 전에 연결한다. GUI proxy에는 responder를 만들지 않는다. daemon spawn metadata로 운반한 snapshot은 세션 catalog·adoption metadata에 보존하지 않는다. 살아 있는 세션 재결합에는 새 responder를 설치하지 않는다.
 - reader는 출력 publish 전에 chunk 경계를 넘어 exact ST-terminated OSC 10/11 질의를 관측한다. 코드별 최초 한 번만 snapshot을 기존 PTY writer FIFO에 넣고 50ms의 write deadline을 부여한다. 만료·실패 시 재시도하거나 늦게 주입하지 않는다. OS 스케줄링 전체의 시간 상한을 보장하지 않으며 이 deadline은 이미 지연된 write를 실행하지 않기 위한 제한이다.
 - 질의 인식·owner write 대기·output callback/transport backpressure의 **누적 처리 예산을 startup 전체에서 50ms로 공유**한다. 각 write는 남은 예산만 사용하며 여러 짧은 callback이나 분할된 두 질의도 예산을 다시 시작하지 않는다. 누적 처리 예산을 소진하면 남은 위임을 영구 해제한다. 뒤에 쌓인 질의의 app-side probe가 이미 끝났을 수 있기 때문이다. 무출력 native read 대기는 app-side probe와 같은 시계가 아니므로 차감하지 않는다. 만료된 queued write는 취소 flag로 폐기하고, 진행 중인 native write는 기존 PTY exact-job OS 취소·완료 확인·실패 시 input fault/종료 정책을 재사용한다.
-- startup 전에 OSC 10/11 setter/reset이 관측되면 초기 snapshot은 더 이상 권위가 없으므로 responder를 비활성화한다. 이 경우 복원 색상 최적화보다 잘못된 응답 방지를 우선한다. 다른 터미널 질의는 통과시킨다.
+- startup 전에 OSC 10/11 setter 또는 OSC 110/111 reset이 관측되면 초기 snapshot은 더 이상 권위가 없으므로 responder를 비활성화한다. setter/reset 번호는 xterm처럼 선행 0을 정규화하되 응답을 위임하는 startup query는 여전히 exact marker만 허용한다. 이 경우 복원 색상 최적화보다 잘못된 응답 방지를 우선한다. 다른 터미널 질의는 통과시킨다.
 - visible xterm은 출력 질의를 계속 파싱하지만 ADR-0131 guard가 최초 대응 RGB 응답을 버려 이중 응답과 WebView 지연 뒤 composer 오염을 막는다. guard의 generation 검증·adoption disarm·human/protocol 분리는 유지한다.
 
 ## Alternatives Considered

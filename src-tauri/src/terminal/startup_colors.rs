@@ -103,7 +103,7 @@ impl StartupColorResponder {
                         osc.push(byte);
                     } else {
                         self.overflow = true;
-                        if osc.starts_with(b"10;") || osc.starts_with(b"11;") {
+                        if !osc.contains(&b';') || changes_initial_colors(osc) {
                             self.pending = 0;
                         }
                     }
@@ -131,11 +131,24 @@ impl StartupColorResponder {
             }
             b"10;?" | b"11;?" => {}
             // Shell changed/reset defaults after the snapshot: fail closed.
-            b"110" | b"111" => self.pending = 0,
-            value if value.starts_with(b"110;") || value.starts_with(b"111;") => self.pending = 0,
-            value if value.starts_with(b"10;") || value.starts_with(b"11;") => self.pending = 0,
+            value if changes_initial_colors(value) => self.pending = 0,
             _ => {}
         }
+    }
+}
+
+fn changes_initial_colors(osc: &[u8]) -> bool {
+    let code_end = osc
+        .iter()
+        .position(|byte| *byte == b';')
+        .unwrap_or(osc.len());
+    let code = std::str::from_utf8(&osc[..code_end])
+        .ok()
+        .and_then(|code| code.parse::<u16>().ok());
+    match code {
+        Some(110 | 111) => true,
+        Some(10 | 11) => osc.get(code_end + 1..) != Some(b"?".as_slice()),
+        _ => false,
     }
 }
 
@@ -229,6 +242,10 @@ mod tests {
             "\x1b]11;#ffffff\x07",
             "\x1b]110\x1b\\",
             "\x1b]111\x07",
+            "\x1b]011;#ffffff\x1b\\",
+            "\x1b]0111\x1b\\",
+            "\x1b]0010;#ffffff\x07",
+            "\x1b]00110;ignored\x07",
             "\x1b]10;?;#ffffff\x1b\\",
         ] {
             let mut responder = StartupColorResponder::new(colors());
@@ -246,7 +263,7 @@ mod tests {
     fn unrelated_osc_and_bel_queries_do_not_claim_startup_replies() {
         let mut responder = StartupColorResponder::new(colors());
         assert!(responder
-            .observe(b"\x1b]2;hello\x07\x1b]10;?\x07")
+            .observe(b"\x1b]2;hello\x07\x1b]10;?\x07\x1b]0011;?\x1b\\")
             .is_empty());
         assert_eq!(
             responder.observe(b"\x1b]10;?\x1b\\"),

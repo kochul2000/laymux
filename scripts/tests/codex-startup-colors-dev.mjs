@@ -85,7 +85,11 @@ try {
           while (performance.now() - monotonic < 1600) {
             /* intentional WebView stall */
           }
-          window.codexColorStall = { start, end: Date.now() };
+          window.codexColorStall = {
+            start,
+            end: Date.now(),
+            durationMs: performance.now() - monotonic,
+          };
         }, 300);
       });
     }
@@ -102,7 +106,7 @@ try {
         data: `${config.command || "codex"}\r`,
       });
     }
-    const screen = await until(
+    await until(
       async () => {
         const state = await page.evaluate(async (id) => {
           const { getTerminalSerializeMap, getTerminalInspector } =
@@ -149,8 +153,20 @@ try {
       backgrounds.length,
       `${mode}: composer must have a theme-derived RGB fill`,
     );
-    if (mode === "restore-stall")
-      assert.ok(screen.stall?.end - screen.stall?.start >= 1600);
+    if (mode === "restore-stall") assert.ok(final.stall?.durationMs >= 1600);
+    if (mode === "restore-stall" && process.env.LAYMUX_CODEX_COLOR_LOG) {
+      const log = await fs.readFile(process.env.LAYMUX_CODEX_COLOR_LOG, "utf8");
+      const query = log
+        .split("\n")
+        .find((line) => line.includes(id) && line.includes("]10;?"));
+      const queryAt = Date.parse(
+        query?.match(/\d{4}-\d\d-\d\dT[\d:.]+Z/)?.[0] ?? "",
+      );
+      assert.ok(
+        queryAt >= final.stall.start && queryAt <= final.stall.end,
+        "raw color query must overlap the measured WebView stall",
+      );
+    }
     const screenshot = (await api("/screenshot", {})).path;
     const { data: inventory } = await api("/pty-sessions");
     const owner = inventory.sessions.some(
