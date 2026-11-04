@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { useOsHandoff } from "@/hooks/useOsHandoff";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -23,7 +25,8 @@ import {
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
-import { ArrowLeftIcon, ArrowRightIcon } from "@/components/ui/icons";
+import { ArrowLeftIcon, ArrowRightIcon, FolderOpenIcon } from "@/components/ui/icons";
+import { Button } from "@/components/ui/Button";
 import { FileKindIcon } from "@/components/ui/FileKindIcon";
 import { fileKindColor } from "@/lib/file-kind-icon";
 
@@ -51,6 +54,8 @@ export function FileExplorerView({
   lastCwd,
   onOpenFile,
 }: FileExplorerViewProps) {
+  const { t } = useTranslation("common");
+  const { request: openDirectoryInOs, failureFor } = useOsHandoff();
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.fileExplorer);
@@ -59,6 +64,7 @@ export function FileExplorerView({
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
+  const directoryOpenError = failureFor(currentCwd);
   const [loading, setLoading] = useState(true);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [focusIndex, setFocusIndex] = useState(0);
@@ -751,7 +757,27 @@ export function FileExplorerView({
             {currentCwd || "..."}
           </span>
         )}
+        <Button
+          className="ml-1 shrink-0"
+          icon={<FolderOpenIcon size={12} />}
+          disabled={!currentCwd}
+          title={t(currentCwd ? "osHandoff.openDirectoryTitle" : "osHandoff.directoryUnavailable")}
+          aria-label={t("osHandoff.openDirectory")}
+          data-testid="file-explorer-open-directory"
+          onClick={() => openDirectoryInOs(currentCwd, "open", { isDirectory: true })}
+          onKeyDown={(e) => e.stopPropagation()}
+        />
       </ViewHeader>
+
+      {directoryOpenError && (
+        <div
+          role="alert"
+          className="shrink-0 break-words px-2 text-xs"
+          style={{ color: "var(--red)" }}
+        >
+          {directoryOpenError}
+        </div>
+      )}
 
       <ViewBody ref={listRef} style={listStyle} testId="file-explorer-list">
         {loading ? (
