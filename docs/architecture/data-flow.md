@@ -1244,6 +1244,8 @@ clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy
 
 [ADR-0373](../adr/0373-submitted-shell-input-and-clear-history.md)에 따라 PowerShell도 PSReadLine이 반환한 실제 제출 문자열을 C 다음의 OSC 133 E로 보내 Tab 자동완성·이력 탐색 결과를 반영한다. 표시 사본의 C0/C1 제어문자는 공백으로 바꾸고 최대 16,384 UTF-16 단위로 제한하며 실행 원문은 바꾸지 않는다. Rust가 기존 `command-status.command`로 전달한다. 본문 없는 시작/종료는 기존 입력 시각을 갱신하지 않고, 늦은 키 쓰기 완료는 그 사이 수신한 셸 본문을 덮지 않는다. PSReadLine 없는 셸·임의 TUI 자동완성은 키만으로 보장하지 않는다.
 
+Claude 세션 기록의 슬래시 명령 envelope는 `command-name`과 선택적인 `command-args`에서 제출 문자열(`/명령 인자`)만 복원한다. `command-message`는 표시하지 않으며 태그 순서와 문자열/텍스트 블록 형식을 모두 처리한다. 같은 user role로 저장되는 `local-command-stdout/stderr`는 입력 후보에서 제외한다. 불완전하거나 중복된 envelope는 보정에 사용하지 않고 기존 키 조립 표시를 유지한다. 일반 사용자 본문의 태그는 제거하지 않는다.
+
 명시적인 Ctrl+L·clear/cls/Clear-Host·/clear 제출과 기존 pane/workspace clear의 성공 경로는 활동 종류와 독립적으로 마지막 입력 표시를 지운다. 실패/skip은 유지한다. 작업 상태·결과는 유지하며 활동별 clear 권한 정책도 유지한다. `lastInputClearedAt` 삭제 경계를 데몬/로컬 표시 checkpoint에 보존하고 이전 입력·명령을 숨겨 복원 시 재등장을 막는다. 새 입력은 경계 이후 시각을 갖고, clear 이전/이전 generation의 늦은 입력 완료는 버린다. clear 도중 관측한 새 사용자 입력은 유지한다. PTY 출력의 ED/redraw는 삭제 신호로 쓰지 않는다.
 
 
