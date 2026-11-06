@@ -36,6 +36,8 @@ const original = await page.evaluate(async () => {
   return useWorkspaceStore.getState().activeWorkspaceId;
 });
 const fixture = `selector-tab-${randomUUID().slice(0, 8)}-completion-target.txt`;
+const commandName = `selector-display-${randomUUID().slice(0, 8)}`;
+const commandFile = path.join(".claude", "commands", `${commandName}.md`);
 let workspaceId;
 try {
   await fs.writeFile(fixture, "selector input completion fixture\n", {
@@ -106,6 +108,11 @@ try {
   await waitInput(null);
   const proof = { shellTab: true, shellClear: true, workspaceClear: true };
   if (!shellOnly) {
+    await fs.writeFile(
+      commandFile,
+      "Reply OK without using tools. $ARGUMENTS\n",
+      { flag: "wx" },
+    );
     await submit("claude");
     await page.waitForFunction(
       async (id) => {
@@ -140,6 +147,30 @@ try {
         { timeout: 60000 },
       );
     await waitForIdle();
+    await submit(`/${commandName} display-args`);
+    await page.waitForFunction(
+      async ({ id, command }) => {
+        const { getAgentSessionStates } = await import("/src/lib/tauri-api.ts");
+        const records = await getAgentSessionStates([id], [], [id]);
+        return records[id]?.submittedInput?.text === command;
+      },
+      { id: terminalId, command: `/${commandName} display-args` },
+      { timeout: 30000 },
+    );
+    // Force the correction path to prove that the transcript never injects its XML envelope.
+    await page.evaluate(async (id) => {
+      const { useTerminalStore } =
+        await import("/src/stores/terminal-store.ts");
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo(id, {
+          lastUserInput: "incomplete key reconstruction",
+        });
+    }, terminalId);
+    await waitInput(`/${commandName} display-args`);
+    await waitForIdle();
+    proof.claudeSlashCommand = true;
+    proof.claudeSlashScreenshot = (await api("/screenshot", {})).path;
     const retainedDraft = "Reply OK without using tools. Retained draft";
     await page.keyboard.type(retainedDraft);
     await page.keyboard.press("Control+l");
@@ -193,5 +224,6 @@ try {
   if (original) await api("/workspaces/active", { id: original });
   if (workspaceId) await api(`/workspaces/${workspaceId}`, undefined, "DELETE");
   await fs.unlink(fixture);
+  if (!shellOnly) await fs.rm(commandFile, { force: true });
   await browser.close();
 }

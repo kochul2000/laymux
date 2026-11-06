@@ -334,7 +334,6 @@ mod tests {
 
     #[test]
     fn split_queries_share_the_budget_for_write_wait_and_output_callback() {
-        use std::io::Write;
         struct SlowWriter(Recorder);
         impl std::io::Write for SlowWriter {
             fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {

@@ -78,6 +78,41 @@ pub(super) fn read_last_input(
     last_input(&bytes, start > 0, provider, session_id)
 }
 
+// Claude stores slash submissions as an envelope, in either tag order.
+// Interpret only that complete envelope; ordinary user markup stays literal.
+fn claude_submitted_text(text: &str) -> Option<String> {
+    let mut rest = text.trim();
+    if !rest.starts_with("<command-name>") && !rest.starts_with("<command-message>") {
+        return Some(text.to_owned());
+    }
+    let mut name = None;
+    let mut args = None;
+    let mut message = None;
+    while !rest.is_empty() {
+        let (open, close, slot) = if rest.starts_with("<command-name>") {
+            ("<command-name>", "</command-name>", &mut name)
+        } else if rest.starts_with("<command-args>") {
+            ("<command-args>", "</command-args>", &mut args)
+        } else if rest.starts_with("<command-message>") {
+            ("<command-message>", "</command-message>", &mut message)
+        } else {
+            return None;
+        };
+        let (value, tail) = rest.strip_prefix(open)?.split_once(close)?;
+        if slot.replace(value.trim()).is_some() {
+            return None;
+        }
+        rest = tail.trim_start();
+    }
+    let name = name.filter(|name| {
+        name.starts_with('/') && name.len() > 1 && !name.chars().any(char::is_whitespace)
+    })?;
+    Some(match args {
+        Some(args) if !args.is_empty() => format!("{name} {args}"),
+        _ => name.to_owned(),
+    })
+}
+
 fn last_input(
     bytes: &[u8],
     truncated: bool,
@@ -125,7 +160,16 @@ fn last_input(
                         .collect::<Vec<_>>()
                         .join("\n")
                 };
-                return SubmittedAgentInput::new(&text, &record["timestamp"]);
+                // Local command output is also stored with role=user, but is not input.
+                if text.trim_start().starts_with("<local-command-stdout>")
+                    || text.trim_start().starts_with("<local-command-stderr>")
+                {
+                    continue;
+                }
+                return SubmittedAgentInput::new(
+                    &claude_submitted_text(&text)?,
+                    &record["timestamp"],
+                );
             }
             Provider::Grok => {
                 if record["params"]["sessionId"].as_str() != Some(session_id) {
@@ -225,5 +269,62 @@ mod tests {
         assert!(last_input(bytes.as_bytes(), true, Provider::Grok, "s").is_none());
         let tail = format!("partial\n{bytes}");
         assert!(last_input(tail.as_bytes(), true, Provider::Grok, "s").is_some());
+    }
+
+    #[test]
+    fn claude_command_envelopes_display_the_submitted_command() {
+        for content in [
+            json!("<command-message>watch-review</command-message>\n<command-name>/watch-review</command-name>\n<command-args>all</command-args>"),
+            json!([{"type":"text","text":"<command-name>/watch-review</command-name>\n<command-message>watch-review</command-message>\n<command-args>all</command-args>"}]),
+        ] {
+            let record = json!({"type":"user","sessionId":"s","timestamp":"2026-11-06T00:00:00Z","message":{"role":"user","content":content}});
+            let bytes = format!("{record}\n");
+            assert_eq!(last_input(bytes.as_bytes(), false, Provider::Claude, "s").unwrap().text, "/watch-review all");
+        }
+    }
+
+    #[test]
+    fn claude_command_without_arguments_and_plain_text_are_preserved() {
+        for (text, expected) in [
+            ("<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>", "/model"),
+            ("<command-message>unless-p1-merge</command-message>\n<command-name>/unless-p1-merge</command-name>", "/unless-p1-merge"),
+            ("explain <command-name>/model</command-name>", "explain <command-name>/model</command-name>"),
+            ("<example>ordinary user text</example>", "<example>ordinary user text</example>"),
+        ] {
+            let record = json!({"type":"user","sessionId":"s","timestamp":"2026-11-06T00:00:00Z","message":{"role":"user","content":text}});
+            assert_eq!(last_input(format!("{record}\n").as_bytes(), false, Provider::Claude, "s").unwrap().text, expected);
+        }
+    }
+
+    #[test]
+    fn claude_skips_local_command_output_and_rejects_broken_envelopes() {
+        let command = json!({"type":"user","sessionId":"s","timestamp":"2026-11-06T00:00:00Z","message":{"role":"user","content":"<command-name>/help</command-name>"}});
+        for output in [
+            "<local-command-stdout>help text</local-command-stdout>",
+            "<local-command-stderr>error</local-command-stderr>",
+        ] {
+            let output = json!({"type":"user","sessionId":"s","timestamp":"2026-11-06T00:00:01Z","message":{"role":"user","content":output}});
+            assert_eq!(
+                last_input(
+                    format!("{command}\n{output}\n").as_bytes(),
+                    false,
+                    Provider::Claude,
+                    "s"
+                )
+                .unwrap()
+                .text,
+                "/help"
+            );
+        }
+        for text in [
+            "<command-message>watch-review</command-message>",
+            "<command-name>/watch-review",
+            "<command-name>/watch-review</command-name><command-args>all",
+            "<command-name>/watch-review</command-name><command-name>/other</command-name>",
+            "<command-name>invalid name</command-name>",
+            "<command-name>/watch-review</command-name>unexpected tail",
+        ] {
+            assert!(claude_submitted_text(text).is_none(), "{text}");
+        }
     }
 }
