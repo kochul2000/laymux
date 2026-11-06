@@ -133,19 +133,38 @@ try {
     await page.waitForTimeout(300);
     await page.keyboard.press("Enter");
     await waitInput(prefix + fixture);
-    const waitForIdle = () =>
-      page.waitForFunction(
-        async (id) => {
+    const waitForIdle = async () => {
+      let idleSince;
+      const deadline = Date.now() + 60000;
+      while (Date.now() < deadline) {
+        const idle = await page.evaluate(async (id) => {
           const { useTerminalStore } =
             await import("/src/stores/terminal-store.ts");
-          return ["idle", "ended"].includes(
-            useTerminalStore.getState().instances.find((i) => i.id === id)?.task
-              ?.state,
+          const { terminalTaskPolicy } =
+            await import("/src/lib/terminal-task.ts");
+          const { getTerminalInspector } =
+            await import("/src/lib/terminal-serialize-registry.ts");
+          const { agentClearComposer } =
+            await import("/src/lib/agent-clear-composer.ts");
+          const instance = useTerminalStore
+            .getState()
+            .instances.find((i) => i.id === id);
+          const screen = getTerminalInspector(id)?.(0);
+          return (
+            instance &&
+            terminalTaskPolicy(instance).clearAllowed &&
+            screen &&
+            agentClearComposer(screen, "Claude") === "empty"
           );
-        },
-        terminalId,
-        { timeout: 60000 },
-      );
+        }, terminalId);
+        if (idle) {
+          idleSince ??= Date.now();
+          if (Date.now() - idleSince >= 1000) return;
+        } else idleSince = undefined;
+        await page.waitForTimeout(200);
+      }
+      assert.fail("Claude did not reach a stable idle composer");
+    };
     await waitForIdle();
     await submit(`/${commandName} display-args`);
     await page.waitForFunction(
@@ -161,15 +180,16 @@ try {
     await page.evaluate(async (id) => {
       const { useTerminalStore } =
         await import("/src/stores/terminal-store.ts");
-      useTerminalStore
-        .getState()
-        .updateInstanceInfo(id, {
-          lastUserInput: "incomplete key reconstruction",
-        });
+      useTerminalStore.getState().updateInstanceInfo(id, {
+        lastUserInput: "incomplete key reconstruction",
+      });
     }, terminalId);
     await waitInput(`/${commandName} display-args`);
     await waitForIdle();
     proof.claudeSlashCommand = true;
+    await page
+      .getByText(`/${commandName} display-args`, { exact: true })
+      .scrollIntoViewIfNeeded();
     proof.claudeSlashScreenshot = (await api("/screenshot", {})).path;
     const retainedDraft = "Reply OK without using tools. Retained draft";
     await page.keyboard.type(retainedDraft);
@@ -197,13 +217,16 @@ try {
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
+    // Current Claude accepts its history preview into the editor before submitting it.
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
     await waitInput(retainedDraft + " suffix");
     await waitForIdle();
     const cleared = await api(
       `/panes/${terminalId.replace(/^terminal-/, "")}/clear`,
       {},
     );
-    assert.deepEqual(cleared.cleared, [terminalId]);
+    assert.deepEqual(cleared.cleared, [terminalId], JSON.stringify(cleared));
     await waitInput(null);
     await page.waitForTimeout(1500);
     await waitInput(null);
