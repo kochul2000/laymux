@@ -109,6 +109,28 @@ export interface SubmittedAgentInput {
   timestamp: string;
 }
 
+/** A display observation may only correct the exact successful submission it captured. */
+export function correctTerminalInputFromScreen(
+  id: string,
+  text: string,
+  expected: InputHistoryScope,
+): boolean {
+  const current = currentScope(id, expected);
+  if (
+    !current ||
+    current.lastUserInput !== expected.lastUserInput ||
+    current.lastUserInputAt !== expected.lastUserInputAt ||
+    current.lastInputSubmissionAt !== expected.lastInputSubmissionAt ||
+    current.lastCommandAt !== expected.lastCommandAt
+  )
+    return false;
+  recordTerminalInput(id, text, {
+    ...expected,
+    startedAt: expected.lastUserInputAt ?? expected.startedAt,
+  });
+  return true;
+}
+
 /** Correct a known submission only. Transcript text never starts a task or restores cleared input. */
 export function correctTerminalInputFromAgent(id: string, input: SubmittedAgentInput): void {
   const current = captureInputHistoryScope(id);

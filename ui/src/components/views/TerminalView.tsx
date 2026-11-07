@@ -154,11 +154,14 @@ import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { installNativeCursorSuppression } from "@/lib/native-cursor-suppression";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import { createDirectInputCapture, normalizeSubmittedInput } from "@/lib/terminal-last-input";
+import { completeClaudeSlashInput } from "@/lib/claude-slash-input";
 import {
   captureInputHistoryScope,
   clearTerminalInputHistory,
+  correctTerminalInputFromScreen,
   noteTerminalInputSubmission,
   recordTerminalInput,
+  type InputHistoryScope,
 } from "@/lib/terminal-input-history";
 import {
   createTerminalFocusOwnership,
@@ -3039,7 +3042,11 @@ export function TerminalView({
       if (!oscPath && !shadowCursor.hasSyncFramePosition) return;
       scheduleShadowCursorSync();
     });
+    let slashInputRevision = 0;
+    let inputUsedTab = false;
+    let pendingClaudeSlash: { input: string; scope: InputHistoryScope } | undefined;
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      observeClaudeSlash();
       // ADR-0188/0220: 안정된 화면에서는 밑줄 아래 원문이 달라진 항목만
       // 거둔다. DEC 2026 중간 버퍼는 아직 표시된 화면이 아니므로 보류한다.
       if (syncOutputActiveRef.current) pathLinkRevalidationDeferred = true;
@@ -3766,6 +3773,28 @@ export function TerminalView({
     // additionally cover focus reports that xterm emits without wasUserInput.
     // Without the internal signal, ambiguous live-write data stays human.
     const directInputCapture = createDirectInputCapture();
+    function observeClaudeSlash() {
+      const pending = pendingClaudeSlash;
+      if (!pending) return;
+      const current = captureInputHistoryScope(instanceId);
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      if (
+        Date.now() - pending.scope.startedAt > 15_000 ||
+        instance?.activity?.name !== "Claude" ||
+        !current ||
+        current.generation !== pending.scope.generation ||
+        current.lastInputClearedAt !== pending.scope.lastInputClearedAt ||
+        current.lastUserInput !== pending.scope.lastUserInput ||
+        current.lastInputSubmissionAt !== pending.scope.lastInputSubmissionAt
+      ) {
+        pendingClaudeSlash = undefined;
+        return;
+      }
+      const completed = completeClaudeSlashInput(pending.input, terminal);
+      if (completed === pending.input) return;
+      pendingClaudeSlash = undefined;
+      correctTerminalInputFromScreen(instanceId, completed, pending.scope);
+    }
     let captureResetRevision = captureInputHistoryScope(instanceId)?.inputDraftResetRevision;
     terminal.onData((data) => {
       trace("terminal-onData", {
@@ -3797,11 +3826,22 @@ export function TerminalView({
       }
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
+        pendingClaudeSlash = undefined;
+        const revision = ++slashInputRevision;
         const historyScope = captureInputHistoryScope(instanceId);
         if (captureResetRevision !== historyScope?.inputDraftResetRevision)
           directInputCapture.reset();
         captureResetRevision = historyScope?.inputDraftResetRevision;
+        inputUsedTab ||= data.includes("\t");
         const submittedInputs = directInputCapture.push(data);
+        const submittedWithTab = inputUsedTab;
+        if (/[\r\n\x03]/u.test(data)) inputUsedTab = false;
+        const rawInput = submittedInputs.at(-1);
+        const isClaude =
+          useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.activity?.name ===
+          "Claude";
+        const completedInput =
+          rawInput && isClaude ? completeClaudeSlashInput(rawInput, terminal) : rawInput;
         const byteLength = textEncoder.encode(data).length;
         const attempt = beginTerminalInputDelivery(instanceId, byteLength);
         void writeToTerminal(instanceId, data).then(
@@ -3809,12 +3849,25 @@ export function TerminalView({
             settleTerminalInputDelivery(attempt, "succeeded");
             if (cancelled) return;
             if (data.includes("\x0c")) clearTerminalInputHistory(instanceId, historyScope);
-            const lastUserInput = submittedInputs.at(-1);
+            const lastUserInput = completedInput;
             if (!lastUserInput) {
               if (/[\r\n]/u.test(data)) noteTerminalInputSubmission(instanceId, historyScope);
               return;
             }
             recordTerminalInput(instanceId, lastUserInput, historyScope);
+            if (
+              isClaude &&
+              submittedWithTab &&
+              rawInput?.startsWith("/") &&
+              rawInput === completedInput &&
+              revision === slashInputRevision
+            ) {
+              const scope = captureInputHistoryScope(instanceId);
+              if (scope && scope.lastUserInput === normalizeSubmittedInput(rawInput)) {
+                pendingClaudeSlash = { input: rawInput, scope };
+                observeClaudeSlash();
+              }
+            }
           },
           (error: unknown) => {
             if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
