@@ -67,9 +67,19 @@ try {
       { timeout: 60000 },
     );
   await waitComposer();
-  const waitInput = (expected) =>
+  const boundary = () =>
+    page.evaluate(async (id) => {
+      const { useTerminalStore } =
+        await import("/src/stores/terminal-store.ts");
+      const i = useTerminalStore.getState().instances.find((i) => i.id === id);
+      return {
+        submission: i.lastInputSubmissionAt ?? 0,
+        cleared: i.lastInputClearedAt ?? 0,
+      };
+    }, terminalId);
+  const waitInput = (expected, before) =>
     page.waitForFunction(
-      async ({ id, expected }) => {
+      async ({ id, expected, before }) => {
         const { useTerminalStore } =
           await import("/src/stores/terminal-store.ts");
         const { selectTerminalLastInput } =
@@ -80,21 +90,24 @@ try {
         return (
           i &&
           (expected === null
-            ? !selectTerminalLastInput(i) && i.lastInputClearedAt > 0
-            : selectTerminalLastInput(i) === expected)
+            ? !selectTerminalLastInput(i) &&
+              i.lastInputClearedAt > before.cleared
+            : selectTerminalLastInput(i) === expected &&
+              i.lastInputSubmissionAt > before.submission)
         );
       },
-      { id: terminalId, expected },
+      { id: terminalId, expected, before },
       { timeout: 5000 },
     );
   const proof = {};
   for (const delay of [500, 0]) {
+    const before = await boundary();
     await editor.focus();
     await page.keyboard.type("/mo");
     await page.keyboard.press("Tab");
     if (delay) await page.waitForTimeout(delay);
     await page.keyboard.press("Enter");
-    await waitInput("/model");
+    await waitInput("/model", before);
     const record = await page.evaluate(async (id) => {
       const { getAgentSessionStates } = await import("/src/lib/tauri-api.ts");
       return (await getAgentSessionStates([id], [], [id]))[id];
@@ -106,8 +119,10 @@ try {
     );
     if (delay) {
       await page.waitForTimeout(16000);
-      await waitInput("/model");
-      await page.getByTestId("pane-last-input-" + terminalId).scrollIntoViewIfNeeded();
+      await waitInput("/model", before);
+      await page
+        .getByTestId("pane-last-input-" + terminalId)
+        .scrollIntoViewIfNeeded();
       proof.modelScreenshot = (await api("/screenshot", {})).path;
     }
     proof[delay ? "modelTab" : "fastModelTab"] = true;
@@ -117,11 +132,12 @@ try {
     await page.keyboard.press("Control+u");
   }
   for (const delay of [500, 0]) {
+    const before = await boundary();
     await page.keyboard.type("/cl");
     await page.keyboard.press("Tab");
     if (delay) await page.waitForTimeout(delay);
     await page.keyboard.press("Enter");
-    await waitInput(null);
+    await waitInput(null, before);
     await waitComposer();
     proof[delay ? "clearTab" : "fastClearTab"] = true;
   }

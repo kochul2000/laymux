@@ -1,6 +1,6 @@
 # 0376. Claude 슬래시 명령의 완성된 이름을 제출 경계에서 관측한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-07
 - Source: 사용자 재현(`/mo` → Tab → Enter 후 `/mo` 잔상); [ADR-0373](0373-submitted-shell-input-and-clear-history.md); [data-flow §9](../architecture/data-flow.md)
 - 관계: ADR-0373의 세션 기록 전용 보정 범위를 Claude 슬래시 명령 이름에 한해 확장한다.
@@ -16,7 +16,7 @@
 **사람이 제출하는 Claude 슬래시 명령의 이름은 현재 primary 입력창과 해당 제출 직후의 알려진 로컬 명령 대화상자에서 보수적으로 보정한다.**
 
 - 마지막 입력·제출 경계의 소유권은 기존 terminal store에 둔다. 성공한 사람 입력 쓰기에만 적용하고 PTY로 보내는 바이트는 바꾸지 않는다.
-- viewport 안의 알려진 Claude 입력창 구조만 읽는다. 키 조립 명령의 접두사와 일치하는 완성 이름만 대체하며 인자는 키 조립 값을 보존한다. placeholder와 임의 본문은 읽지 않는다. alternate buffer·wrap·모호한 구조는 거부한다.
+- viewport 안의 알려진 Claude 입력창 구조만 읽는다. 키 조립 명령의 접두사와 일치하는 완성 이름만 대체하며 인자는 키 조립 값을 보존한다. placeholder와 임의 본문은 읽지 않는다. alternate buffer·wrap·모호한 구조는 거부하며 동기 출력 프레임 중에는 판독을 보류한다.
 - 빠른 Tab→Enter에서 redraw가 늦으면 같은 제출의 parsed output으로 나타난 알려진 `/model` 대화상자 echo를 이용한다. 다음 사람 입력·PTY 교체·삭제 경계·새 제출·15초 만료는 대기 중 관측을 폐기한다. 원래 제출 시각은 보존한다.
 - 이 관측은 표시용이다. 작업 상태·권한·실제 clear 실행을 승인하지 않는다. 제출 전에 확인한 완성 이름이 `/clear`이면 기존 성공한 clear 제출의 표시 삭제 정책을 따른다. 기록 보정은 기존 경계를 유지한다.
 - 전송 실패·미지원 화면은 키 조립 표시와 기존 기록 보정으로 fallback한다. 새 IPC·설정·영속 필드·OS/WSL 조회는 추가하지 않는다.

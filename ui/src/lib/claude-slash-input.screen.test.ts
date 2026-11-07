@@ -51,3 +51,17 @@ it("과거 명령·일반 본문·접두사 불일치·alternate는 보정하지
     s.dispose();
   }
 });
+
+it("DEC2026의 중간 명령은 확정하지 않고 닫힌 프레임의 완성 이름을 읽는다", async () => {
+  const s = createScreenTerminal({ cols: 96, rows: 12 });
+  try {
+    await s.write("\x1b[?2026h" + composer("/mod"));
+    expect(completeClaudeSlashInput("/mo ", s.terminal)).toBe("/mo ");
+    await s.write("\x1b[H\x1b[2J" + composer("/model"));
+    expect(completeClaudeSlashInput("/mo ", s.terminal)).toBe("/mo ");
+    await s.write("\x1b[?2026l");
+    expect(completeClaudeSlashInput("/mo ", s.terminal)).toBe("/model ");
+  } finally {
+    s.dispose();
+  }
+});

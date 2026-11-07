@@ -3043,6 +3043,7 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     let slashInputRevision = 0;
+    let inputUsedTab = false;
     let pendingClaudeSlash: { input: string; scope: InputHistoryScope } | undefined;
     const writeParsedDisposable = terminal.onWriteParsed(() => {
       observeClaudeSlash();
@@ -3831,7 +3832,10 @@ export function TerminalView({
         if (captureResetRevision !== historyScope?.inputDraftResetRevision)
           directInputCapture.reset();
         captureResetRevision = historyScope?.inputDraftResetRevision;
+        inputUsedTab ||= data.includes("\t");
         const submittedInputs = directInputCapture.push(data);
+        const submittedWithTab = inputUsedTab;
+        if (/[\r\n\x03]/u.test(data)) inputUsedTab = false;
         const rawInput = submittedInputs.at(-1);
         const isClaude =
           useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.activity?.name ===
@@ -3853,6 +3857,7 @@ export function TerminalView({
             recordTerminalInput(instanceId, lastUserInput, historyScope);
             if (
               isClaude &&
+              submittedWithTab &&
               rawInput?.startsWith("/") &&
               rawInput === completedInput &&
               revision === slashInputRevision

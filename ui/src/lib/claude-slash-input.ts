@@ -6,7 +6,9 @@ import type { TerminalBufferDump } from "./terminal-serialize-registry";
 export function completeClaudeSlashInput(input: string, terminal: Terminal): string {
   const typed = /^(\/[\w:./-]+)(\s.*)?$/u.exec(input);
   const buffer = terminal.buffer.active;
-  if (!typed || buffer.type !== "normal") return input;
+  const synchronized = (terminal as Terminal & { modes?: { synchronizedOutputMode?: boolean } })
+    .modes?.synchronizedOutputMode;
+  if (!typed || buffer.type !== "normal" || synchronized) return input;
   const lines = Array.from({ length: terminal.rows }, (_, row) => {
     const index = buffer.baseY + row;
     const line = buffer.getLine(index);
