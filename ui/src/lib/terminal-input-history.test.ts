@@ -6,6 +6,7 @@ import {
   clearTerminalInputHistory,
   recordTerminalInput,
   correctTerminalInputFromAgent,
+  correctTerminalInputFromScreen,
   noteTerminalInputSubmission,
 } from "./terminal-input-history";
 
@@ -136,4 +137,28 @@ it("rejects old agent messages after clear and after a newer user submission", (
   clearTerminalInputHistory("t");
   correctTerminalInputFromAgent("t", { text: "old", timestamp: String(timestamp + 10) });
   expect(current().lastUserInput).toBeUndefined();
+});
+
+it("화면 보정은 제출 시각을 보존하고 새 입력과 clear를 덮지 않는다", () => {
+  recordTerminalInput("t", "/mo");
+  const scope = captureInputHistoryScope("t")!;
+  expect(correctTerminalInputFromScreen("t", "/model", scope)).toBe(true);
+  expect(current().lastUserInput).toBe("/model");
+  expect(current().lastUserInputAt).toBe(scope.lastUserInputAt);
+  expect(current().lastInputSubmissionAt).toBe(scope.lastInputSubmissionAt);
+  recordTerminalInput("t", "next input");
+  expect(correctTerminalInputFromScreen("t", "/model", scope)).toBe(false);
+  expect(current().lastUserInput).toBe("next input");
+  const newer = captureInputHistoryScope("t")!;
+  clearTerminalInputHistory("t");
+  expect(correctTerminalInputFromScreen("t", "/model", newer)).toBe(false);
+  expect(selectTerminalLastInput(current())).toBeUndefined();
+});
+
+it("같은 제출의 화면에서 확인한 clear는 부분 입력 표시를 지운다", () => {
+  recordTerminalInput("t", "/cl");
+  const scope = captureInputHistoryScope("t")!;
+  expect(correctTerminalInputFromScreen("t", "/clear", scope)).toBe(true);
+  expect(selectTerminalLastInput(current())).toBeUndefined();
+  expect(current().inputDraftResetRevision).toBe(1);
 });

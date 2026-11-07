@@ -1246,6 +1246,8 @@ clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy
 
 Claude 세션 기록의 슬래시 명령 envelope는 `command-name`과 선택적인 `command-args`에서 제출 문자열(`/명령 인자`)만 복원한다. `command-message`는 표시하지 않으며 태그 순서와 문자열/텍스트 블록 형식을 모두 처리한다. 같은 user role로 저장되는 `local-command-stdout/stderr`는 입력 후보에서 제외한다. 불완전하거나 중복된 envelope는 보정에 사용하지 않고 기존 키 조립 표시를 유지한다. 일반 사용자 본문의 태그는 제거하지 않는다.
 
+[ADR-0376](../adr/0376-claude-slash-command-display-observation.md)에 따라 Claude 슬래시 명령 이름은 사람의 성공한 제출 경계에서 보이는 primary 입력창으로도 보정한다. `completeClaudeSlashInput`은 viewport의 단일 행 입력창에서 키 조립 명령 접두사와 일치하는 완성 이름만 선택하며, 인자·placeholder는 화면에서 가져오지 않는다. 빠른 Tab→Enter로 redraw가 늦으면 같은 제출의 `onWriteParsed`에서 알려진 `/model` 선택창의 제출 echo를 관측한다. 다음 사람 입력·15초 만료·PTY generation·입력/삭제 경계 변경은 대기를 폐기한다. `correctTerminalInputFromScreen`은 제출 시각을 보존하고 새로운 입력/명령을 덮지 않는다. alternate buffer·wrapped/미지원 화면은 기존 기록 보정으로 fallback한다. 화면 관측은 표시용이며 PTY 입력 바이트·작업·권한 정책은 바꾸지 않는다. 제출 전에 확인한 `/clear`는 기존 성공한 clear 입력의 표시 삭제 경로를 따른다.
+
 명시적인 Ctrl+L·clear/cls/Clear-Host·/clear 제출과 기존 pane/workspace clear의 성공 경로는 활동 종류와 독립적으로 마지막 입력 표시를 지운다. 실패/skip은 유지한다. 작업 상태·결과는 유지하며 활동별 clear 권한 정책도 유지한다. `lastInputClearedAt` 삭제 경계를 데몬/로컬 표시 checkpoint에 보존하고 이전 입력·명령을 숨겨 복원 시 재등장을 막는다. 새 입력은 경계 이후 시각을 갖고, clear 이전/이전 generation의 늦은 입력 완료는 버린다. clear 도중 관측한 새 사용자 입력은 유지한다. PTY 출력의 ED/redraw는 삭제 신호로 쓰지 않는다.
 
 
