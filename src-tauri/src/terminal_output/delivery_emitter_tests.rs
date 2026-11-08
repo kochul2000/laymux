@@ -84,6 +84,19 @@ fn receipted_envelope_cannot_rearm_a_synchronous_emitter_call() {
         TerminalOutputReceiptCompletion::Accepted
     );
 
+    // 채널 수신은 emitter 콜백의 반환보다 먼저 일어날 수 있다. 기존 호출이
+    // 실제로 끝난 뒤의 상태를 기준으로 재무장 거부를 검사한다.
+    let (state, _) = delivery
+        .inner
+        .changed
+        .wait_timeout_while(
+            delivery.inner.state.lock().unwrap(),
+            Duration::from_secs(1),
+            |state| state.emitter_call_expires_at.is_some(),
+        )
+        .unwrap();
+    assert!(state.emitter_call_expires_at.is_none());
+    drop(state);
     assert!(
         !super::super::delivery_worker::arm_emitter_call(&delivery.inner, &envelope_identity,)
             .unwrap()

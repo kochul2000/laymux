@@ -36,7 +36,7 @@ try {
   const postpone = page.getByRole("button", { name: "나중에", exact: true });
   if (await postpone.isVisible()) await postpone.click();
   await api("/workspaces/active", { id: report.workspaceId });
-  await api("/panes/layers/activate", { layerId: report.paneId });
+  await page.getByTestId(`pane-stack-tab-${report.paneId}`).click();
   const view = page.locator(
     `[data-testid="view-worktree"][data-pane-id="${report.paneId}"]`,
   );
@@ -50,7 +50,9 @@ try {
         );
         return (
           view?.querySelector("[data-worktree-path]") &&
-          !view.textContent?.includes("내용 검사 중")
+          !/내용 검사 중|목록을 읽고|기존 목록을 표시하며/.test(
+            view.textContent,
+          )
         );
       },
       report.paneId,
@@ -62,6 +64,7 @@ try {
     action: "filter",
     filter: "candidates",
   });
+  await view.locator("[data-worktree-path]").nth(1).waitFor();
   const candidatePaths = await view
     .locator("[data-worktree-path]")
     .evaluateAll((rows) =>
@@ -88,7 +91,7 @@ try {
     .getByRole("button", { name: /실행 중/ });
   await usageButton.click();
   await view.waitFor({ state: "hidden" });
-  await api("/panes/layers/activate", { layerId: report.paneId });
+  await page.getByTestId(`pane-stack-tab-${report.paneId}`).click();
   await view.waitFor();
   await api("/ui/worktrees", {
     paneId: report.paneId,
@@ -111,6 +114,7 @@ try {
   await settled();
   await view.locator("[data-worktree-path]").first().scrollIntoViewIfNeeded();
   const screenshot = await api("/screenshot", undefined, "POST");
+  delete screenshot.dataUrl;
   await page.screenshot({ path: path.join(artifacts, "overview.png") });
   const result = {
     results: [

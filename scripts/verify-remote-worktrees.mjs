@@ -154,6 +154,8 @@ const session = {
 const results = [];
 let browser;
 let leaseId;
+let remotePage;
+const pageErrors = [];
 async function remote(route, body, expected = 200, auth = true) {
   const response = await fetch(host + "/remote/v1" + route, {
     method: "POST",
@@ -170,10 +172,12 @@ async function remote(route, body, expected = 200, auth = true) {
     : text;
 }
 try {
-  await invoke("set_remote_runtime_access", {
+  const accessStatus = await invoke("set_remote_runtime_access", {
     enabled: true,
     authToken: session.token,
   });
+  // 저장된 토큰이 있으면 runtime override보다 우선한다. 실제 유효 토큰으로 접속한다.
+  session.token = accessStatus.effectiveAuthToken;
   session.workspace = (
     await api("/workspaces", {
       name: "remote-worktree-demo",
@@ -242,7 +246,7 @@ try {
     hasTouch: true,
   });
   const page = await context.newPage();
-  const pageErrors = [];
+  remotePage = page;
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const claimed = page.waitForResponse(
     (response) =>
@@ -315,11 +319,9 @@ try {
   );
   results.push("실제 Remote API 제거·브랜치 보존");
   const row = (tree) =>
-    page.locator("button[data-worktree-path]").filter({
-      has: page.locator("span.worktree-path", {
-        hasText: tree.replaceAll("\\", "/"),
-      }),
-    });
+    page.locator(
+      `button[data-worktree-path=${JSON.stringify(tree.replaceAll("\\", "/"))}]`,
+    );
   await page.locator("#worktreesHeader").click();
   await page.waitForFunction(
     () =>
@@ -353,7 +355,8 @@ try {
     path: path.join(artifacts, "mobile-file-viewer.png"),
   });
   await page.locator("#fileViewerClose").click();
-  await page.locator("#worktreesHeader").click();
+  await page.locator("#worktreesOverlay").waitFor();
+  await page.getByRole("button", { name: "상세 닫기", exact: true }).click();
   await row(session.fixture.paths["done-ui"]).click();
   await page
     .getByRole("button", { name: "워크트리 제거", exact: true })
@@ -506,6 +509,20 @@ try {
     ),
   );
 } catch (error) {
+  if (remotePage) {
+    await remotePage
+      .screenshot({ path: path.join(artifacts, "failure.png") })
+      .catch(() => {});
+    console.error(
+      JSON.stringify({
+        pageErrors,
+        errors: await remotePage
+          .locator(".error")
+          .allTextContents()
+          .catch(() => []),
+      }),
+    );
+  }
   if (leaseId) await remote("/session/release", { leaseId }).catch(() => {});
   await restore(session).catch(() => {});
   if (session.workspace)

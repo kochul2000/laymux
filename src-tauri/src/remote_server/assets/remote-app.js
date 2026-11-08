@@ -449,13 +449,15 @@ import {
         });
         const worktreeView = createRemoteWorktrees({
           api: remoteFetch,
-          getContext: () => ({ leaseId, terminalId: activeTerminalId, cwd: terminalInfoById.get(activeTerminalId)?.cwd }),
+          getContext: () => ({ leaseId, terminalId: activeTerminalId, cwd: terminalInfoById.get(activeTerminalId)?.cwd,
+            usageRevision: [...terminalInfoById.keys()].sort().join("\0") }),
           copy: writeClipboardText,
           canOpenFile: () => Boolean(leaseId && fileViewerToken),
           openFile: (path) => openFileViewerOverlay(path, undefined, true),
           focusUsage: (usage) => selectTerminal(usage.terminalId, { refreshNavigation: true, focusDockHost: true }),
           beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); if (memoView.isOpen()) memoView.close(); setNavigationOpen(false); },
           afterClose: () => focusCurrentInputSurface(),
+          onStateChange: () => syncNavigationViewPolling(),
         });
         let remoteDisplaySettings = loadDeviceDisplaySettings();
         let resumeToken = null;
@@ -9105,6 +9107,8 @@ import {
           workspaceCloseToasts.sync(data.pendingWorkspaceCloses, data.workspaceCloseServerTime);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
+          // drawer를 다시 그리지 않는 metadata 갱신도 CWD 소유권을 갱신한다.
+          worktreeView.syncContext();
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
           // Host rebinds arrive with every snapshot (ADR-0269).
           renderKeyboardShortcutList();
@@ -9119,6 +9123,7 @@ import {
 
         function navigationViewPollingNeeded() {
           return document.querySelector(".app").classList.contains("nav-open") ||
+            worktreeView.isOpen() || worktreeView.isSuspended() ||
             Boolean(activeTerminalId && navigationState?.paneLinkEnabled !== false);
         }
 

@@ -12,6 +12,7 @@ export function createRemoteWorktrees({
   focusUsage,
   beforeOpen,
   afterClose,
+  onStateChange = () => {},
 }) {
   const $ = (id) => document.getElementById(id);
   const overlay = $("worktreesOverlay");
@@ -447,6 +448,7 @@ export function createRemoteWorktrees({
     beforeOpen();
     suspended = false;
     overlay.hidden = false;
+    onStateChange();
     filter = "all";
     notice = null;
     void refresh();
@@ -463,17 +465,20 @@ export function createRemoteWorktrees({
     confirming = false;
     removing = false;
     afterClose();
+    onStateChange();
   }
   function syncContext() {
-    if ((!isOpen() && !suspended) || matchesContext(context)) return;
+    if (!isOpen() && !suspended) return;
     const next = getContext();
+    const sameTarget = matchesContext(context);
+    if (sameTarget && next.usageRevision === context?.usageRevision) return;
     if (
       !next.leaseId ||
       next.leaseId !== context?.leaseId ||
       next.terminalId !== context?.terminalId
     )
       close();
-    else if (suspended) close();
+    else if (suspended && !sameTarget) close();
     else {
       notice = null;
       void refresh();
@@ -514,6 +519,7 @@ export function createRemoteWorktrees({
     if (!isOpen() || !matchesContext(context)) return;
     suspended = true;
     overlay.hidden = true;
+    onStateChange();
   }
   function resume() {
     if (!suspended) return false;
@@ -523,6 +529,7 @@ export function createRemoteWorktrees({
     }
     suspended = false;
     overlay.hidden = false;
+    onStateChange();
     detail.querySelector("button")?.focus({ preventScroll: true });
     return true;
   }

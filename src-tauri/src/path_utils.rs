@@ -189,7 +189,9 @@ pub fn resolve_path_for_windows(path: &str, wsl_distro: Option<&str>) -> String 
 /// Resolve a path supplied to a file command (address bar, listing, viewer) to a
 /// Windows-accessible path, applying one shared WSL-distro inference rule:
 ///
-/// - an explicit `wsl_distro` always wins;
+/// - a Windows UNC address already names its host/share; forward slashes are
+///   normalized before any guest-path inference;
+/// - for a guest path, an explicit `wsl_distro` always wins;
 /// - otherwise, on Windows, a Linux-looking path (`/...` that is not `/mnt/...`)
 ///   auto-detects the default distro so `\\wsl.localhost\<distro>\...` resolves.
 ///
@@ -197,6 +199,12 @@ pub fn resolve_path_for_windows(path: &str, wsl_distro: Option<&str>) -> String 
 /// `read_file_for_viewer` from drifting — if their distro inference diverged, a
 /// path could `stat` as existing yet fail to open (or vice versa). (#282)
 pub fn resolve_address_path(path: &str, wsl_distro: Option<&str>) -> String {
+    // Worktree/Git 주소는 forward-slash UNC를 사용한다. 이미 host와 배포판이
+    // 정해진 주소를 bare guest 경로로 오인해 기본 배포판을 다시 붙이지 않는다.
+    #[cfg(windows)]
+    if path.starts_with("//") {
+        return path.replace('/', "\\");
+    }
     let distro = wsl_distro.map(str::to_string).or_else(|| {
         if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
             get_default_wsl_distro()
@@ -484,6 +492,25 @@ mod tests {
     fn resolve_address_path_windows_passthrough() {
         // Already-Windows paths pass through unchanged regardless of distro.
         assert_eq!(resolve_address_path("C:\\Users", None), "C:\\Users");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn qualified_forward_unc_keeps_its_host_and_distribution() {
+        for (input, expected) in [
+            (
+                "//wsl.localhost/Debian/home/한글 폴더/README.md",
+                "\\\\wsl.localhost\\Debian\\home\\한글 폴더\\README.md",
+            ),
+            (
+                "//wsl$/Debian/home/file.txt",
+                "\\\\wsl$\\Debian\\home\\file.txt",
+            ),
+            ("//server/share/file.txt", "\\\\server\\share\\file.txt"),
+        ] {
+            assert_eq!(resolve_address_path(input, Some("Other")), expected);
+            assert_eq!(resolve_address_path(input, None), expected);
+        }
     }
 
     #[test]

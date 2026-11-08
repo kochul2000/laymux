@@ -11,6 +11,25 @@ struct Source {
     host: InitialExecutionHost,
 }
 
+/// Resolve the distribution before turning a guest CWD into a host address.
+pub(crate) fn resolve_distro(
+    stored: Option<&str>,
+    command_line: &str,
+    default_distro: impl FnOnce() -> Option<String>,
+) -> Result<Option<String>, String> {
+    let (distro, needs_default) = crate::wsl_probe::terminal_distro_target(stored, command_line)?;
+    if !needs_default {
+        return Ok(distro);
+    }
+    // A missing selector means the default only for a WSL launcher. Unknown
+    // native POSIX paths must not be attributed to an arbitrary guest.
+    let target = command_line.split_whitespace().next();
+    if InitialExecutionHost::classify_spawn_target(target, true) != InitialExecutionHost::Wsl {
+        return Ok(None);
+    }
+    Ok(default_distro().filter(|name| crate::wsl_probe::is_safe_distro_name(name)))
+}
+
 pub fn resolve_working_dir(
     state: &AppState,
     working_dir: &str,
@@ -60,9 +79,10 @@ fn qualify(working_dir: &str, source: Option<&Source>, windows: bool) -> Result<
                 "WSL 경로는 원본 터미널 또는 배포판을 포함한 UNC 경로가 필요합니다.".into(),
             )
         })?;
-        let (distro, _) = crate::wsl_probe::terminal_distro_target(
+        let distro = resolve_distro(
             source.distro.as_deref(),
             &source.command_line,
+            crate::path_utils::get_default_wsl_distro,
         )
         .map_err(AppError::Other)?;
         let distro = distro.ok_or_else(|| {
@@ -76,6 +96,55 @@ fn qualify(working_dir: &str, source: Option<&Source>, windows: bool) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_wsl_resolves_the_default_distribution() {
+        for command in ["wsl.exe", "wsl", "C:\\Windows\\System32\\WSL.EXE -u user"] {
+            assert_eq!(
+                resolve_distro(None, command, || Some("Ubuntu".into())).unwrap(),
+                Some("Ubuntu".into()),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn reported_and_explicit_distributions_never_query_the_default() {
+        for (stored, command, expected) in [
+            (Some("Debian"), "wsl.exe -d Ubuntu", "Debian"),
+            (None, "wsl.exe -d Debian", "Debian"),
+            (None, "wsl.exe --distribution=Debian", "Debian"),
+        ] {
+            assert_eq!(
+                resolve_distro(stored, command, || panic!("default must not be queried")).unwrap(),
+                Some(expected.into())
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_distribution_never_falls_back_to_the_default() {
+        for (stored, command) in [
+            (Some("bad/name"), "wsl.exe"),
+            (None, "wsl.exe -d"),
+            (None, "wsl.exe -d bad/name"),
+        ] {
+            assert!(resolve_distro(stored, command, || panic!("invalid target")).is_err());
+        }
+    }
+
+    #[test]
+    fn missing_or_unsafe_default_and_native_commands_stay_unresolved() {
+        assert_eq!(resolve_distro(None, "wsl.exe", || None).unwrap(), None);
+        assert_eq!(
+            resolve_distro(None, "wsl.exe", || Some("bad/name".into())).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_distro(None, "powershell.exe", || panic!("native command")).unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn posix_cwd_is_bound_to_its_source_distribution_not_the_default() {

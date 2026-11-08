@@ -226,7 +226,6 @@ assert.equal(await view.getByTestId("worktree-remove").isDisabled(), true);
 await api("/screenshot", undefined, "POST");
 await page.screenshot({ path: path.join(artifacts, "dirty-detail.png") });
 results.push("Automation 상세 선택·변경 파일 제거 버튼 비활성");
-await view.locator("summary").click();
 await view
   .getByRole("button", { name: "변경 · README.md", exact: true })
   .click();
@@ -264,7 +263,10 @@ const inUse = snapshot.worktrees.find(
   (row) => path.resolve(row.path) === path.resolve(fixture.paths["in-use"]),
 ).path;
 await api("/ui/worktrees", { paneId, action: "select", path: inUse });
-await view.getByRole("button", { name: "새 터미널", exact: true }).click();
+await view
+  .getByTestId("worktree-detail")
+  .getByRole("button", { name: "새 터미널", exact: true })
+  .click();
 let usageDetail;
 for (let attempt = 0; attempt < 40; attempt++) {
   usageDetail = await inspect(fixture.paths["in-use"]);
@@ -278,7 +280,7 @@ assert.ok(
 assert.ok(usageDetail.blockers.includes("in_use"));
 await remove(fixture.paths["in-use"], usageDetail.worktree.head, 409);
 results.push("실제 새 터미널 CWD·live 사용 정보·사용 중 제거 거부");
-await api("/panes/layers/activate", { layerId: paneId });
+await page.getByTestId(`pane-stack-tab-${paneId}`).click();
 await api("/ui/worktrees", { paneId, action: "refresh" });
 await view.waitFor();
 await page.waitForFunction((id) => {
