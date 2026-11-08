@@ -17,11 +17,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { chromium } from "../ui/node_modules/playwright-core/index.mjs";
+import { assertSetupMayStart } from "./verify-worktree-matrix-session.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const artifacts = path.join(root, ".screenshots/worktree-matrix");
 const stateFile = path.join(artifacts, "session.json");
 const host = "http://127.0.0.1:19281";
+// 원본 복원 기록은 health/CDP 접속이나 앱 상태 변경보다 먼저 보호한다.
+if (process.argv.includes("--setup")) await assertSetupMayStart(stateFile);
 await mkdir(artifacts, { recursive: true });
 const normalize = (value) =>
   value
