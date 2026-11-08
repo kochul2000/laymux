@@ -99,7 +99,13 @@ pub fn collect_usage(state: &AppState) -> Result<UsageSnapshot, AppError> {
     };
     let inventory = pty_daemon::inventory(&known).map_err(AppError::Other)?;
     Ok(resolve_usage_paths(
-        assemble_usage(live, &settings, &inventory, cfg!(windows)),
+        assemble_usage(
+            live,
+            &settings,
+            &inventory,
+            cfg!(windows),
+            crate::path_utils::get_default_wsl_distro,
+        ),
         crate::worktree::canonicalize_host_path,
     ))
 }
@@ -147,6 +153,7 @@ fn assemble_usage(
     settings: &Settings,
     inventory: &PtySessionInventory,
     windows: bool,
+    default_distro: impl Fn() -> Option<String>,
 ) -> UsageSnapshot {
     let views = saved_views(settings);
     let by_terminal: HashMap<_, _> = views
@@ -176,6 +183,7 @@ fn assemble_usage(
                     terminal.distro.as_deref(),
                     &terminal.command_line,
                     windows,
+                    &default_distro,
                 )
             });
         match cwd {
@@ -237,7 +245,13 @@ fn assemble_usage(
         else {
             continue;
         };
-        match local_path(cwd, view.view["wslDistro"].as_str(), command_line, windows) {
+        match local_path(
+            cwd,
+            view.view["wslDistro"].as_str(),
+            command_line,
+            windows,
+            &default_distro,
+        ) {
             Ok(cwd) => usage.push(view_usage(Some(view), cwd, UsageKind::Saved)),
             Err(error) => warnings.push(format!("{id} (복원 대상): {error}")),
         }
@@ -327,6 +341,7 @@ fn local_path(
     distro: Option<&str>,
     command_line: &str,
     windows: bool,
+    default_distro: impl FnOnce() -> Option<String>,
 ) -> Result<String, String> {
     if cwd.is_empty() {
         return Err("CWD가 비어 있습니다".into());
@@ -357,7 +372,7 @@ fn local_path(
         return Ok(native.replace('\\', "/"));
     }
     if path.starts_with('/') {
-        let (distro, _) = crate::wsl_probe::terminal_distro_target(distro, command_line)?;
+        let distro = crate::worktree_context::resolve_distro(distro, command_line, default_distro)?;
         let distro = distro.ok_or("WSL 배포판을 확인할 수 없어 CWD를 연결하지 않았습니다")?;
         return Ok(format!("//wsl.localhost/{distro}{path}"));
     }

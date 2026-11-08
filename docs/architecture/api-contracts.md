@@ -347,7 +347,7 @@ PC의 목록은 첫 줄에 폴더 말단·브랜치, 둘째 줄에 디렉터리 
 
 주 버튼과 메뉴 항목은 같은 2줄 표시를 사용한다. 첫 줄은 기존 selector의 `워크스페이스 번호·이름`, 둘째 줄은 해당 pane의 `미니맵·터미널 이름·활동 칩·경로·상태 아이콘` 한 줄이다. `WorkspaceIdentity`와 `WorkspaceTerminalSummary`를 WorkspaceSelectorView와 공유하므로 글꼴·굵기·크기·색상·간격·표시 설정을 동일하게 적용한다. 선택지의 활성색·밝기는 현재 포커스된 pane(슬롯의 활성 레이어 또는 dock pane)을 기준으로 적용하며 같은 workspace의 다른 pane을 함께 강조하지 않는다. 워크스페이스 번호는 selector의 정렬·숨김을 반영하며, 숨겨진 workspace나 dock에는 임의의 번호를 붙이지 않는다. pane 번호와 저장/백그라운드 상태는 tooltip에서 확인한다. pane별 정보를 디렉터리 상태 줄에 나열하지 않는다. 이동·새 터미널·상세에는 장식 아이콘을 두지 않고 상세에서 목록 복귀는 `목록` 텍스트 버튼으로 표시한다. pane이 없으면 이동할 수 없다. 전체 경로와 파일 검사 요약은 tooltip·상세에서 확인한다.
 
-저장소 이름·CWD 수신 상태·필터·새로고침 버튼은 본문 스크롤 밖에 둔다. 좁은 영역은 목록과 상세를 전환하며 목록 복귀 시 스크롤과 상세 버튼의 키보드 포커스를 복구하고, 폭 640px 이상은 목록/상세를 나란히 배치한다. 상세의 식별·닫기·주요 작업·제거 확인은 내용 스크롤과 분리한다. workspace ID 변화만으로 재마운트하지 않고 실제 CWD·원본 terminal·초기 대상 변경에 검토 초기화를 결합한다. 같은 대상의 갱신 중 기존 목록은 참고용으로 유지하지만 후보 수·제거 적격성은 재검사 상태로 표시한다. 새 터미널 생성 직후 적격성을 보류하고 실제 terminal store의 `sessionReady` 관측 뒤 다시 검사한다([ADR-0345](../adr/0345-worktree-dock-review-context.md)).
+저장소 이름·CWD 수신 상태·필터·새로고침 버튼은 본문 스크롤 밖에 둔다. 좁은 영역은 목록과 상세를 전환하며 목록 복귀 시 스크롤과 상세 버튼의 키보드 포커스를 복구하고, 폭 640px 이상은 목록/상세를 나란히 배치한다. 상세의 식별·닫기·주요 작업·제거 확인은 내용 스크롤과 분리한다. workspace ID 변화만으로 재마운트하지 않고 실제 CWD·원본 terminal·초기 대상 변경에 검토 초기화를 결합한다. 같은 대상의 갱신 중 기존 목록은 참고용으로 유지하지만 후보 수·제거 적격성은 재검사 상태로 표시한다. 새 터미널 생성 직후 적격성을 보류하고 실제 terminal store의 `sessionReady` 관측 뒤 다시 검사한다. 복원·재연결도 등록 집합·세션 준비·준비된 세대의 변경으로 재검사하며, 출력·활동·표시 정보만 바뀌면 Git을 다시 조회하지 않는다([ADR-0345](../adr/0345-worktree-dock-review-context.md)).
 
 Git 실행에는 명령당 30초·출력 8 MiB 상한을 적용한다. 목록은 NUL 구분 porcelain을 우선 사용하고 `-z` 옵션 미지원일 때만 구버전의 줄 구분 형식으로 재조회한다. Git 2.34의 줄 구분 형식은 경로의 개행을 인용하지 않으므로 모호한 레코드를 거부한다. 공백·한글·탭·역슬래시는 원문대로 보존한다.
 
@@ -359,7 +359,7 @@ Git 실행에는 명령당 30초·출력 8 MiB 상한을 적용한다. 목록은
 
 CWD를 따라갈 때는 실제 전파 원본 `sourceTerminalId`를 보낸다. backend가 그 세션의 현재 CWD와 실행 환경을 검증해 응답 `workingDir`를 확정한다. Windows의 WSL guest CWD는 배포판이 포함된 경로로 바꾸며 UI의 이후 검사·제거는 이 확정된 `workingDir`를 사용한다. CWD 수신을 끈 같은 대상의 재조회도 이 주소를 사용하며 원본 terminal의 이후 이동·종료와 분리한다. 응답 `repositoryPath`는 기본 worktree의 경로이며 현재 저장소 표시에 사용한다. 원본의 CWD가 요청과 달라졌거나 Windows에서 원본 터미널 없이 `/home/...` 같은 경로를 보내면 조회를 거부한다. 명시적인 WSL 경로는 `//wsl.localhost/<배포판>/...`이며 SSH 원격 CWD는 로컬 저장소로 조회하지 않는다. 사용 CWD의 심볼릭 링크는 실제 실행 환경에서 해석하며 실패 시 제거를 차단한다.
 
-`usage` 항목은 `{terminalId,paneId,workspaceId,workspaceName,cwd,kind,agentType}`이며 nullable 식별자·이름·에이전트 유형은 없는 경우 `null`이다. `kind`는 `live | saved | daemon`이다. live terminal은 같은 ID의 저장된 경로보다 우선하며 live CWD가 불명확해도 저장 경로로 되돌리지 않는다. 숨은 레이어와 dock도 포함한다. 저장된 터미널은 `lastCwd`, 이어서 해당 프로필(미지정이면 기본 프로필)의 시작 경로를 복원 참조로 사용한다. 관측되지 않은 local CWD·불명확한 daemon 상태·사용 경로 확인 실패는 `usageWarnings`와 `usage_unknown`이 되며, 불완전한 사용 정보로는 어느 워크트리도 제거하지 않는다. 사용 정보는 이 laymux build의 관측 범위이며 외부 프로세스가 미사용임을 보증하지 않는다.
+`usage` 항목은 `{terminalId,paneId,workspaceId,workspaceName,cwd,kind,agentType}`이며 nullable 식별자·이름·에이전트 유형은 없는 경우 `null`이다. `kind`는 `live | saved | daemon`이다. live terminal은 같은 ID의 저장된 경로보다 우선하며 live CWD가 불명확해도 저장 경로로 되돌리지 않는다. 숨은 레이어와 dock도 포함한다. 저장된 터미널은 `lastCwd`, 이어서 해당 프로필(미지정이면 기본 프로필)의 시작 경로를 복원 참조로 사용한다. 원본과 사용 CWD의 WSL 배포판은 보고값 → 프로필의 명시적 선택 → WSL 프로필의 기본 배포판 순으로 해석한다. 기본 배포판은 기존 Lxss 레지스트리 조회를 사용하며 잘못된 명시적 값은 대체하지 않는다. 관측되지 않은 local CWD·불명확한 daemon 상태·사용 경로 확인 실패는 `usageWarnings`와 `usage_unknown`이 되며, 불완전한 사용 정보로는 어느 워크트리도 제거하지 않는다. 사용 정보는 이 laymux build의 관측 범위이며 외부 프로세스가 미사용임을 보증하지 않는다.
 
 후보는 검사가 끝나고 `canRemove=true`인 항목이다. 초기 목록 조회와 파일 검사는 분리하고 UI 검사 동시성을 3개로 제한한다. 수동 새로고침으로 목록과 검사를 갱신하며 행 선택은 별도의 최신 상세 검사를 수행한다. 이 동작들은 다른 터미널 CWD를 바꾸지 않는다. `files`는 최대 200개 미리보기이며 더 있으면 `filesTruncated=true`다. `kind`는 `tracked | untracked | ignored`이고 파일 경로는 해당 worktree 기준이다.
 
@@ -374,6 +374,8 @@ Automation은 같은 서비스를 사용하고 기존 IP allowlist를 따른다.
 Remote의 `Worktrees`는 현재 active terminal의 CWD로 목록을 조회한다. 서버가 terminal registry의 raw CWD와 실행 환경을 결합하며 클라이언트의 임의 `workingDir`는 받지 않는다. 세 경로 모두 기존 Remote 인증과 활성 lease를 요구하고, Git I/O는 blocking worker에서 공통 서비스를 재사용한다([ADR-0344](../adr/0344-remote-worktrees-and-usage-mcp.md)).
 
 모바일 목록은 폴더 이름을 우선 표시하고 상세 선택 시 목록을 숨겨 상세를 즉시 보여 준다. 상세 제목·닫기는 내용 스크롤 중에도 남으며 닫기는 목록 위치로 복귀한다. 같은 대상의 갱신은 선택을 유지하며 이전 검사·제거 확인을 폐기하고 후보 수를 검사 중으로 표시한다. Worktrees에서 연 파일 뷰어는 사용자 닫기/Back/Escape 때 같은 lease·terminal·CWD의 상세로 복귀한다. 다른 도구 열기·연결 상실·대상 변경은 메모리의 복귀 맥락을 폐기한다([ADR-0345](../adr/0345-worktree-dock-review-context.md)).
+
+drawer를 그리지 않는 navigation metadata 갱신도 Worktrees의 CWD 맥락을 동기화한다. Worktrees 또는 그 파일 뷰어 복귀 맥락이 열려 있으면 pane 링크를 꺼도 기존 navigation metadata 폴링을 유지하고, 닫으면 기존 폴링 필요 조건으로 돌아간다. CWD 변화 뒤 이전 제거 확인을 화면에 남기지 않으며 새로운 Git 주기 폴링은 만들지 않는다.
 
 | Remote route (POST) | 본문 | 응답 |
 | --- | --- | --- |

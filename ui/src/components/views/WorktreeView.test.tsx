@@ -496,6 +496,82 @@ describe("WorktreeView", () => {
     expect(screen.queryByText("터미널 시작을 확인하고 있습니다")).not.toBeInTheDocument();
   });
 
+  it.each(["ready", "generation", "removed"])(
+    "다른 터미널의 %s 변화 뒤 재연결 중 경고와 이전 검사를 갱신한다",
+    async (transition) => {
+      const warning =
+        "terminal-restored (daemon): 연결되지 않은 PTY의 현재 CWD를 확인할 수 없습니다";
+      const terminal = {
+        id: "terminal-restored",
+        sessionReady: transition !== "ready",
+        generation: 1,
+      };
+      useTerminalStore.setState({ instances: [terminal as never] });
+      api.getWorktreeSnapshot.mockResolvedValue({ ...snapshot(), usageWarnings: [warning] });
+      api.inspectWorktree.mockResolvedValue(
+        inspection(clean, {
+          canRemove: false,
+          blockers: ["usage_unknown"],
+          usageWarnings: [warning],
+        }),
+      );
+      renderView();
+      await screen.findByText(warning);
+      await openDetails();
+      await screen.findByTestId("worktree-detail-summary");
+      const calls = api.getWorktreeSnapshot.mock.calls.length;
+      const next = deferred<WorktreeSnapshot>();
+      api.getWorktreeSnapshot.mockReturnValue(next.promise);
+      api.inspectWorktree.mockImplementation((_cwd, path) =>
+        Promise.resolve(inspection(path === main.path ? main : clean)),
+      );
+      act(() =>
+        useTerminalStore.setState({
+          instances:
+            transition === "removed"
+              ? []
+              : [
+                  {
+                    ...terminal,
+                    sessionReady: true,
+                    generation: transition === "generation" ? 2 : 1,
+                  } as never,
+                ],
+        }),
+      );
+      await waitFor(() => expect(api.getWorktreeSnapshot.mock.calls.length).toBeGreaterThan(calls));
+      expect(screen.getByTestId("worktree-detail")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "워크트리 제거" })).toBeDisabled();
+      await act(async () => next.resolve(snapshot()));
+      await waitFor(() => expect(screen.queryByText(warning)).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "워크트리 제거" })).toBeEnabled(),
+      );
+    },
+  );
+
+  it("터미널 출력·활동·표시 상태 변화는 Git 재검사를 유발하지 않는다", async () => {
+    const terminal = { id: "terminal-restored", sessionReady: true, generation: 1 };
+    useTerminalStore.setState({ instances: [terminal as never] });
+    renderView();
+    await screen.findByText("feature");
+    const calls = api.getWorktreeSnapshot.mock.calls.length;
+    await act(async () =>
+      useTerminalStore.setState({
+        instances: [
+          {
+            ...terminal,
+            title: "실행 중",
+            outputActive: true,
+            activity: { type: "running" },
+            lastActivityAt: 123,
+          } as never,
+        ],
+      }),
+    );
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(calls);
+  });
+
   it("완료된 검사만 정리 후보에 포함하고 제거는 상세 검사와 명시적 확인 뒤 실행한다", async () => {
     renderView();
     await screen.findByText("feature");
@@ -587,6 +663,35 @@ describe("WorktreeView", () => {
     await screen.findByText("other");
     await act(async () => old.resolve(snapshot()));
     expect(screen.queryByText("feature")).not.toBeInTheDocument();
+  });
+
+  it("초기 WSL 배포판 조회 실패 뒤 새로고침하면 오류를 지우고 목록·상세를 다시 검사한다", async () => {
+    const workingDir = "//wsl.localhost/Ubuntu/home/repo";
+    const tree = entry(`${workingDir}-clean`);
+    api.useSyncGroupCwdContext.mockReturnValue({
+      cwd: "/home/repo",
+      sourceTerminalId: "terminal-wsl",
+    });
+    api.getWorktreeSnapshot.mockRejectedValueOnce(
+      new Error("원본 터미널의 WSL 배포판을 확인할 수 없습니다."),
+    );
+    api.getWorktreeSnapshot.mockResolvedValue({
+      workingDir,
+      repositoryPath: workingDir,
+      commonDir: `${workingDir}/.git`,
+      worktrees: [tree],
+    });
+    api.inspectWorktree.mockResolvedValue(inspection(tree));
+    renderView();
+    expect(await screen.findByRole("alert")).toHaveTextContent("WSL 배포판");
+    expect(api.inspectWorktree).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "워크트리 새로고침" }));
+    await screen.findByText("feature");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(api.getWorktreeSnapshot).toHaveBeenLastCalledWith("/home/repo", "terminal-wsl");
+    await openDetails();
+    await screen.findByTestId("worktree-detail-summary");
+    expect(api.inspectWorktree).toHaveBeenLastCalledWith(workingDir, tree.path);
   });
 
   it("검사 실패는 정리 가능 상태로 취급하지 않고 원인을 노출한다", async () => {

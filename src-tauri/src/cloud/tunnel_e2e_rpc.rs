@@ -156,6 +156,9 @@ mod tests {
     impl Harness {
         fn new() -> (Self, String) {
             let state = Arc::new(AppState::new());
+            // Keep the host-derived envelope limit independent of local settings.
+            *state.remote_access.lock().unwrap() =
+                crate::remote_server::RemoteAccessRuntimeState::default();
             let session_id = URL_SAFE_NO_PAD.encode([5_u8; 16]);
             state
                 .android_e2e

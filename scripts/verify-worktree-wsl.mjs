@@ -2,6 +2,7 @@
 // node scripts/verify-worktree-wsl.mjs [배포판 이름]
 // 비기본 배포판을 우선 선택하고, 없으면 기본 배포판에서 검증한다. --git-only는 Git API만 검사한다.
 // 실제 sourceTerminalId·symlink CWD 검증에는 CDP 9342의 dev WebView가 필요하다.
+// --bare-default는 -d 없는 기본 WSL 프로필과 숨은 복원 대상도 검증한다.
 // 검증용 profile/workspace/fixture를 사용자가 확인할 수 있도록 남긴다.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -11,6 +12,7 @@ import path from "node:path";
 import { chromium } from "../ui/node_modules/playwright-core/index.mjs";
 
 const gitOnly = process.argv.includes("--git-only");
+const bareDefault = process.argv.includes("--bare-default");
 function wslListing(args) {
   const result = spawnSync("wsl.exe", args, {
     windowsHide: true,
@@ -39,7 +41,7 @@ const requestedDistro = process.argv
   .slice(2)
   .find((argument) => !argument.startsWith("--"));
 const distro =
-  requestedDistro ??
+  (bareDefault ? defaultDistro : requestedDistro) ??
   installedDistros.find(
     (name) => name !== defaultDistro && !/^docker-/i.test(name),
   ) ??
@@ -171,6 +173,7 @@ assert.equal(
 results.push("WSL clean 제거·브랜치 보존");
 
 async function verifyLiveGuestUsage() {
+  let retainedPaneId;
   const activeTree = `${base}/in-use`;
   const alias = `${base}/active-alias`;
   const aliasCwd = `${alias}/src`;
@@ -222,8 +225,9 @@ async function verifyLiveGuestUsage() {
       .first();
     if (await postponeHooks.isVisible()) await postponeHooks.click();
     const profileName = `Worktree WSL ${distro} ${base.split("-").at(-1)}`;
+    const commandLine = bareDefault ? "wsl.exe" : `wsl.exe -d ${distro}`;
     await page.evaluate(
-      async ({ profileName, distro, main }) => {
+      async ({ profileName, commandLine, distro, main, bareDefault }) => {
         const { useSettingsStore, makeProfileFromDefaults } =
           await import("/src/stores/settings-store.ts");
         const { persistSession } = await import("/src/lib/persist-session.ts");
@@ -231,15 +235,25 @@ async function verifyLiveGuestUsage() {
         state.addProfile({
           ...makeProfileFromDefaults(
             profileName,
-            `wsl.exe -d ${distro}`,
+            commandLine,
             state.profileDefaults,
           ),
           startingDirectory: main,
           restoreCwd: true,
         });
+        // 새 터미널 버튼의 기존 계약은 배포판이 확인되는 프로필을 요구한다.
+        if (bareDefault)
+          state.addProfile({
+            ...makeProfileFromDefaults(
+              `${profileName} explicit`,
+              `wsl.exe -d ${distro}`,
+              state.profileDefaults,
+            ),
+            startingDirectory: main,
+          });
         await persistSession();
       },
-      { profileName, distro, main },
+      { profileName, commandLine, distro, main, bareDefault },
     );
     const workspace = (
       await api(
@@ -324,8 +338,168 @@ async function verifyLiveGuestUsage() {
       409,
     );
     results.push(
-      `${distro === defaultDistro ? "기본" : "비기본"} ${distro}: sourceTerminalId로 raw POSIX CWD 배포판 식별·source 없는 조회/오래된 CWD 거부`,
+      `${commandLine}: sourceTerminalId로 raw POSIX CWD 배포판 식별·source 없는 조회/오래된 CWD 거부`,
     );
+
+    if (bareDefault) {
+      const savedWorkspace = (
+        await api(
+          "/workspaces",
+          { name: "WSL 숨은 복원 검증", layoutId: "default-layout" },
+          201,
+        )
+      ).workspace;
+      try {
+        const savedId = await page.evaluate(
+          async ({ workspaceId, profileName, main }) => {
+            const { useWorkspaceStore } =
+              await import("/src/stores/workspace-store.ts");
+            const { persistSession } =
+              await import("/src/lib/persist-session.ts");
+            const store = useWorkspaceStore.getState();
+            store.setPaneView(
+              0,
+              { type: "TerminalView", profile: profileName, lastCwd: main },
+              undefined,
+              workspaceId,
+            );
+            await persistSession();
+            const workspace = useWorkspaceStore
+              .getState()
+              .workspaces.find((item) => item.id === workspaceId);
+            return `terminal-${workspace.panes[0].layers[0].id}`;
+          },
+          { workspaceId: savedWorkspace.id, profileName, main },
+        );
+        const savedDetail = (
+          await api("/worktrees/inspect", { workingDir, path: workingDir })
+        ).data;
+        assert.deepEqual(savedDetail.usageWarnings, []);
+        assert.ok(
+          savedDetail.usage.some(
+            (usage) => usage.terminalId === savedId && usage.kind === "saved",
+          ),
+        );
+        results.push("-d 없는 WSL의 숨은 복원 대상 CWD 연결·경고 없음");
+      } finally {
+        await api(`/workspaces/${savedWorkspace.id}`, undefined, 200, "DELETE");
+      }
+
+      // 실제 WorktreeView를 원본 WSL 셸의 SyncGroup에 붙여 CWD 수신을 검증한다.
+      const followPaneId = await page.evaluate(async (workspaceId) => {
+        const { useWorkspaceStore } =
+          await import("/src/stores/workspace-store.ts");
+        const store = useWorkspaceStore.getState();
+        const sourceView = store.workspaces.find(
+          (item) => item.id === workspaceId,
+        ).panes[0].layers[0].view;
+        store.setPaneView(0, {
+          ...sourceView,
+          syncGroup: workspaceId,
+          cwdSend: true,
+        });
+        store.splitPane(0, "horizontal", workspaceId, {
+          type: "WorktreeView",
+          syncGroup: workspaceId,
+          cwdReceive: true,
+        });
+        return useWorkspaceStore
+          .getState()
+          .workspaces.find((item) => item.id === workspaceId).panes[1].layers[0]
+          .id;
+      }, workspace.id);
+      const followView = page.locator(
+        `[data-testid="view-worktree"][data-pane-id="${followPaneId}"]`,
+      );
+      const rowPaths = () =>
+        followView.evaluate((view) => {
+          const errors = [...view.querySelectorAll('[role="alert"]')].map(
+            (item) => item.textContent,
+          );
+          if (errors.length) throw new Error(errors.join("\n"));
+          if (
+            /목록을 읽고|기존 목록을 표시하며|내용 검사 중/.test(
+              view.textContent,
+            )
+          )
+            return [];
+          return [...view.querySelectorAll("[data-worktree-path]")].map(
+            (row) => row.dataset.worktreePath,
+          );
+        });
+      await until(
+        rowPaths,
+        (paths) => paths.includes(host(main)),
+        "기본 WSL CWD를 받는 실제 WorktreeView",
+      );
+      assert.ok(
+        !(await followView.textContent()).includes("원본 터미널의 WSL"),
+      );
+      const other = `${base}/other-repository`;
+      guest(["mkdir", "--", other]);
+      git(other, "init", "-b", "other");
+      git(
+        other,
+        "-c",
+        "user.name=Laymux verification",
+        "-c",
+        "user.email=laymux-dev@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "fixture",
+      );
+      await changeDirectory(other);
+      await until(
+        rowPaths,
+        (paths) => paths.length === 1 && paths[0] === host(other),
+        "다른 저장소 CWD 수신",
+      );
+      const receive = async (enabled) =>
+        page.evaluate(
+          async ({ enabled, workspaceId }) => {
+            const { useWorkspaceStore } =
+              await import("/src/stores/workspace-store.ts");
+            useWorkspaceStore.getState().setPaneView(1, {
+              type: "WorktreeView",
+              syncGroup: workspaceId,
+              cwdReceive: enabled,
+            });
+          },
+          { enabled, workspaceId: workspace.id },
+        );
+      await receive(false);
+      await changeDirectory(main);
+      await api("/ui/worktrees", { paneId: followPaneId, action: "refresh" });
+      await until(
+        rowPaths,
+        (paths) => paths.length === 1 && paths[0] === host(other),
+        "CWD 수신 중지 후 확정한 배포판 경로로 갱신",
+      );
+      await receive(true);
+      await until(
+        rowPaths,
+        (paths) => paths.includes(host(main)) && !paths.includes(host(other)),
+        "CWD 수신 재개",
+      );
+      await api("/ui/worktrees", {
+        paneId: followPaneId,
+        action: "select",
+        path: registeredTree.path,
+      });
+      await followView.getByTestId("worktree-detail-summary").waitFor();
+      await page.screenshot({
+        path: path.join(artifacts, "wsl-default-cwd-follow.png"),
+      });
+      await api("/screenshot", undefined, 200, "POST");
+      await receive(false);
+      retainedPaneId = followPaneId;
+      results.push(
+        "실제 WorktreeView 기본 WSL CWD 수신·저장소 변경·수신 중지 후 갱신·수신 재개·상세 열기",
+      );
+    }
 
     const logical = await changeDirectory(aliasCwd);
     assert.equal(logical.cwd, aliasCwd);
@@ -409,7 +583,10 @@ async function verifyLiveGuestUsage() {
       action: "select",
       path: registeredTree.path,
     });
-    await view.getByRole("button", { name: "새 터미널", exact: true }).click();
+    await view
+      .getByTestId("worktree-detail")
+      .getByRole("button", { name: "새 터미널", exact: true })
+      .click();
     const layeredWorkspace = (await api("/workspaces/active")).workspace;
     const openedTerminalId = layeredWorkspace.panes.find(
       (pane) => pane.activeLayer && pane.terminalId,
@@ -465,7 +642,7 @@ async function verifyLiveGuestUsage() {
     results.push(
       "WSL WorktreeView 새 터미널 버튼에서 guest CWD·일치하는 프로필·live 제거 보호 확인",
     );
-    await api("/panes/layers/activate", { layerId: paneId });
+    await page.getByTestId(`pane-stack-tab-${paneId}`).click();
     await api("/ui/worktrees", { paneId, action: "refresh" });
     await view
       .locator("[data-worktree-path]")
@@ -477,10 +654,41 @@ async function verifyLiveGuestUsage() {
       path: registeredTree.path,
     });
     await view.getByTestId("worktree-detail-summary").waitFor();
+    if (retainedPaneId) {
+      const terminals = (await api("/terminals")).instances;
+      assert.ok(!terminals.some((terminal) => terminal.id === terminalId));
+      const retainedView = page.locator(
+        `[data-testid="view-worktree"][data-pane-id="${retainedPaneId}"]`,
+      );
+      await api("/ui/worktrees", { paneId: retainedPaneId, action: "refresh" });
+      await until(
+        () =>
+          retainedView.evaluate((view) => ({
+            pending: /목록을 읽고|기존 목록을 표시하며|내용 검사 중/.test(
+              view.textContent,
+            ),
+            errors: [...view.querySelectorAll('[role="alert"]')].map(
+              (item) => item.textContent,
+            ),
+            paths: [...view.querySelectorAll("[data-worktree-path]")].map(
+              (row) => row.dataset.worktreePath,
+            ),
+          })),
+        (state) =>
+          !state.pending &&
+          state.errors.length === 0 &&
+          state.paths.includes(host(main)),
+        "원본 WSL 터미널 종료 뒤 수신 중지한 WorktreeView 새로고침",
+      );
+      results.push(
+        "원본 WSL 터미널 종료 뒤에도 수신 중지한 뷰의 저장소·갱신 유지",
+      );
+    }
     await api("/screenshot", undefined, 200, "POST");
     await page.screenshot({
       path: path.join(artifacts, "wsl-worktree-view.png"),
     });
+    if (retainedPaneId) await api("/panes/1", undefined, 200, "DELETE");
     return {
       workspaceId: workspace.id,
       terminalId,
@@ -503,13 +711,17 @@ const report = {
   base,
   workingDir,
   gitOnly,
+  bareDefault,
   nonDefaultDistroVerified,
   skipped,
   live,
   results,
 };
 await writeFile(
-  path.join(artifacts, "wsl-report.json"),
+  path.join(
+    artifacts,
+    bareDefault ? "wsl-bare-default-report.json" : "wsl-report.json",
+  ),
   JSON.stringify(report, null, 2),
 );
 console.log(JSON.stringify(report, null, 2));

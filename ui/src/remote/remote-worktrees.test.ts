@@ -26,7 +26,7 @@ function deferred<T>() {
 }
 
 describe("Remote Worktrees 요청 소유권", () => {
-  let context: { leaseId: string | null; terminalId: string; cwd: string };
+  let context: { leaseId: string | null; terminalId: string; cwd: string; usageRevision?: string };
   let controller: ReturnType<typeof createRemoteWorktrees>;
   const api = vi.fn();
   const focusUsage = vi.fn();
@@ -207,6 +207,35 @@ describe("Remote Worktrees 요청 소유권", () => {
     pending.resolve(result);
     await vi.waitFor(() => expect(button("워크트리 제거")).toBeDefined());
     expect(document.getElementById("worktreesList")?.hidden).toBe(true);
+  });
+
+  it("다른 PTY의 재연결 관측은 같은 CWD의 오래된 사용 경고와 제거 확인을 갱신한다", async () => {
+    context.usageRevision = "source";
+    api.mockImplementation(async (url: string) =>
+      url.endsWith("/inspect")
+        ? { data: inspection }
+        : {
+            ...result,
+            data: {
+              ...result.data,
+              usageWarnings: context.usageRevision === "source" ? ["다른 PTY 연결 대기"] : [],
+            },
+          },
+    );
+    controller.open();
+    await vi.waitFor(() =>
+      expect(document.getElementById("worktreesStatus")?.textContent).toContain("연결 대기"),
+    );
+    click("[data-worktree-path]");
+    await vi.waitFor(() => expect(button("워크트리 제거")).toBeDefined());
+    button("워크트리 제거").click();
+    context = { ...context, usageRevision: "source,restored" };
+    controller.syncContext();
+    await vi.waitFor(() =>
+      expect(document.getElementById("worktreesStatus")?.textContent).not.toContain("연결 대기"),
+    );
+    expect(button("제거 확인")).toBeUndefined();
+    expect(document.getElementById("worktreesDetail")?.hidden).toBe(false);
   });
 
   it("제거 거부는 검사 실패로 표시하고 검사 중 상태로 남기지 않는다", async () => {

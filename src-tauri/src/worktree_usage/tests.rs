@@ -68,6 +68,7 @@ fn live_cwd_supersedes_saved_cwd_and_keeps_workspace_attribution() {
         &settings(),
         &attached_inventory(&["terminal-one"]),
         true,
+        || None,
     );
     assert!(snapshot.complete);
     assert_eq!(snapshot.usage.len(), 3);
@@ -85,7 +86,7 @@ fn live_cwd_supersedes_saved_cwd_and_keeps_workspace_attribution() {
 
 #[test]
 fn saved_snapshot_includes_every_stack_layer_and_hidden_dock() {
-    let snapshot = assemble_usage(vec![], &settings(), &inventory(&[]), true);
+    let snapshot = assemble_usage(vec![], &settings(), &inventory(&[]), true, || None);
     assert!(snapshot.complete);
     assert_eq!(snapshot.usage.len(), 3);
     assert!(snapshot.usage.iter().all(|u| u.kind == UsageKind::Saved));
@@ -97,7 +98,13 @@ fn saved_snapshot_includes_every_stack_layer_and_hidden_dock() {
 
 #[test]
 fn saved_daemon_path_is_a_protected_reference_not_current_cwd_evidence() {
-    let snapshot = assemble_usage(vec![], &settings(), &inventory(&["terminal-one"]), true);
+    let snapshot = assemble_usage(
+        vec![],
+        &settings(),
+        &inventory(&["terminal-one"]),
+        true,
+        || None,
+    );
     assert!(!snapshot.complete);
     assert!(!snapshot.warnings.is_empty());
     assert_eq!(
@@ -113,13 +120,14 @@ fn saved_daemon_path_is_a_protected_reference_not_current_cwd_evidence() {
 
 #[test]
 fn unknown_daemon_or_live_cwd_prevents_complete_coverage() {
-    let orphan = assemble_usage(vec![], &settings(), &inventory(&["orphan"]), true);
+    let orphan = assemble_usage(vec![], &settings(), &inventory(&["orphan"]), true, || None);
     assert!(!orphan.complete);
     let unknown = assemble_usage(
         vec![live("terminal-one", None)],
         &settings(),
         &inventory(&[]),
         true,
+        || None,
     );
     assert!(!unknown.complete);
     assert!(!unknown
@@ -137,6 +145,7 @@ fn direct_ssh_cwd_does_not_claim_a_local_worktree() {
         &settings(),
         &attached_inventory(&["terminal-one"]),
         true,
+        || None,
     );
     assert!(snapshot.complete);
     assert_eq!(snapshot.usage.len(), 2);
@@ -176,22 +185,86 @@ fn wsl_distributions_and_case_sensitive_suffixes_stay_distinct() {
     let mut terminal = live("terminal-one", Some("/home/repo"));
     terminal.host = InitialExecutionHost::Wsl;
     terminal.distro = Some("Debian".into());
-    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true);
+    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true, || None);
     assert!(snapshot.complete);
     assert_eq!(snapshot.usage[0].cwd, "//wsl.localhost/Debian/home/repo");
 }
 
 #[test]
-fn unknown_wsl_distribution_does_not_fall_back_to_another_guest() {
+fn invalid_wsl_distribution_does_not_fall_back_to_another_guest() {
     let mut terminal = live("terminal-one", Some("/home/repo"));
     terminal.host = InitialExecutionHost::Wsl;
-    terminal.command_line = "wsl.exe".into();
-    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true);
+    terminal.command_line = "wsl.exe -d".into();
+    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true, || None);
     assert!(!snapshot.complete);
     assert!(!snapshot
         .usage
         .iter()
         .any(|u| u.terminal_id.as_deref() == Some("terminal-one")));
+}
+
+#[test]
+fn default_wsl_live_and_hidden_restore_cwds_are_both_qualified() {
+    let mut settings = settings();
+    settings.default_profile = "Test WSL".into();
+    settings.profiles.push(crate::settings::Profile {
+        name: "Test WSL".into(),
+        command_line: "wsl.exe".into(),
+        starting_directory: "/home/start".into(),
+        ..Default::default()
+    });
+    settings.workspaces[0].panes[0].layers[0].view.extra =
+        json!({"profile": "Test WSL", "lastCwd": "/home/old"});
+    settings.workspaces[0].panes[0].layers[1].view.extra =
+        json!({"profile": "Test WSL", "lastCwd": "/home/saved"});
+    settings.docks[0].panes[0].view = json!({"type": "TerminalView"});
+    let mut terminal = live("terminal-one", Some("/home/current/src"));
+    terminal.host = InitialExecutionHost::Wsl;
+    terminal.command_line = "wsl.exe".into();
+    let snapshot = assemble_usage(vec![terminal], &settings, &inventory(&[]), true, || {
+        Some("Ubuntu".into())
+    });
+    assert!(snapshot.complete, "{:?}", snapshot.warnings);
+    assert_eq!(snapshot.usage.len(), 3);
+    for (path, kind) in [
+        ("/home/current/src", UsageKind::Live),
+        ("/home/saved", UsageKind::Saved),
+        ("/home/start", UsageKind::Saved),
+    ] {
+        assert!(snapshot.usage.iter().any(|usage| usage.cwd
+            == format!("//wsl.localhost/Ubuntu{path}")
+            && usage.kind == kind));
+    }
+    assert!(!snapshot
+        .usage
+        .iter()
+        .any(|usage| usage.cwd.ends_with("/home/old")));
+}
+
+#[test]
+fn missing_default_keeps_live_and_saved_wsl_usage_unknown() {
+    let mut settings = settings();
+    settings.profiles.push(crate::settings::Profile {
+        name: "Missing WSL".into(),
+        command_line: "wsl.exe".into(),
+        ..Default::default()
+    });
+    settings.workspaces[0].panes[0].layers[1].view.extra =
+        json!({"profile": "Missing WSL", "lastCwd": "/home/saved"});
+    let mut terminal = live("terminal-one", Some("/home/current"));
+    terminal.host = InitialExecutionHost::Wsl;
+    terminal.command_line = "wsl.exe".into();
+    let snapshot = assemble_usage(vec![terminal], &settings, &inventory(&[]), true, || None);
+    assert!(!snapshot.complete);
+    assert_eq!(snapshot.warnings.len(), 2);
+    assert!(snapshot
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("복원 대상")));
+    assert!(!snapshot
+        .usage
+        .iter()
+        .any(|usage| usage.cwd.contains("/home/")));
 }
 
 #[test]
@@ -204,6 +277,7 @@ fn an_old_detached_child_with_a_live_terminal_id_is_still_unknown() {
         &settings(),
         &daemons,
         true,
+        || None,
     );
     assert!(!snapshot.complete);
 }
@@ -215,7 +289,7 @@ fn ending_daemon_does_not_prove_the_child_has_exited() {
     for terminal_id in ["terminal-one", "orphan"] {
         let mut daemons = inventory(&[terminal_id]);
         daemons.sessions[0].state = PtySessionState::Ending;
-        let snapshot = assemble_usage(vec![], &settings(), &daemons, true);
+        let snapshot = assemble_usage(vec![], &settings(), &daemons, true, || None);
         assert!(
             !snapshot.complete,
             "Ending must retain uncertainty for {terminal_id}"
@@ -233,6 +307,7 @@ fn ending_daemon_does_not_prove_the_child_has_exited() {
         &settings(),
         &daemons,
         true,
+        || None,
     );
     assert!(
         !snapshot.complete,
@@ -250,6 +325,7 @@ fn unsaved_live_pane_has_navigation_id_but_file_viewer_does_not() {
         &settings(),
         &inventory(&[]),
         true,
+        || None,
     );
     assert_eq!(
         snapshot
@@ -285,7 +361,7 @@ fn missing_or_empty_saved_profile_uses_default_profile_starting_directory() {
     });
     settings.workspaces[0].panes[0].layers[0].view.extra = json!({});
     settings.workspaces[0].panes[0].layers[1].view.extra = json!({"profile": ""});
-    let snapshot = assemble_usage(vec![], &settings, &inventory(&[]), true);
+    let snapshot = assemble_usage(vec![], &settings, &inventory(&[]), true, || None);
     assert!(snapshot.complete);
     assert_eq!(
         snapshot
@@ -302,7 +378,7 @@ fn symlinked_usage_is_matched_to_the_real_worktree_path() {
     let mut terminal = live("terminal-one", Some("/home/link/src"));
     terminal.distro = Some("Ubuntu".into());
     terminal.host = InitialExecutionHost::Wsl;
-    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true);
+    let snapshot = assemble_usage(vec![terminal], &settings(), &inventory(&[]), true, || None);
     let resolved = resolve_usage_paths(snapshot, |path| {
         Ok(if path == "//wsl.localhost/Ubuntu/home/link/src" {
             "//wsl.localhost/Ubuntu/home/worktree/src".into()
@@ -332,6 +408,7 @@ fn unresolved_usage_path_is_preserved_and_blocks_removal() {
         &settings(),
         &inventory(&[]),
         true,
+        || None,
     );
     let resolved = resolve_usage_paths(snapshot, |path| {
         if path == "D:/unknown" {
@@ -351,9 +428,12 @@ fn unresolved_usage_path_is_preserved_and_blocks_removal() {
 #[test]
 fn forward_wsl_paths_keep_literal_backslashes_and_guest_case() {
     let literal = "//wsl.localhost/Ubuntu/home/Repo\\name";
-    assert_eq!(local_path(literal, None, "wsl.exe", true).unwrap(), literal);
     assert_eq!(
-        local_path("/home/Repo\\name", Some("Ubuntu"), "wsl.exe", true).unwrap(),
+        local_path(literal, None, "wsl.exe", true, || None).unwrap(),
+        literal
+    );
+    assert_eq!(
+        local_path("/home/Repo\\name", Some("Ubuntu"), "wsl.exe", true, || None).unwrap(),
         literal
     );
     assert!(path_is_within(&format!("{literal}/src"), literal, true));
@@ -375,7 +455,10 @@ fn forward_wsl_paths_keep_literal_backslashes_and_guest_case() {
     assert!(!path_is_within("/mnt/d/Repo\\name", "D:/Repo/name", true));
     assert_eq!(canonical_or_original(literal), literal);
     assert_eq!(
-        local_path("\\\\wsl$\\Ubuntu\\home\\Repo\\name", None, "", true).unwrap(),
+        local_path("\\\\wsl$\\Ubuntu\\home\\Repo\\name", None, "", true, || {
+            None
+        })
+        .unwrap(),
         "//wsl$/Ubuntu/home/Repo/name"
     );
     assert!(path_is_within(

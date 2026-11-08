@@ -76,10 +76,21 @@ function WorktreeContent({
   const [readyCreation, setReadyCreation] = useState<string | null>(null);
   if (created && ready && readyCreation !== created.id) setReadyCreation(created.id);
   const creationSettled = ready || readyCreation === created?.id;
+  // 복원/재연결은 이 뷰의 새 터미널 버튼을 거치지 않는다. 실제 세션의
+  // 준비·교체·제거만 재검사 신호로 쓰며 출력·활동·표시 갱신은 제외한다.
+  const terminalLifecycle = useTerminalStore((s) =>
+    s.instances
+      .map(
+        (terminal) =>
+          `${terminal.id}:${terminal.sessionReady === true ? (terminal.generation ?? 0) : "pending"}`,
+      )
+      .sort()
+      .join("\0"),
+  );
   const { snapshot, error, inspections, loading, refresh, version } = useWorktreeSnapshot(
     workingDir,
     sourceTerminalId,
-    created ? `${created.id}:${creationSettled}` : "",
+    `${terminalLifecycle}\x01${created ? `${created.id}:${creationSettled}` : ""}`,
     !cwdReceive,
   );
   const [filter, setFilter] = useState<"all" | "candidates">("all");

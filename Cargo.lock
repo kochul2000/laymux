@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "laymux"
-version = "3.13.3"
+version = "3.13.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
