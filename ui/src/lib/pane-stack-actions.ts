@@ -14,14 +14,16 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 /**
  * Stack a new layer on slot `paneIndex` of the active workspace and focus it.
  * Returns the new layer id, or null for an invalid slot.
+ * `index` overrides the default insertion after the active layer (strip `+`).
  */
 export function stackPaneAt(
   paneIndex: number,
   view?: ViewInstanceConfig,
   sourceLayerId?: string,
+  index?: number,
 ): string | null {
   const state = useWorkspaceStore.getState();
-  const layerId = state.stackPane(paneIndex, view, sourceLayerId ? { sourceLayerId } : undefined);
+  const layerId = state.stackPane(paneIndex, view, { sourceLayerId, index });
   if (layerId) activatePaneLayer(state.activeWorkspaceId, layerId);
   return layerId;
 }

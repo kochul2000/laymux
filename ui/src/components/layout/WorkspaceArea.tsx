@@ -100,7 +100,11 @@ export function WorkspaceArea() {
             onRemovePane={
               isActive ? (paneId, layerId) => removePane(idxOf(paneId), layerId) : undefined
             }
-            onStackPane={isActive ? (paneId) => stackPaneAt(idxOf(paneId)) : undefined}
+            onStackPane={
+              isActive
+                ? (paneId, index) => stackPaneAt(idxOf(paneId), undefined, undefined, index)
+                : undefined
+            }
             onActivateLayer={(_paneId, layerId) => {
               activatePaneLayer(ws.id, layerId);
             }}

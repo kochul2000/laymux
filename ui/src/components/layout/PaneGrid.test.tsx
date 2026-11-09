@@ -871,7 +871,7 @@ describe("PaneGrid stack UI (ADR-0297)", () => {
     fireEvent.click(screen.getByTestId("pane-stack-tab-close-under"));
     expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
     fireEvent.click(screen.getByTestId("pane-stack-add"));
-    expect(onStackPane).toHaveBeenCalledWith("slot");
+    expect(onStackPane).toHaveBeenCalledWith("slot", stacked.layers.length);
   });
 });
 

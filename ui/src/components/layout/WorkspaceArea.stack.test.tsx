@@ -1,4 +1,4 @@
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent, screen, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -23,6 +23,9 @@ vi.mock("@/components/views/TerminalView", () => ({
 import { WorkspaceArea } from "./WorkspaceArea";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useGridStore } from "@/stores/grid-store";
+import { useDockStore } from "@/stores/dock-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 
 const terminal = { type: "TerminalView" } as const;
 
@@ -72,6 +75,54 @@ describe("WorkspaceArea stack rearrangement keeps terminal sessions (ADR-0297)",
       ),
     });
     useTerminalStartupStore.setState({ revealedPaneIds: new Set(["A", "L", "B", "C"]) });
+  });
+
+  it.each(["A", "L", "last"])("+ appends at the right edge when %s is active", (activeId) => {
+    const store = useWorkspaceStore.getState();
+    useWorkspaceStore.setState({
+      workspaces: store.workspaces.map((ws) => ({
+        ...ws,
+        panes: ws.panes.map((pane, index) =>
+          index === 0
+            ? {
+                ...pane,
+                layers: [
+                  { id: "A", view: { ...terminal, profile: "first", lastCwd: "/first" } },
+                  { id: "L", view: { ...terminal, profile: "middle", lastCwd: "/middle" } },
+                  { id: "last", view: { ...terminal, profile: "last", lastCwd: "/last" } },
+                ],
+                activeLayerId: activeId,
+              }
+            : pane,
+        ),
+      })),
+    });
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["A", "L", "last", "B", "C"]) });
+    const source = useWorkspaceStore
+      .getState()
+      .getActiveWorkspace()!
+      .panes[0].layers.find((layer) => layer.id === activeId)!;
+    render(<WorkspaceArea />);
+    const strip = screen.getAllByTestId("pane-stack-strip")[0];
+    lifecycle.length = 0;
+    fireEvent.click(within(strip).getByTestId("pane-stack-add"));
+
+    const slot = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    const addedId = slot.activeLayerId;
+    expect(slot.layers.map((layer) => layer.id)).toEqual(["A", "L", "last", addedId]);
+    expect(
+      within(screen.getAllByTestId("pane-stack-strip")[0])
+        .getAllByRole("tab")
+        .map((tab) => tab.getAttribute("data-testid")),
+    ).toEqual(["A", "L", "last", addedId].map((id) => `pane-stack-tab-${id}`));
+    expect(slot.layers.at(-1)?.view).toEqual({
+      type: "TerminalView",
+      profile: source.view.profile,
+    });
+    expect(useTerminalRestartStore.getState().requests[addedId]?.cwd).toBe(source.view.lastCwd);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(lifecycle.filter((entry) => entry.startsWith("close "))).toEqual([]);
   });
 
   it("keeps the session of a layer moved past another slot's layers", () => {

@@ -61,10 +61,11 @@ export interface PaneGridProps {
   onSwapPanes?: (srcPaneId: string, tgtPaneId: string) => void;
   /**
    * Pane stack (ADR-0297). `onStackPane` adds a layer to the slot (control bar
-   * Stack button and the strip `+`); `onActivateLayer` shows one of its layers.
+   * Stack button and the strip `+`). The strip passes the end index to append;
+   * `onActivateLayer` shows one of its layers.
    * Omitted (dock) → no Stack button and no strip interaction.
    */
-  onStackPane?: (paneId: string) => void;
+  onStackPane?: (paneId: string, index?: number) => void;
   onActivateLayer?: (paneId: string, layerId: string) => void;
   /**
    * Layer rearrangement (ADR-0297). `onMoveLayer` takes a dragged tab to slot
@@ -380,7 +381,7 @@ export function PaneGrid({
                     onActivateLayer ? onActivateLayer(pane.id, layerId) : undefined
                   }
                   onClose={onRemovePane ? (layerId) => onRemovePane(pane.id, layerId) : undefined}
-                  onAdd={onStackPane ? () => onStackPane(pane.id) : undefined}
+                  onAdd={onStackPane ? () => onStackPane(pane.id, pane.layers.length) : undefined}
                   onSplitOut={onExtractLayer}
                   onTabDragStart={layerDragEnabled ? setDraggingLayerId : undefined}
                   onTabDragEnd={() => {
