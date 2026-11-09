@@ -71,7 +71,8 @@ Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자�
 
 | 방법 | 동작 |
 | --- | --- |
-| 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 프로필 상속 설정에 따른 새 레이어를 추가하고 표시·포커스 |
+| 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) | 슬롯 활성 레이어 바로 뒤에 프로필 상속 설정에 따른 새 레이어를 추가하고 표시·포커스 |
+| 전환 줄 `+` | 활성 레이어 위치와 관계없이 스택의 가장 오른쪽에 새 레이어를 추가하고 표시·포커스. 프로필·CWD는 누르기 전 활성 레이어에서 상속 ([ADR-0377](../adr/0377-stack-strip-plus-appends.md)) |
 | Remote Stack 키 | 열린 터미널의 프로필·CWD를 이어받는 `TerminalView`를 쌓고 표시·포커스한 뒤 Remote 출력을 새 터미널에 연결. 대상이 비활성 레이어여도 그 레이어에서 상속하며 프로필 상속을 끄면 기본 프로필을 선택 ([ADR-0339](../adr/0339-remote-stack-creates-enterable-terminal.md), [ADR-0361](../adr/0361-split-stack-inherit-terminal-profile.md)) |
 | Automation `stack_pane` · REST `/api/v1/panes/stack` | 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 추가하되 기존 표시·포커스를 유지. 생성 도중에도 새 레이어를 활성화하지 않음 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
@@ -85,7 +86,7 @@ Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자�
 
 - **전환 줄(`PaneStackStrip`)**: 레이어가 둘 이상인 슬롯의 활성 박스 최상단에 `--pane-stack-strip-h`(= `--bar-h`, 28px) 높이로 고정된다. 탭 글자는 컨트롤 바와 같은 `--fs-sm`·굵기 500 이고, 선택 탭 밑줄은 pane 포커스 테두리와 같은 `--pane-focus-border-w`(1px) 다. 컨트롤 바와 view 는 그 아래 칸에 놓이므로 hover 오버레이 바가 전환 줄을 가리지 않는다. 탭은 레이어 번호·상태 점(미읽음 알림 우선, 그다음 출력 활동)·제목을 보여준다. 터미널 제목은 OSC 제목 → 라벨 → 프로파일 순, 그 밖의 view 는 `lib/view-labels.ts` 이름이다.
 - **재마운트 없음**: 박스 안의 열(column) 래퍼와 내용 칸은 단일 레이어일 때도 항상 렌더한다. 슬롯이 스택이 되는 순간에는 전환 줄만 끼어들고 컨트롤 바·view 는 같은 자리에 남아 터미널이 재마운트되지 않는다.
-- **소유권**: 쌓기·순환은 `lib/pane-stack-actions.ts`(`stackPaneAt`, `stackFocusedPane`, `cycleFocusedLayer`)가, 레이어 표시+포커스 commit 은 `workspace-transition.activatePaneLayer` 가 소유한다. 컴포넌트와 단축키는 이 둘만 부른다.
+- **소유권**: 쌓기·순환은 `lib/pane-stack-actions.ts`(`stackPaneAt`, `stackFocusedPane`, `cycleFocusedLayer`)가, 레이어 표시+포커스 commit 은 `workspace-transition.activatePaneLayer` 가 소유한다. 컴포넌트와 단축키는 이 둘만 부른다. 전환 줄 `+`는 슬롯 레이어 수를 삽입 인덱스로 전달하며, `workspace-store.stackPane`가 기존 `insertLayer`의 인덱스 옵션으로 한 번에 끝 삽입한다.
 - **CWD 시드**: 새 레이어의 첫 터미널 세션은 누른 슬롯 활성 레이어의 CWD 에서 시작한다(분할과 같은 재시작 요청 버스).
 - **Automation 비활성 생성**: `workspace-store.stackPane`의 내부 `activate: false` 옵션이 삽입과 기존 활성 레이어 보존을 한 번에 반영한다. 비활성 터미널도 기존 시작 큐에서 렌더러 없이 PTY를 준비하므로 생성·readiness 대기·입력에 화면 전환이 필요 없다. UI/Remote Stack 조작은 기본 활성 삽입을 사용한다.
 - **경계 병합**: 경계선 병합(드래그 끝·더블클릭)은 스택 슬롯을 지우지 않고 최소 크기로 남긴다. 단일 레이어 슬롯의 병합은 슬롯을 통째로 지운다(`removeSlot`).

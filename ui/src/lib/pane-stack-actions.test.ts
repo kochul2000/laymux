@@ -53,6 +53,17 @@ describe("pane-stack-actions (ADR-0297)", () => {
     expect(stackFocusedPane()).toBeNull();
   });
 
+  it("keeps default Stack actions immediately after the active layer", () => {
+    const second = stackPaneAt(0)!;
+    const third = stackPaneAt(0)!;
+    useWorkspaceStore.getState().setActiveLayer("ws", "a");
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    const added = stackFocusedPane()!;
+    const slot = useWorkspaceStore.getState().workspaces[0].panes[0];
+    expect(slot.layers.map((layer) => layer.id)).toEqual(["a", added, second, third]);
+    expect(slot.activeLayerId).toBe(added);
+  });
+
   it("cycleFocusedLayer walks the ring and refuses unstacked slots", () => {
     useGridStore.setState({ focusedPaneIndex: 0 });
     expect(cycleFocusedLayer(1)).toBe(false);

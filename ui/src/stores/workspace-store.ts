@@ -209,14 +209,14 @@ interface WorkspaceState {
    */
   removeSlot: (paneIndex: number) => void;
   /**
-   * Stack a new layer right after the active layer (ADR-0297). Automation uses
+   * Stack a new layer at `index`, defaulting to right after the active layer (ADR-0297). Automation uses
    * activate: false to preserve the displayed layer atomically (ADR-0328).
    * Returns the new layer id, or null for an invalid slot.
    */
   stackPane: (
     paneIndex: number,
     view?: ViewInstanceConfig,
-    options?: { activate?: boolean; sourceLayerId?: string },
+    options?: { activate?: boolean; sourceLayerId?: string; index?: number },
     workspaceId?: string,
   ) => string | null;
   /**
