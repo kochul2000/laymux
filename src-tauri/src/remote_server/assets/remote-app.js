@@ -13816,7 +13816,9 @@ import {
             ? `Remote Nav uses ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + arrows. PC Alt / Ctrl+Alt arrows above are overridden. Change this in Input bar settings.`
             : "Remote Nav is off. The PC keybindings above apply.";
           $("physicalKeyboardStatus").textContent = physicalKeyboardConnected === null
-            ? "Automatic keyboard detection requires the updated Android app."
+            ? androidE2eMode
+              ? "Automatic keyboard detection requires the updated Android app."
+              : "Automatic keyboard detection is not supported in this browser. Keyboard shortcuts still work."
             : physicalKeyboardConnected ? "Physical keyboard connected." : "No physical keyboard connected.";
         }
 

@@ -2053,6 +2053,8 @@ Android 첨부 선택과 공유 수신([ADR-0290](../adr/0290-android-attachment
 
 #### Remote 물리 키보드와 Nav 단축키 (ADR-0273)
 
+설정의 감지 상태 안내는 일반 브라우저의 자동 감지 미지원과 구형 Android 앱의 업데이트 필요를 구분한다. 브라우저에서도 단축키와 수동 Nav 설정은 감지 여부와 무관하게 사용할 수 있다.
+
 물리 키보드 연결이 확인된 동안, 비동기 사용자 진입 attach와 단축키에서 소비되지 않은 일반 문자/조합 시작 키는 현재 입력 표면으로 포커스를 복구한다([ADR-0275](../adr/0275-remote-physical-keyboard-focus-recovery.md)). lease·활성 terminal·visible 문서가 필요하며, 열린 도구·모달·navigation, 다른 편집기 포커스, 진행 중 IME 조합을 보호한다. Ctrl/Alt/Meta 및 제어·탐색 키는 복구를 시작하지 않는다. 복구는 keydown capture에서 focus만 바꾸고 원래 브라우저 입력을 유지하므로 첫 글자를 합성하거나 PTY에 중복 전송하지 않는다. 접힌 Composer는 펼치지 않으며 자동 재접속·snapshot의 기존 no-focus 규칙도 유지한다.
 
 Android `PhysicalKeyboardMonitor`는 `InputManager`의 비가상 문자 키보드를 조회하고 장치 변경·foreground 복귀에 상태를 갱신한다. secure Remote bridge의 `isPhysicalKeyboardConnected()`와 `window.laymuxPhysicalKeyboard.onChanged(boolean)`만 현재 승인 문서 세대에 제공한다. `keyboard|keyboardHidden` 구성 변경은 Activity를 유지한다. 브라우저·구형 앱은 감지 미지원이며 입력 이벤트나 IME 크기로 연결을 추정하지 않는다.

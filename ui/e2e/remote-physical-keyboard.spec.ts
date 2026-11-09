@@ -203,7 +203,9 @@ test("구형 Android bridge와 일반 브라우저는 키 입력 후에도 자�
     await expect(page.locator("#keyBar")).toBeVisible();
     await settings(page);
     await expect(page.locator("#physicalKeyboardStatus")).toContainText(
-      "requires the updated Android app",
+      android
+        ? "requires the updated Android app"
+        : "Automatic keyboard detection is not supported in this browser.",
     );
   }
 });
