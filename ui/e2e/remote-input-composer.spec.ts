@@ -1599,7 +1599,8 @@ test("Settings lists the physical keyboard shortcuts with host rebinds", async (
   });
   await connect(page);
   await openRemoteSettings(page);
-  await page.locator('#settingsTabs [data-settings-panel="app"]').click();
+  await page.locator('#settingsTabs [data-settings-panel="inputBar"]').click();
+  await page.locator("#keyboardShortcutsSection > summary").click();
 
   const list = page.locator("#keyboardShortcutList");
   await expect(list).toBeVisible();
