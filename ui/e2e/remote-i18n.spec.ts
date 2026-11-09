@@ -1,6 +1,73 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fulfillRemoteClientAsset, installRemoteClientRoutes } from "./remote-client-assets";
 
+test.describe("Floating 설정의 언어 전환", () => {
+  test.use({ locale: "en-US" });
+  test("동작 선택의 번역과 선택값을 함께 유지한다", async ({ page }) => {
+    await installRemoteClientRoutes(page);
+    await page.goto("http://remote.test/remote/");
+    await settings(page);
+    await page.locator("#settingsTabFloating").click();
+    const picker = page.locator("#floatingSettingsEditor > select");
+    const action = await picker
+      .getByRole("option", { name: "Keyboard", exact: true })
+      .getAttribute("value");
+    await picker.selectOption(action!);
+    await page.locator("#settingsTabApp").click();
+    await page.locator("#remoteLanguage").selectOption("ko");
+    await page.locator("#settingsTabFloating").click();
+    await expect(picker).toHaveValue(action!);
+    await expect(picker.getByRole("option", { name: "키보드", exact: true })).toHaveCount(1);
+  });
+
+  test("원시 시퀀스의 Enter 문구를 번역하며 초안과 체크 상태를 유지한다", async ({ page }) => {
+    await installRemoteClientRoutes(page);
+    await page.goto("http://remote.test/remote/");
+    await settings(page);
+    await page.locator("#settingsTabInputBar").click();
+    await page.locator("#inputCustomKey > summary").click();
+    await page.getByRole("combobox", { name: "Custom key kind" }).selectOption("raw");
+    const fields = page.locator('#inputCustomKey input[type="text"]');
+    await fields.first().fill("Settings");
+    await fields.last().fill("\\e[15~");
+    const enter = page.locator('#inputCustomKey input[type="checkbox"]');
+    await enter.check();
+    await page.locator("#settingsTabApp").click();
+    await page.locator("#remoteLanguage").selectOption("ko");
+    await page.locator("#settingsTabInputBar").click();
+    await expect(enter).toHaveAccessibleName("Enter 전송");
+    await expect(enter).toBeChecked();
+    await expect(fields.first()).toHaveValue("Settings");
+    await expect(fields.last()).toHaveValue("\\e[15~");
+  });
+
+  test("언어를 바꿔도 입력 컨트롤과 편집 값을 보존한다", async ({ page }, info) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installRemoteClientRoutes(page);
+    await page.goto("http://remote.test/remote/");
+    await settings(page);
+    await page.locator("#settingsTabFloating").click();
+    const inputs = page.locator("#floatingSettingsEditor .floating-setting input");
+    await expect(inputs).toHaveCount(6);
+    const size = page.locator('#floatingSettingsEditor input[type="number"]').first();
+    await size.fill("88");
+    await size.press("Tab");
+    await page.locator("#settingsTabApp").click();
+    await page.locator("#remoteLanguage").selectOption("ko");
+    await page.locator("#settingsTabFloating").click();
+    await page.screenshot({ path: info.outputPath("floating-language.png") });
+    await expect(inputs).toHaveCount(6);
+    await expect(size).toHaveValue("88");
+    await expect(inputs.first()).toHaveAccessibleName(/[가-힣]/);
+    await page.locator("#settingsTabApp").click();
+    await page.locator("#remoteLanguage").selectOption("en");
+    await page.locator("#settingsTabFloating").click();
+    await expect(inputs).toHaveCount(6);
+    await expect(size).toHaveValue("88");
+    await expect(inputs.first()).toHaveAccessibleName(/Arrow pad/);
+  });
+});
+
 async function settings(page: Page) {
   if ((await page.locator("#navToggle").getAttribute("aria-expanded")) !== "true")
     await page.locator("#navToggle").click();

@@ -12646,10 +12646,12 @@ import {
               ["enabled", "enabled", 0, 1], ["size", "size", 44, 128], ["opacity", "opacity", 0, 100],
             ]) {
               const wrapper = document.createElement("label");
-              setRemoteText(wrapper, label === "size" ? t("Size (px)") : label === "opacity" ? t("Opacity (%)") : t("Enabled"));
+              const fieldLabel = label === "size" ? t("Size (px)") : label === "opacity" ? t("Opacity (%)") : t("Enabled");
+              const caption = document.createElement("span");
+              setRemoteText(caption, fieldLabel);
               const input = document.createElement("input");
               input.type = field === "enabled" ? "checkbox" : "number";
-              setRemoteAttribute(input, "aria-label", `${name} ${label}`);
+              setRemoteAttribute(input, "aria-label", tr`${name} ${fieldLabel}`);
               const factor = field === "opacity" ? 100 : 1;
               if (field === "enabled") input.checked = item.enabled;
               else {
@@ -12666,7 +12668,7 @@ import {
                 }
                 update();
               });
-              wrapper.append(input);
+              wrapper.append(caption, input);
               group.append(wrapper);
             }
             if (!pad) {
@@ -12687,7 +12689,9 @@ import {
           setRemoteAttribute(picker, "aria-label", t("Floating button action"));
           for (const actionId of knownActionIdSet(keyBarConfig.userKeys)) {
             if (["soft:dpad", "soft:navPad"].includes(actionId)) continue;
-            picker.add(new Option(inputActionHint(actionId), actionId));
+            const option = new Option("", actionId);
+            setRemoteText(option, inputActionHint(actionId));
+            picker.add(option);
           }
           const add = document.createElement("button");
           add.type = "button";
@@ -13479,7 +13483,9 @@ import {
             enterCheckbox.addEventListener("change", () => {
               userKeyRawSubmit = enterCheckbox.checked;
             });
-            enterRow.append(enterCheckbox, t("Send Enter"));
+            const enterLabel = document.createElement("span");
+            setRemoteText(enterLabel, t("Send Enter"));
+            enterRow.append(enterCheckbox, enterLabel);
             form.append(enterRow);
 
             const hint = document.createElement("div");

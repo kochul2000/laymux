@@ -1895,6 +1895,8 @@ Remote 터미널 host(`#terminal`)는 `-webkit-tap-highlight-color: #00000000`�
 
 Remote Settings → App의 언어는 `localStorage["laymux.remote.language"]`에 JSON 문자열 `"system" | "ko" | "en"`으로 저장한다([ADR-0380](../adr/0380-remote-device-language-and-message-boundaries.md)). 기본·손상 값은 `system`이며 브라우저 `ko*`만 한국어, 나머지는 영어로 해석한다. 선택은 PC·API·lease 없이 `document.documentElement.lang`과 열린 DOM에 즉시 적용하고 초안·포커스·도구·연결을 보존한다. 저장 불가 시 문서에서 적용하고 상태를 알린다. origin별 선호이며 PC 설정에 전송하지 않는다. 정적 `data-remote-i18n*`과 `t()`/보간 제품 토큰만 번역하고 일반 문자열은 같은 단어라도 그대로 둔다. DOM setter의 WeakMap 바인딩과 현재 관리 노드 순회로 갱신하며 임의 텍스트 관찰·치환은 하지 않는다.
 
+번역의 `textContent` 바인딩은 문구 전용 leaf 요소에 둔다. 입력 컨트롤을 가진 `label`은 별도 `span`만 번역해 언어 전환 때 자식을 지우지 않으며, `option`도 문구 토큰을 명시적으로 바인딩해 선택값과 번역을 함께 보존한다. DOM `append`·`new Option`의 암묵적 문자열 변환으로 제품 토큰을 소실시키지 않는다.
+
 | 항목 | PC 기본 | 새 Remote 기기 기본·설정 경로 |
 |---|---|---|
 | 입력 | Direct, 기존 터미널 즉시 입력 | 포인터 종류와 무관하게 Composer · 터미널 입력 모드 토글 |
