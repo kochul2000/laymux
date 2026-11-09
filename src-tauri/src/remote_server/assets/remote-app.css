@@ -1355,6 +1355,32 @@
         min-width: 32px;
         padding: 4px;
       }
+      @container remote-settings (max-width: 18em) {
+        #drawerSettingsView .nav-number-row {
+          grid-template-columns: 72px auto minmax(0, 1fr);
+        }
+        #drawerSettingsView .nav-number-copy {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+        #drawerSettingsView .nav-number-row input {
+          grid-column: 1;
+          grid-row: 2;
+        }
+        #drawerSettingsView .nav-number-unit {
+          grid-column: 2;
+          grid-row: 2;
+        }
+        #drawerSettingsView .nav-number-row select {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          width: 100%;
+        }
+        #drawerSettingsView .nav-number-row .button-size-controls {
+          grid-column: 1 / -1;
+          grid-row: 2;
+        }
+      }
       .connection-title {
         color: var(--text-secondary);
         font-size: var(--fs-xs);

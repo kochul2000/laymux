@@ -13843,7 +13843,7 @@ import {
           }
           $("remoteNavigationModifiers").disabled = !remoteKeyboardSettings.useRemoteNavigationKeys;
           $("remoteNavigationShortcutNotice").textContent = remoteKeyboardSettings.useRemoteNavigationKeys
-            ? `Remote Nav: ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input bar settings.`
+            ? `Remote Nav: ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input settings.`
             : "Remote Nav is off. The PC keybindings below apply.";
           renderKeyboardShortcutList();
           $("physicalKeyboardStatus").textContent = physicalKeyboardConnected === null

@@ -951,7 +951,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
     // Returning from Connection retains App; select Input bar explicitly.
     await expect(page.locator("#settingsPanelApp")).toBeVisible();
-    await page.getByRole("tab", { name: "Input bar", exact: true }).click();
+    await page.getByRole("tab", { name: "Input", exact: true }).click();
     await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
     await expect(page.locator("#displaySection")).toBeHidden();
     await page.locator('#settingsTabs [data-settings-panel="display"]').click();

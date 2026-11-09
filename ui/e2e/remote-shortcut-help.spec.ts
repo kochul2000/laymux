@@ -9,7 +9,8 @@ test("단축키 도움말은 입력 설정에서 요청할 때만 펼치고 App�
   await page.locator("#drawerSettingsButton").click();
   await page.getByRole("tab", { name: "App", exact: true }).click();
   await expect(page.locator("#settingsPanelApp #keyboardShortcutList")).toHaveCount(0);
-  await page.getByRole("tab", { name: "Input bar", exact: true }).click();
+  await page.getByRole("tab", { name: "Input", exact: true }).click();
+  await page.locator("#physicalKeyboardSection > summary").click();
   const help = page.locator("#keyboardShortcutsSection");
   await expect(help).not.toHaveAttribute("open", "");
   await expect(page.locator("#keyboardShortcutList")).toBeHidden();

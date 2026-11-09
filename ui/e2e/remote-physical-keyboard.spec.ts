@@ -57,7 +57,7 @@ async function keyboardConnection(page: Page, connected: boolean) {
   }, connected);
 }
 
-async function settings(page: Page, tab = "Input bar") {
+async function settings(page: Page, tab = "Input") {
   if ((await page.locator("#navToggle").getAttribute("aria-expanded")) !== "true") {
     await page.locator("#navToggle").click();
   }
@@ -65,6 +65,12 @@ async function settings(page: Page, tab = "Input bar") {
     await page.locator("#drawerSettingsButton").click();
   }
   await page.getByRole("tab", { name: tab, exact: true }).click();
+  if (
+    tab === "Input" &&
+    !(await page.locator("#physicalKeyboardSection").evaluate((el) => el.open))
+  ) {
+    await page.locator("#physicalKeyboardSection > summary").click();
+  }
 }
 
 const keybar = (page: Page) => page.evaluate(() => localStorage.getItem("laymux.remote.keybar"));
