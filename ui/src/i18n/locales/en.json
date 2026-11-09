@@ -273,7 +273,10 @@
       "error": "Error!",
       "discard": "Discard changes",
       "unsaved": "Unsaved changes",
-      "noChanges": "No changes to save"
+      "noChanges": "No changes to save",
+      "saving": "Saving…",
+      "retry": "Retry save",
+      "failed": "Saving failed. Your changes remain applied in the app. Retry saving. {{error}}"
     },
     "startup": {
       "title": "Startup",

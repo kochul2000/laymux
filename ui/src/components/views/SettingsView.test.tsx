@@ -68,6 +68,27 @@ let mockAppUpdateStatus: typeof DEFAULT_APP_UPDATE_STATUS & { channel: string } 
   DEFAULT_APP_UPDATE_STATUS;
 
 describe("SettingsView", () => {
+  it("저장 실패는 오류와 재시도를 유지하고 추가 편집 취소 뒤에도 재시도한다", async () => {
+    const user = userEvent.setup();
+    vi.mocked(persistSession).mockRejectedValueOnce(new Error("disk full"));
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("pane-link-enabled-toggle");
+    await user.click(toggle);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
+    expect(screen.getByTestId("save-settings-btn")).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByTestId("discard-settings-btn"));
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent("disk full");
+    await user.click(screen.getByTestId("save-settings-btn"));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(persistSession).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("save-settings-btn")).toBeDisabled();
+  });
+
   it("pane 링크 토글은 기본 켬이며 저장 뒤 끔이 적용된다", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

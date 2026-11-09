@@ -5111,6 +5111,8 @@ export function SettingsView() {
   };
 
   const [saveLabel, setSaveLabel] = useState("Save");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // The sections share one scroll container, so without this a new page would
@@ -5163,6 +5165,9 @@ export function SettingsView() {
   );
 
   const handleSave = () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
     const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
     const previousUpdateChannel = useSettingsStore.getState().update.channel;
@@ -5192,10 +5197,11 @@ export function SettingsView() {
         setSaveLabel("Saved!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 1500);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         setSaveLabel("Error!");
-        saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 2000);
-      });
+        setSaveError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setSaving(false));
   };
 
   const handleDiscard = () => {
@@ -5256,23 +5262,28 @@ export function SettingsView() {
           {/* Sticky save bar — always visible at bottom */}
           <div className="settings-save-bar">
             <span
-              role="status"
-              className="mr-auto text-[13px]"
+              role={saveError !== null ? "alert" : "status"}
+              className="settings-save-status"
+              tabIndex={saveError !== null ? 0 : undefined}
               style={{ color: "var(--text-secondary)" }}
             >
-              {saveLabel === "Saved!"
-                ? t("save.saved")
-                : saveLabel === "Error!"
-                  ? t("save.error")
-                  : dirty
-                    ? t("save.unsaved")
-                    : t("save.noChanges")}
+              {saveError !== null
+                ? t("save.failed", { error: saveError })
+                : saving
+                  ? t("save.saving")
+                  : saveLabel === "Saved!"
+                    ? t("save.saved")
+                    : saveLabel === "Error!"
+                      ? t("save.error")
+                      : dirty
+                        ? t("save.unsaved")
+                        : t("save.noChanges")}
             </span>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
                 data-testid="discard-settings-btn"
                 onClick={handleDiscard}
-                disabled={!dirty}
+                disabled={!dirty || saving}
                 title={!dirty ? t("save.noChanges") : undefined}
               >
                 {t("save.discard")}
@@ -5281,14 +5292,18 @@ export function SettingsView() {
                 data-testid="save-settings-btn"
                 variant="primary"
                 onClick={handleSave}
-                disabled={!dirty}
-                title={!dirty ? t("save.noChanges") : undefined}
+                disabled={(!dirty && saveError === null) || saving}
+                title={!dirty && saveError === null ? t("save.noChanges") : undefined}
               >
-                {saveLabel === "Saved!"
-                  ? t("save.saved")
-                  : saveLabel === "Error!"
-                    ? t("save.error")
-                    : t("save.save")}
+                {saving
+                  ? t("save.saving")
+                  : saveError !== null
+                    ? t("save.retry")
+                    : saveLabel === "Saved!"
+                      ? t("save.saved")
+                      : saveLabel === "Error!"
+                        ? t("save.error")
+                        : t("save.save")}
               </Button>
             </div>
           </div>

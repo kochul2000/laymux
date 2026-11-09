@@ -822,6 +822,19 @@
   min-height: var(--settings-control-height);
   min-width: 80px;
 }
+.settings-save-status {
+  flex: 1 1 var(--settings-control-width);
+  min-width: 0;
+  max-height: 6em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.settings-save-status:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* Wrap text controls before their description is squeezed into a thin column.
    Switches need little space and keep their label beside them. */
