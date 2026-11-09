@@ -1,3 +1,5 @@
+import { keybindingMatchesEvent } from "../lib/keybinding-core.ts";
+
 // Remote device bindings live here, independently of the PC's keybindings.
 // Both keyboard navigation and the touch Nav pad dispatch these same actions.
 export const REMOTE_NAV_TARGETS = Object.freeze({
@@ -48,6 +50,23 @@ function matchesModifiers(event, binding) {
     event.shiftKey === binding.shift &&
     !event.metaKey
   );
+}
+
+// Derive the reference from the same matcher and priority used for input.
+export function isRemoteShortcutOverridden(keys, settings) {
+  if (!keys || !settings.useRemoteNavigationKeys) return false;
+  for (const ctrlKey of [false, true]) {
+    for (const altKey of [false, true]) {
+      for (const shiftKey of [false, true]) {
+        for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+          const event = { key, ctrlKey, altKey, shiftKey, metaKey: false };
+          if (keybindingMatchesEvent(keys, event) && resolveRemoteNavigationKey(event, settings))
+            return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 export function resolveRemoteNavigationKey(event, settings) {

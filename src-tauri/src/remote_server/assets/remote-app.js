@@ -8,7 +8,7 @@ import { createPaneCloseKeyConfirmation, createPaneManager, installWorkspaceRena
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
-  remoteKeyboardVisibility, resolveRemoteNavigationKey,
+  remoteKeyboardVisibility, resolveRemoteNavigationKey, isRemoteShortcutOverridden,
 } from "../../../../ui/src/remote/remote-keyboard.js";
 import { installRemoteToolSwipes, resolveToolSwipe, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
@@ -9824,7 +9824,19 @@ import {
             const name = document.createElement("dt");
             name.textContent = action.label;
             const combo = document.createElement("dd");
-            combo.textContent = keys && keys.trim() ? keys.replace(/Arrow$/, "Arrows") : "Unassigned";
+            const overridden = isRemoteShortcutOverridden(keys, remoteKeyboardSettings);
+            const keyText = keys && keys.trim() ? keys.replace(/Arrow$/, "Arrows") : "Unassigned";
+            if (overridden) {
+              const note = document.createElement("span");
+              note.className = "keyboard-shortcut-note";
+              note.textContent = "PC shortcut overridden by Remote Nav";
+              name.append(note);
+              const inactive = document.createElement("s");
+              inactive.textContent = keyText;
+              combo.append(inactive);
+            } else {
+              combo.textContent = keyText;
+            }
             keyboardShortcutListEl.append(name, combo);
           }
         }
@@ -13831,8 +13843,9 @@ import {
           }
           $("remoteNavigationModifiers").disabled = !remoteKeyboardSettings.useRemoteNavigationKeys;
           $("remoteNavigationShortcutNotice").textContent = remoteKeyboardSettings.useRemoteNavigationKeys
-            ? `Remote Nav uses ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + arrows. PC Alt / Ctrl+Alt arrows above are overridden. Change this in Input bar settings.`
-            : "Remote Nav is off. The PC keybindings above apply.";
+            ? `Remote Nav: ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input bar settings.`
+            : "Remote Nav is off. The PC keybindings below apply.";
+          renderKeyboardShortcutList();
           $("physicalKeyboardStatus").textContent = physicalKeyboardConnected === null
             ? androidE2eMode
               ? "Automatic keyboard detection requires the updated Android app."

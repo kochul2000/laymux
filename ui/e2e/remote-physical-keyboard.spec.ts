@@ -70,6 +70,27 @@ async function settings(page: Page, tab = "Input bar") {
 const keybar = (page: Page) => page.evaluate(() => localStorage.getItem("laymux.remote.keybar"));
 const floatingPad = (page: Page) => page.locator('#floatingControls [data-key="dpad"]');
 
+test("단축키 표는 현재 Remote Nav와 덮어쓴 PC 조합을 즉시 구분한다", async ({ page }) => {
+  await openControls(page, { android: false });
+  await settings(page, "App");
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText("Remote Nav: Alt +");
+  await expect(page.locator("#keyboardShortcutList s")).toHaveCount(5);
+  await expect(page.locator("#keyboardShortcutList")).toContainText(
+    "PC shortcut overridden by Remote Nav",
+  );
+  await settings(page);
+  await page.locator("#remoteNavigationModifiers").selectOption("ctrlShift");
+  await settings(page, "App");
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText(
+    "Remote Nav: Ctrl + Shift +",
+  );
+  await settings(page);
+  await page.locator("#useRemoteNavigationKeys").uncheck();
+  await settings(page, "App");
+  await expect(page.locator("#keyboardShortcutList s")).toHaveCount(0);
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText("Remote Nav is off.");
+});
+
 test.use({ locale: "ko-KR" });
 
 for (const locale of ["en-US", "fr-FR"]) {

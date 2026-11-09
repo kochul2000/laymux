@@ -1112,6 +1112,7 @@
          Scope the readable UI typography and touch targets to Settings:
          terminal cells, key caps and workspace density keep their own rules. */
       #drawerSettingsView {
+        container: remote-settings / inline-size;
         --fs-xs: max(12px, calc(var(--remote-menu-font-size) * 12 / 13));
         --fs-sm: max(14px, var(--remote-menu-font-size));
         --fs-md: max(14px, var(--remote-menu-font-size));
@@ -1161,6 +1162,11 @@
         min-width: 0;
         color: var(--text-primary);
       }
+      .keyboard-shortcut-note {
+        display: block;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
 
       .keyboard-shortcut-list dd {
         margin: 0;
@@ -1168,6 +1174,21 @@
         font-family: ui-monospace, monospace;
         text-align: right;
         white-space: nowrap;
+      }
+
+      /* A large menu font can leave no readable description column. Keep each
+         action with its complete key combination, using the menu's text scale. */
+      @container remote-settings (max-width: 24em) {
+        .keyboard-shortcut-list {
+          grid-template-columns: minmax(0, 1fr);
+          row-gap: 4px;
+        }
+        .keyboard-shortcut-list dd {
+          margin-bottom: 12px;
+          text-align: left;
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
       }
 
       .settings-page-description {
