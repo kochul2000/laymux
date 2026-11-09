@@ -1653,11 +1653,22 @@ import {
             selectionHandleSize: remoteSelectionHandleSizeInput.value,
           });
           const persisted = persistDeviceDisplaySettings(normalized);
+          const opacityAdjustments = [
+            ["composerIdleOpacity", "Idle", remoteComposerIdleOpacityInput],
+            ["composerFocusedOpacity", "Focused", remoteComposerFocusedOpacityInput],
+            ["composerActiveOpacity", "Active", remoteComposerActiveOpacityInput],
+          ].filter(([key, , input]) => Number(input.value) !== normalized[key])
+            .map(([key, label]) => `${label} ${normalized[key]}%`);
           applyRemoteDisplaySettings(normalized);
           updateRemoteDisplaySettingsControls(
             persisted ? "Saved on this device." : "Could not save on this device.",
             !persisted,
           );
+          const opacityStatus = $("remoteComposerOpacityStatus");
+          opacityStatus.textContent = persisted
+            ? opacityAdjustments.length ? `Also adjusted: ${opacityAdjustments.join(", ")}.` : ""
+            : "Could not save on this device.";
+          opacityStatus.classList.toggle("error", !persisted);
         }
 
         function renderPcUpdateStatus(message = null, isError = false) {

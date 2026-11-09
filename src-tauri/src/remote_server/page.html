@@ -254,12 +254,13 @@
                 <span class="nav-number-unit">px</span>
               </label>
               <h3 class="settings-group-title">Composer opacity</h3>
+              <p id="remoteComposerOpacityHint" class="nav-settings-status">Idle ≤ Focused ≤ Active. Lowering a later state also lowers earlier states when needed.</p>
               <label class="nav-number-row" for="remoteComposerIdleOpacity">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Composer idle</span>
                   <span class="nav-number-desc">Visible without focus or activity</span>
                 </span>
-                <input id="remoteComposerIdleOpacity" type="number" min="20" max="100" step="5" />
+                <input id="remoteComposerIdleOpacity" type="number" min="20" max="100" step="5" aria-describedby="remoteComposerOpacityHint remoteComposerOpacityStatus" />
                 <span class="nav-number-unit">%</span>
               </label>
               <label class="nav-number-row" for="remoteComposerFocusedOpacity">
@@ -267,7 +268,7 @@
                   <span class="nav-toggle-name">Composer focused</span>
                   <span class="nav-number-desc">Empty editor with keyboard focus</span>
                 </span>
-                <input id="remoteComposerFocusedOpacity" type="number" min="20" max="100" step="5" />
+                <input id="remoteComposerFocusedOpacity" type="number" min="20" max="100" step="5" aria-describedby="remoteComposerOpacityHint remoteComposerOpacityStatus" />
                 <span class="nav-number-unit">%</span>
               </label>
               <label class="nav-number-row" for="remoteComposerActiveOpacity">
@@ -275,9 +276,10 @@
                   <span class="nav-toggle-name">Composer active</span>
                   <span class="nav-number-desc">Draft, suggestion, IME, or send activity</span>
                 </span>
-                <input id="remoteComposerActiveOpacity" type="number" min="20" max="100" step="5" />
+                <input id="remoteComposerActiveOpacity" type="number" min="20" max="100" step="5" aria-describedby="remoteComposerOpacityHint remoteComposerOpacityStatus" />
                 <span class="nav-number-unit">%</span>
               </label>
+              <p id="remoteComposerOpacityStatus" class="nav-settings-status" role="status"></p>
               <h3 class="settings-group-title">Workspace menu</h3>
               <label class="nav-number-row" for="remoteMenuFontSize">
                 <span class="nav-number-copy">
