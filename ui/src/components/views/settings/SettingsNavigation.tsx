@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
+import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import {
   BotIcon,
   ClipboardIcon,
@@ -86,6 +87,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
 export function SettingsNavigation({
   activeNav,
   profiles,
+  confirmationEnabled,
   onNavigate,
   onAddProfile,
   onRemoveProfile,
@@ -93,6 +95,7 @@ export function SettingsNavigation({
 }: {
   activeNav: string;
   profiles: readonly { name: string }[];
+  confirmationEnabled: boolean;
   onNavigate: (id: string) => void;
   onAddProfile: () => void;
   onRemoveProfile: (index: number) => void;
@@ -132,6 +135,7 @@ export function SettingsNavigation({
           <div className="settings-nav-heading">
             <h3>{t("nav.groupProfiles")}</h3>
           </div>
+          <p className="settings-profile-apply-hint">{t("nav.profileActionsImmediate")}</p>
           <button
             data-testid="nav-profile-defaults"
             className="settings-nav-button"
@@ -144,7 +148,7 @@ export function SettingsNavigation({
             <span className="settings-nav-label">{t("nav.profileDefaults")}</span>
           </button>
           {profiles.map((profile, index) => (
-            <div key={`profile-${index}`} className="settings-profile-nav">
+            <div key={`profile-${index}-${profile.name}`} className="settings-profile-nav">
               <button
                 className="settings-nav-button"
                 aria-label={profile.name}
@@ -155,15 +159,19 @@ export function SettingsNavigation({
                 <TerminalIcon size={16} />
                 <span className="settings-nav-label">{profile.name}</span>
               </button>
-              <button
+              <TwoClickConfirmButton
                 data-testid={`remove-profile-${index}`}
                 className="settings-profile-remove"
                 title={t("nav.deleteProfile")}
                 aria-label={t("nav.deleteProfile")}
-                onClick={() => onRemoveProfile(index)}
+                confirmationEnabled={confirmationEnabled}
+                confirmLabel={t("nav.confirmDeleteProfile", { name: profile.name })}
+                confirmChildren={t("nav.confirmDeleteProfileShort")}
+                onConfirm={() => onRemoveProfile(index)}
               >
                 <XIcon size={12} />
-              </button>
+                {t("nav.deleteProfile")}
+              </TwoClickConfirmButton>
             </div>
           ))}
           <button

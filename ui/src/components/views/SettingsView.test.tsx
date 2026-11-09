@@ -698,6 +698,8 @@ describe("SettingsView", () => {
 
     const removeBtn = screen.getByTestId("remove-profile-1");
     await user.click(removeBtn);
+    expect(useSettingsStore.getState().profiles).toHaveLength(2);
+    await user.click(removeBtn);
 
     expect(useSettingsStore.getState().profiles).toHaveLength(1);
   });
@@ -705,6 +707,15 @@ describe("SettingsView", () => {
   it("shows add profile button", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("add-profile-btn")).toBeInTheDocument();
+  });
+
+  it("전역 클릭 확인을 끄면 프로필 삭제도 첫 클릭에 적용한다", async () => {
+    useSettingsStore.setState({ confirmDestructiveActions: false });
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("remove-profile-1"));
+    expect(useSettingsStore.getState().profiles).toHaveLength(1);
+    useSettingsStore.setState({ confirmDestructiveActions: true });
   });
 
   // -- Profile sub-tabs --

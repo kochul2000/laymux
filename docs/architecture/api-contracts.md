@@ -79,6 +79,8 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 
 설정 모달은 닫힐 때 React Activity의 hidden 상태로 전환해 SettingsView의 로컬 초안·페이지 선택을 현재 앱 실행 동안 보존한다. 숨긴 동안 effects는 중지되고 대화상자는 포커스·접근성 대상에서 제외된다. 다시 열면 초안을 이어서 편집하며 명시적 변경 취소가 기존 reset 경로를 실행한다. 초안을 디스크에 저장하거나 다른 SettingsView 인스턴스와 공유하지 않는다.
 
+언어 변경과 프로필 추가·삭제는 즉시 적용이며 저장·변경 취소의 draft 범위에서 제외됨을 동작 근처와 실행 결과로 안내한다. 프로필 삭제는 전역 `confirmDestructiveActions`와 공용 TwoClickConfirmButton을 사용하며 확인 단계에서 대상 이름과 삭제 확인 글자를 표시한다([ADR-0378](../adr/0378-settings-immediate-action-feedback.md)). 사이드바의 삭제 버튼은 항상 프로필 이름 아래 독립 행을 차지하므로 확인 문구가 이름을 덮거나 버튼 이동 때문에 확인이 취소되지 않는다.
+
 ### 로딩 실패와 부분 복구
 
 `load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0119](../adr/0119-settings-type-error-partial-recovery.md)).

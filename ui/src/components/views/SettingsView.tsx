@@ -251,6 +251,7 @@ const LANGUAGE_OPTIONS: LanguageSetting[] = ["system", "ko", "en"];
 
 function StartupSection() {
   const { t } = useTranslation(["settings", "common"]);
+  const { notifyImmediate } = useSettingsDraft();
   const language = useSettingsStore((s) => s.language);
   const setLanguage = useSettingsStore((s) => s.setLanguage);
   const storeDefaultProfile = useSettingsStore((s) => s.defaultProfile);
@@ -282,7 +283,10 @@ function StartupSection() {
             data-testid="language-select"
             aria-label={t("settings:startup.language.title")}
             value={language}
-            onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
+            onChange={(e) => {
+              setLanguage(e.target.value as LanguageSetting);
+              notifyImmediate("startup.language.title");
+            }}
             className={inputCls}
           >
             {LANGUAGE_OPTIONS.map((lng) => (
@@ -4971,7 +4975,9 @@ function KeybindingsSection() {
 // Sections register flush/reset callbacks that SettingsView invokes on Save/Discard.
 
 type FlushFn = () => void;
+type ImmediateAction = "startup.language.title" | "nav.addProfile" | "nav.deleteProfile";
 interface SettingsDraftCtx {
+  notifyImmediate: (action: ImmediateAction) => void;
   registerFlush: (id: string, fn: FlushFn) => void;
   registerReset: (id: string, fn: FlushFn) => void;
   markDirty: (id: string) => void;
@@ -4980,6 +4986,7 @@ interface SettingsDraftCtx {
 }
 const defaultDraftValues = { current: new Map<string, unknown>() };
 const SettingsDraftContext = createContext<SettingsDraftCtx>({
+  notifyImmediate: () => {},
   registerFlush: () => {},
   registerReset: () => {},
   markDirty: () => {},
@@ -5076,6 +5083,8 @@ export function SettingsView() {
   const profiles = useSettingsStore((s) => s.profiles);
   const addProfile = useSettingsStore((s) => s.addProfile);
   const removeProfile = useSettingsStore((s) => s.removeProfile);
+  const confirmationEnabled = useSettingsStore((s) => s.confirmDestructiveActions);
+  const [immediateAction, setImmediateAction] = useState<ImmediateAction | null>(null);
   const [navChoice, setNavChoice] = useState<string>("startup");
   const settingsNavTarget = useUiStore((s) => s.settingsNavTarget);
   const setSettingsNavTarget = useUiStore((s) => s.setSettingsNavTarget);
@@ -5108,6 +5117,7 @@ export function SettingsView() {
 
   const handleAddProfile = () => {
     addProfile(makeProfileFromDefaults(`Profile ${profiles.length + 1}`, "", profileDefaults));
+    setImmediateAction("nav.addProfile");
   };
 
   const [saveLabel, setSaveLabel] = useState("Save");
@@ -5160,6 +5170,7 @@ export function SettingsView() {
       markDirty,
       clearDirtyFor,
       draftValues: draftValuesRef,
+      notifyImmediate: setImmediateAction,
     }),
     [registerFlush, registerReset, markDirty, clearDirtyFor],
   );
@@ -5221,10 +5232,12 @@ export function SettingsView() {
         <SettingsNavigation
           activeNav={activeNav}
           profiles={profiles}
+          confirmationEnabled={confirmationEnabled}
           onNavigate={setActiveNav}
           onAddProfile={handleAddProfile}
           onRemoveProfile={(index) => {
             removeProfile(index);
+            setImmediateAction("nav.deleteProfile");
             setActiveNav("startup");
           }}
           onOpenJson={handleOpenSettingsJson}
@@ -5277,7 +5290,9 @@ export function SettingsView() {
                       ? t("save.error")
                       : dirty
                         ? t("save.unsaved")
-                        : t("save.noChanges")}
+                        : immediateAction
+                          ? t("save.immediateApplied", { action: t(immediateAction) })
+                          : t("save.noChanges")}
             </span>
             <div className="flex flex-wrap justify-end gap-2">
               <Button

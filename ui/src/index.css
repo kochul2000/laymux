@@ -772,20 +772,31 @@
 .settings-profile-nav {
   position: relative;
 }
+.settings-profile-apply-hint {
+  margin: 4px 20px 8px;
+  color: var(--text-secondary);
+  font-size: var(--settings-desc-size);
+}
+.settings-profile-remove[data-confirming="true"] {
+  white-space: normal;
+}
 .settings-profile-nav .settings-nav-button {
-  padding-right: 32px;
+  padding-right: 12px;
 }
 .settings-profile-remove {
-  position: absolute;
-  top: 7px;
-  right: 14px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  gap: 6px;
+  width: calc(100% - 32px);
+  height: auto;
+  min-height: var(--settings-control-height);
+  margin: 0 16px 6px;
+  padding: 4px 8px;
   color: var(--red);
-  opacity: 0;
+  font-size: var(--fs-md);
+  opacity: 1;
   cursor: pointer;
 }
 .settings-profile-nav:hover .settings-profile-remove,
@@ -880,9 +891,6 @@
   }
   .settings-nav-footer .settings-json-button {
     justify-content: center;
-  }
-  .settings-profile-remove {
-    right: 3px;
   }
 }
 

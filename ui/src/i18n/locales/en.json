@@ -262,6 +262,9 @@
       "profileDefaults": "Defaults",
       "addProfile": "Add profile",
       "deleteProfile": "Delete profile",
+      "profileActionsImmediate": "Add and delete apply immediately. Save and Discard do not undo them.",
+      "confirmDeleteProfile": "Click again to delete profile {{name}} immediately",
+      "confirmDeleteProfileShort": "Confirm delete",
       "widgets": "Widgets",
       "groupGeneral": "General",
       "update": "Updates",
@@ -276,13 +279,14 @@
       "noChanges": "No changes to save",
       "saving": "Saving…",
       "retry": "Retry save",
-      "failed": "Saving failed. Your changes remain applied in the app. Retry saving. {{error}}"
+      "failed": "Saving failed. Your changes remain applied in the app. Retry saving. {{error}}",
+      "immediateApplied": "{{action}} applied immediately. Save and Discard affect pending edits only."
     },
     "startup": {
       "title": "Startup",
       "language": {
         "title": "Language",
-        "description": "App UI display language (System follows the OS locale)"
+        "description": "Applies immediately. Save and Discard do not undo this choice. System follows the OS locale."
       },
       "appTheme": {
         "title": "App Theme",

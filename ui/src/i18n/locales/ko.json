@@ -262,6 +262,9 @@
       "profileDefaults": "기본값",
       "addProfile": "프로필 추가",
       "deleteProfile": "프로필 삭제",
+      "profileActionsImmediate": "추가·삭제는 즉시 적용되며 저장·변경 취소로 되돌리지 않습니다.",
+      "confirmDeleteProfile": "프로필 {{name}}을 즉시 삭제하려면 다시 누르세요",
+      "confirmDeleteProfileShort": "삭제 확인",
       "widgets": "위젯",
       "groupGeneral": "일반",
       "update": "업데이트",
@@ -276,13 +279,14 @@
       "noChanges": "변경 사항 없음",
       "saving": "저장 중…",
       "retry": "다시 저장",
-      "failed": "저장하지 못했습니다. 변경 내용은 앱에 적용되어 있습니다. 다시 저장하세요. {{error}}"
+      "failed": "저장하지 못했습니다. 변경 내용은 앱에 적용되어 있습니다. 다시 저장하세요. {{error}}",
+      "immediateApplied": "{{action}} 즉시 적용됨. 저장·변경 취소는 대기 중인 편집에만 적용됩니다."
     },
     "startup": {
       "title": "시작",
       "language": {
         "title": "언어",
-        "description": "앱 UI 표시 언어 (시스템은 OS 로케일을 따름)"
+        "description": "즉시 적용되며 저장·변경 취소로 되돌리지 않습니다. 시스템은 OS 로케일을 따릅니다."
       },
       "appTheme": {
         "title": "앱 테마",

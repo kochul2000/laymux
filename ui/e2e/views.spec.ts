@@ -225,6 +225,7 @@ test.describe("SettingsView (via dock)", () => {
     const lastProfile = profiles.last();
     await lastProfile.locator("..").hover();
     await lastProfile.click();
+    await lastProfile.click();
 
     const countAfter = await page.locator("[data-testid^='remove-profile-']").count();
     expect(countAfter).toBe(countBefore - 1);
