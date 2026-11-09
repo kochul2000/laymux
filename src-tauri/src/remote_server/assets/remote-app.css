@@ -1044,29 +1044,23 @@
         position: sticky;
         top: 0;
         z-index: 1;
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, max(85px, calc(5.5em + 4px))), 1fr));
         /* The long Input bar panel must scroll instead of taking this flex
            item's height. Without an explicit zero shrink factor, the strip
            collapses to its padding and the tabs disappear on short screens. */
         flex: 0 0 auto;
         min-width: 0;
         gap: 4px;
-        padding: 0 12px;
+        padding: 0 4px;
         border-bottom: 1px solid var(--border);
         background: var(--panel);
-        overflow-x: auto;
-        scrollbar-width: none;
       }
-      .settings-tabs::-webkit-scrollbar {
-        display: none;
-      }
-      /* `1 0 auto`, not `1 1 0`: a shrinking tab would squeeze its label past
-         its own box (no ellipsis, nowrap) and the strip's overflow would never
-         engage. Growing-only tabs fill a wide drawer and scroll a narrow one. */
+      /* Wrap complete category names instead of hiding categories offscreen. */
       .settings-tab {
-        flex: 1 0 auto;
+        min-width: 0;
         min-height: 44px;
-        padding: 10px 8px;
+        padding: 4px 8px;
         border: 0;
         border-bottom: 2px solid transparent;
         border-radius: 0;
@@ -1074,7 +1068,8 @@
         color: var(--muted);
         font-size: var(--fs-sm);
         font-weight: 500;
-        white-space: nowrap;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
       .settings-tab:hover {
         color: var(--text-secondary);
@@ -1235,6 +1230,9 @@
       #drawerSettingsView :is(input:not([type="checkbox"]), select, button) {
         min-height: var(--settings-control-height);
         border-radius: 0;
+      }
+      #drawerSettingsView .settings-tabs .settings-tab {
+        min-height: 44px;
       }
       #drawerSettingsView :is(input:not([type="checkbox"]), select) {
         min-width: 0;
