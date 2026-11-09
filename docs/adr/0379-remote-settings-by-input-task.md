@@ -1,6 +1,6 @@
 # 0379. Remote 설정은 입력 과업을 기준으로 묶는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-09
 - Source: 사용자 UI 개선 요구, [#1300](https://github.com/kochul2000/laymux/issues/1300), [ADR-0214](0214-remote-settings-paginates-into-tabs.md), [ADR-0269](0269-remote-physical-keyboard-shortcuts.md)
 - Extends: ADR-0214의 설정 분류와 소속 항목을 정리한다.

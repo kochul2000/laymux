@@ -1,6 +1,6 @@
 # 0378. 설정의 즉시 적용 작업은 저장 초안과 구분하고 프로필 삭제는 공통 확인 정책을 따른다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-09
 - Source: 사용자 UI 개선 요구, [#1306](https://github.com/kochul2000/laymux/issues/1306), [api-contracts.md 설정 화면](../architecture/api-contracts.md), [ADR-0333](0333-destructive-confirmation-global-and-pane-control-bar.md)
 - Extends: ADR-0333의 클릭 확인 적용 대상을 설정 프로필 삭제로 확장한다.

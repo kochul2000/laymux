@@ -1,6 +1,6 @@
 # 0380. Remote 언어는 기기가 소유하고 제품 문구만 명시적으로 번역한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-09
 - Source: [이슈 #1297](https://github.com/kochul2000/laymux/issues/1297), [api-contracts.md 언어 설정·§13.4](../architecture/api-contracts.md), [ADR-0209](0209-remote-display-preferences-are-device-local.md), [ADR-0214](0214-remote-settings-paginates-into-tabs.md)
 - Extends: ADR-0209의 기기 로컬 표시 선호에 언어 선택을 추가한다.
