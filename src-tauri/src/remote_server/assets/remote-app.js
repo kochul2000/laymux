@@ -7703,14 +7703,22 @@ import {
           container.append(item);
         }
 
+        function syncNavigationAccessibility(open) {
+          if (!open && navigationPanel.contains(document.activeElement)) {
+            navToggleButton.focus({ preventScroll: true });
+          }
+          navigationPanel.inert = !open;
+          navToggleButton.setAttribute("aria-expanded", String(open));
+          navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+        }
+
         function setNavigationOpen(open) {
           if (!open) sharedTargetChanging = false;
           if (open) setDrawerView(leaseId ? "workspace" : "connection");
           const pinned = remoteNavigationPinnedForViewport();
           const nextOpen = open || pinned;
           document.querySelector(".app").classList.toggle("nav-open", nextOpen);
-          navToggleButton.setAttribute("aria-expanded", String(nextOpen));
-          navToggleButton.setAttribute("aria-label", nextOpen ? "Close navigation" : "Open navigation");
+          syncNavigationAccessibility(nextOpen);
           navScrim.hidden = !nextOpen || pinned;
           syncNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
@@ -7730,8 +7738,7 @@ import {
           const open = app.classList.contains("nav-open") || pinned;
           app.classList.toggle("nav-pinned", pinned);
           app.classList.toggle("nav-open", open);
-          navToggleButton.setAttribute("aria-expanded", String(open));
-          navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+          syncNavigationAccessibility(open);
           navScrim.hidden = !open || pinned;
           syncNavigationViewPolling();
           positionFloatingControls();
@@ -14587,9 +14594,10 @@ import {
         checkPcUpdateButton.addEventListener("click", () => {
           pcUpdateDialog.open();
         });
-        navToggleButton.addEventListener("click", () => {
+        navToggleButton.addEventListener("click", (event) => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);
+          if (open && event.detail === 0) navigationPinButton.focus({ preventScroll: true });
         });
         keepInputSurfaceFocus(navigationPinButton);
         navigationPinButton.addEventListener("click", () => {
