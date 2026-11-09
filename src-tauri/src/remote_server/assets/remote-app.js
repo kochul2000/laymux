@@ -5044,7 +5044,9 @@ import {
             setRemoteText(text, message);
             oauthRelayStatus.append(icon, text);
           } else {
-            setRemoteText(oauthRelayStatus, message);
+            const text = document.createElement("span");
+            setRemoteText(text, message);
+            oauthRelayStatus.append(text);
           }
           oauthRelayStatus.classList.toggle("error", kind === "error");
           oauthRelayStatus.classList.toggle("success", kind === "success");

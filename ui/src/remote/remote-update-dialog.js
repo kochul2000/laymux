@@ -134,7 +134,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         row.append(
           element("span", "lifecycle-step-icon", index < active ? "✓" : String(index + 1)),
         );
-        const body = element("div", "lifecycle-step-body", copy[stage]);
+        const body = element("div", "lifecycle-step-body");
+        body.append(element("span", "", copy[stage]));
         if (index === active) {
           const percent = progressPercent(progress);
           const detail = element("div", "lifecycle-step-detail");
