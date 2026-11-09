@@ -4,9 +4,29 @@ import {
   remoteKeyboardVisibility,
   resolveRemoteNavigationKey,
   readPhysicalKeyboardConnected,
+  isRemoteShortcutOverridden,
 } from "./remote-keyboard.js";
 
 const defaults = DEFAULT_REMOTE_KEYBOARD_SETTINGS;
+
+describe("Remote 단축키 도움말의 실제 우선순위", () => {
+  it("현재 Nav와 차단된 PC 방향키만 덮어쓴 것으로 표시한다", () => {
+    expect(isRemoteShortcutOverridden("Alt+Arrow", defaults)).toBe(true);
+    expect(isRemoteShortcutOverridden("Ctrl+Alt+Left", defaults)).toBe(true);
+    expect(isRemoteShortcutOverridden("Ctrl+Shift+Arrow", defaults)).toBe(false);
+    expect(isRemoteShortcutOverridden("Alt+L", defaults)).toBe(false);
+    expect(isRemoteShortcutOverridden("", defaults)).toBe(false);
+    expect(
+      isRemoteShortcutOverridden("Alt+Arrow", { ...defaults, useRemoteNavigationKeys: false }),
+    ).toBe(false);
+    expect(
+      isRemoteShortcutOverridden("Ctrl+Shift+Arrow", {
+        ...defaults,
+        remoteNavigationModifiers: "ctrlShift",
+      }),
+    ).toBe(true);
+  });
+});
 const key = (overrides: Partial<KeyboardEvent> = {}) => ({
   key: "ArrowUp",
   altKey: true,

@@ -528,11 +528,11 @@ test("a shared file opens confirmation on the connected terminal and attaches in
       }),
     ),
   ).toBe(true);
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).toBeVisible();
   await expect(page.locator("#sharedFilesTarget")).toContainText("Shell");
   await page.screenshot({ path: testInfo.outputPath("shared-file-confirmation.png") });
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "여기에 첨부", exact: true }).click();
+  await page.getByRole("button", { name: "Attach here", exact: true }).click();
   const chooser = await chooserPromise;
   expect(
     await page.evaluate(() =>
@@ -568,7 +568,7 @@ test("an unconnected shared file waits for terminal readiness then opens confirm
       count: 2,
     }),
   );
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).not.toBeVisible();
   await page.evaluate(() => {
     const target = window as AndroidLifecycleWindow;
     target.laymuxAndroidE2e!.onHttpResponse(
@@ -585,8 +585,8 @@ test("an unconnected shared file waits for terminal readiness then opens confirm
       }),
     );
   });
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
-  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 2개");
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).toBeVisible();
+  await expect(page.locator("#sharedFilesCount")).toHaveText("2 shared files");
 });
 
 test("cancel and Android back discard the shared offer without uploading", async ({ page }) => {
@@ -598,9 +598,9 @@ test("cancel and Android back discard the shared offer without uploading", async
       id,
     );
     if (id === "cancel-1")
-      await page.getByRole("button", { name: "첨부 취소", exact: true }).click();
+      await page.getByRole("button", { name: "Cancel attachment", exact: true }).click();
     else expect(await dismissTopRemoteLayer(page)).toBe(true);
-    await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Attach shared files" })).not.toBeVisible();
   }
   const state = await page.evaluate(
     () => (window as AndroidLifecycleWindow).__androidLifecycleState,
@@ -620,8 +620,8 @@ test("changing the shared-file PC returns to PC selection without consuming the 
       count: 1,
     }),
   );
-  await page.getByRole("button", { name: "대상 변경", exact: true }).click();
-  await page.getByRole("button", { name: "다른 PC", exact: true }).click();
+  await page.getByRole("button", { name: "Change target", exact: true }).click();
+  await page.getByRole("button", { name: "Another PC", exact: true }).click();
   await expect
     .poll(
       async () =>
@@ -660,11 +660,11 @@ test("changing the shared-file terminal confirms the selected target without dis
       count: 1,
     }),
   );
-  await page.getByRole("button", { name: "대상 변경", exact: true }).click();
-  await page.getByRole("button", { name: "다른 터미널", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  await page.getByRole("button", { name: "Change target", exact: true }).click();
+  await page.getByRole("button", { name: "Another terminal", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).not.toBeVisible();
   await page.locator('[data-pane-row="pane-2"]').click();
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).toBeVisible();
   await expect(page.locator("#sharedFilesTarget")).toContainText("Pane 2");
   expect(
     (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
@@ -682,12 +682,12 @@ test("a new share replaces the confirmation and keyboard focus stays inside it",
     ui.offerSharedFiles({ id: "old-share", count: 1 });
     ui.offerSharedFiles({ id: "new-share", count: 3 });
   });
-  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 3개");
+  await expect(page.locator("#sharedFilesCount")).toHaveText("3 shared files");
   await expect(page.locator("#sharedFilesAttach")).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(page.locator("#sharedFilesCancel")).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Attach shared files" })).not.toBeVisible();
   expect(
     (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
       .canceledShares,
@@ -704,7 +704,7 @@ test("a replaced share cannot be consumed by a pending older chooser", async ({ 
     }),
   );
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "여기에 첨부", exact: true }).click();
+  await page.getByRole("button", { name: "Attach here", exact: true }).click();
   await chooserPromise;
   await page.evaluate(() =>
     (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
@@ -717,7 +717,7 @@ test("a replaced share cannot be consumed by a pending older chooser", async ({ 
       (window as AndroidLifecycleWindow).laymuxRemoteUi!.takeSharedFileSelection(),
     ),
   ).toBe(false);
-  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 2개");
+  await expect(page.locator("#sharedFilesCount")).toHaveText("2 shared files");
   expect(
     (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
       .attachments,
@@ -927,9 +927,9 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
     page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  // Composer suggestions float above the terminal content, but their parent
-  // stacking context stays below the drawer. A widget can open navigation
-  // without blurring the composer, so exercise the real simultaneous state.
+  // Opening navigation moves focus into the drawer and dismisses composer
+  // suggestions. Back closes navigation first; a subsequent focused composer
+  // can open suggestions again and Back dismisses them before disconnecting.
   const composer = page.locator("#composerInput");
   await composer.fill("echo remembered");
   await composer.press("Control+Enter"); // composer.remote.send (ADR-0269)
@@ -939,9 +939,12 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
 
   await page.locator("#navToggle").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
-  await expect(page.locator("#composerAutocompleteList")).toBeVisible();
+  await expect(page.locator("#composerAutocompleteList")).toBeHidden();
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await composer.focus();
+  await composer.fill("");
+  await composer.fill("echo");
   await expect(page.locator("#composerAutocompleteList")).toBeVisible();
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
@@ -1091,6 +1094,13 @@ test("a stale OAuth forward cannot clear a newer relay opened after back", async
     { leaseId: "lease-1", sessionId: "oauth-session-2", pathAndQuery: "/callback?code=new" },
   ]);
   await expect(page.locator("#oauthRelayStatus")).toContainText("200");
+  await page.locator("#remoteLanguage").evaluate((select: HTMLSelectElement) => {
+    select.value = "ko";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.locator("#oauthRelayStatus")).toContainText("200");
+  await expect(page.locator("#oauthRelayStatus.success svg")).toHaveCount(1);
+  await page.screenshot({ path: "test-results/remote-oauth-language.png" });
 });
 
 test("the Android wrapper opens files through native and explains an outdated APK", async ({

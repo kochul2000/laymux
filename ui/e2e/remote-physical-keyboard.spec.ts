@@ -57,18 +57,49 @@ async function keyboardConnection(page: Page, connected: boolean) {
   }, connected);
 }
 
-async function settings(page: Page, tab = "Input bar") {
+async function settings(page: Page, tab = "Input") {
   if ((await page.locator("#navToggle").getAttribute("aria-expanded")) !== "true") {
     await page.locator("#navToggle").click();
   }
   if (await page.locator("#drawerSettingsView").isHidden()) {
     await page.locator("#drawerSettingsButton").click();
   }
-  await page.getByRole("tab", { name: tab, exact: true }).click();
+  await page.locator(`#settingsTab${tab === "Input" ? "InputBar" : tab}`).click();
+  if (
+    tab === "Input" &&
+    !(await page.locator("#physicalKeyboardSection").evaluate((el) => el.open))
+  ) {
+    await page.locator("#physicalKeyboardSection > summary").click();
+  }
 }
 
 const keybar = (page: Page) => page.evaluate(() => localStorage.getItem("laymux.remote.keybar"));
 const floatingPad = (page: Page) => page.locator('#floatingControls [data-key="dpad"]');
+
+test("단축키 표는 현재 Remote Nav와 덮어쓴 PC 조합을 즉시 구분한다", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("laymux.remote.language", JSON.stringify("en")),
+  );
+  await openControls(page, { android: false });
+  await settings(page);
+  await page.locator("#keyboardShortcutsSection > summary").click();
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText("Remote Nav: Alt +");
+  await expect(page.locator("#keyboardShortcutList s")).toHaveCount(5);
+  await expect(page.locator("#keyboardShortcutList")).toContainText(
+    "PC shortcut overridden by Remote Nav",
+  );
+  await settings(page);
+  await page.locator("#remoteNavigationModifiers").selectOption("ctrlShift");
+  await settings(page);
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText(
+    "Remote Nav: Ctrl + Shift +",
+  );
+  await settings(page);
+  await page.locator("#useRemoteNavigationKeys").uncheck();
+  await settings(page);
+  await expect(page.locator("#keyboardShortcutList s")).toHaveCount(0);
+  await expect(page.locator("#remoteNavigationShortcutNotice")).toContainText("Remote Nav is off.");
+});
 
 test.use({ locale: "ko-KR" });
 
@@ -175,15 +206,15 @@ test("이전 Keys 숨김 설정은 무시하고 플로팅 숨김 옵션만 변�
   await expect(floatingPad(page)).toHaveCount(0);
   await expect(page.locator("#keyBar")).toBeVisible();
   await settings(page, "Floating");
-  await page.getByLabel("Hide floating controls with physical keyboard", { exact: true }).uncheck();
+  await page.locator("#hideFloatingWithKeyboard").uncheck();
   await expect(floatingPad(page)).toBeVisible();
   await expect(page.locator("#keyBar")).toBeVisible();
-  await page.getByLabel("Hide floating controls with physical keyboard", { exact: true }).check();
+  await page.locator("#hideFloatingWithKeyboard").check();
   await settings(page);
   await expect(page.getByLabel("Hide Keys with physical keyboard", { exact: true })).toHaveCount(0);
   await expect(page.locator("#keyBar")).toBeVisible();
   await expect(floatingPad(page)).toHaveCount(0);
-  await expect(page.getByLabel("Use Remote Nav shortcuts", { exact: true })).toBeChecked();
+  await expect(page.locator("#useRemoteNavigationKeys")).toBeChecked();
   await page.screenshot({ path: info.outputPath("keyboard-settings.png") });
   await page.reload();
   await page.setContent(remoteClientMarkupWithoutXterm());
@@ -203,7 +234,9 @@ test("구형 Android bridge와 일반 브라우저는 키 입력 후에도 자�
     await expect(page.locator("#keyBar")).toBeVisible();
     await settings(page);
     await expect(page.locator("#physicalKeyboardStatus")).toContainText(
-      "requires the updated Android app",
+      android
+        ? "최신 Android 앱이 필요합니다"
+        : "이 브라우저는 키보드 자동 감지를 지원하지 않습니다.",
     );
   }
 });
@@ -347,8 +380,8 @@ test("브라우저의 실제 xterm 입력에서 기본 Nav와 PC 조합을 소�
 test("Nav 보조키 변경·해제는 즉시 적용되고 설정 입력은 가로채지 않는다", async ({ page }) => {
   const state = await connectKeyboardRemote(page);
   await settings(page);
-  await page.getByLabel("Nav shortcut", { exact: true }).selectOption("ctrlAlt");
-  await page.getByLabel("Use Remote Nav shortcuts", { exact: true }).focus();
+  await page.locator("#remoteNavigationModifiers").selectOption("ctrlAlt");
+  await page.locator("#useRemoteNavigationKeys").focus();
   await page.keyboard.press("Control+Alt+ArrowUp");
   await page.locator("#navToggle").click();
   await state.input.focus();
@@ -358,8 +391,8 @@ test("Nav 보조키 변경·해제는 즉시 적용되고 설정 입력은 가�
   await page.keyboard.type("a");
   await expect.poll(() => state.writes.join("")).toBe("a");
   await settings(page);
-  await page.getByLabel("Use Remote Nav shortcuts", { exact: true }).uncheck();
-  await expect(page.getByLabel("Nav shortcut", { exact: true })).toBeDisabled();
+  await page.locator("#useRemoteNavigationKeys").uncheck();
+  await expect(page.locator("#remoteNavigationModifiers")).toBeDisabled();
   await page.locator("#navToggle").click();
   await state.input.focus();
   await page.keyboard.press("Alt+ArrowDown");

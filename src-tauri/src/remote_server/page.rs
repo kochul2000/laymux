@@ -341,7 +341,7 @@ mod tests {
         assert!(
             html.contains("// capability above is what lets the reclaim follow the release drain.")
         );
-        assert!(html.contains("setStatus(\"Another client has control.\");"));
+        assert!(html.contains("setStatus(t(\"Another client has control.\"));"));
         assert!(html.contains("function maybeAutoConnect()"));
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
         // Three signals for one moment: tab switch, bfcache restore, network back.
@@ -368,7 +368,7 @@ mod tests {
         assert!(html.contains("const reclaimingOurOwn = !hostTookOver && autoConnectArmed();"));
         assert!(html.contains("if (!reclaimingOurOwn) discardResumeToken();"));
         assert!(html.contains("if (reclaimingOurOwn) {"));
-        assert!(html.contains("setConnectionHint(\"Reconnecting...\", false);"));
+        assert!(html.contains("setConnectionHint(t(\"Reconnecting...\"), false);"));
         // A heartbeat 409 (\"lease is not active\") does not name an owner, so it must
         // not be read as a takeover — an expiry while the phone was away answers the
         // same way. The claim settles ownership.
@@ -677,7 +677,7 @@ mod tests {
             "the install offer must sit inside the drawer"
         );
         // Hidden until something makes it actionable.
-        assert!(html.contains("<section id=\"installSection\" class=\"nav-section\" aria-label=\"Install this app\" hidden>"));
+        assert!(html.contains("<section id=\"installSection\" class=\"nav-section\" aria-label=\"Install this app\" hidden data-remote-i18n-aria-label=\"Install this app\">"));
     }
 
     /// ADR-0132: the device half of the widget-strip gate lives in the drawer.
@@ -699,7 +699,7 @@ mod tests {
         // Not `locked`: what this browser spends its rows on needs no lease, and
         // it has to be settable before the first connect.
         assert!(html.contains(
-            "<section id=\"displaySection\" class=\"nav-section\" aria-label=\"Display\">"
+            "<section id=\"displaySection\" class=\"nav-section\" aria-label=\"Display\" data-remote-i18n-aria-label=\"Display\">"
         ));
     }
 
@@ -1051,15 +1051,15 @@ mod tests {
         assert!(html.contains("id=\"statusSpinner\""));
         assert!(html.contains("statusEl.setAttribute(\"aria-busy\", busy ? \"true\" : \"false\");"));
         assert!(html.contains("statusEl.classList.toggle(\"warning\", warning);"));
-        assert!(
-            html.contains("setBusyStatus(\"Connection interrupted. Reconnecting…\", false, true);")
-        );
+        assert!(html
+            .contains("setBusyStatus(t(\"Connection interrupted. Reconnecting…\"), false, true);"));
         assert!(html.contains(".input-mode-toggle {"));
         assert!(html.contains("width: 34px;"));
         assert!(html.contains("height: var(--key-bar-control-height);"));
         assert!(!html.contains("id=\"inputModeLabel\""));
-        assert!(html
-            .contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
+        assert!(html.contains(
+            "setRemoteAttribute(inputModeToggleButton, \"aria-label\", inputModeActionLabel);"
+        ));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains(
@@ -1074,7 +1074,9 @@ mod tests {
         ));
         assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
         assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
-        assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
+        assert!(html.contains(
+            "<button id=\"exit\" class=\"danger\" data-remote-i18n=\"Exit\">Exit</button>"
+        ));
         assert!(!html.contains("id=\"exit\" class=\"danger\" disabled"));
         assert!(html.contains("async function exitRemote()"));
         assert!(
@@ -1142,7 +1144,7 @@ mod tests {
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
-        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open"));
+        assert!(html.contains("<button id=\"openFileViewer\" type=\"button\" disabled data-remote-i18n=\"Open\">Open</button>"));
         // The Files button's unread dot replaced `From host` (ADR-0291): the
         // input is never filled from the PC, and only the button tap reads the
         // capability-gated status.
@@ -1182,7 +1184,7 @@ mod tests {
         assert!(html.contains("\"/remote/v1/file-viewer/list\""));
         // Entry names are text, never markup: a hostile file name must not
         // become HTML in this document.
-        assert!(html.contains("name.textContent = entry.name;"));
+        assert!(html.contains("setRemoteText(name, entry.name);"));
         assert!(!html.contains("/remote/viewer/"));
         assert!(!html.contains("window.open(\"/remote/viewer/\""));
         assert!(!html.contains("laymux:file-viewer-ready"));
@@ -1204,7 +1206,7 @@ mod tests {
         // Images stay a decoded `data:` URL and text stays textContent — neither
         // path may become HTML in this document.
         assert!(html.contains("/^data:image\\//i.test(payload.dataUrl || \"\")"));
-        assert!(html.contains("fileViewerTextElement.textContent = payload.content || \"\";"));
+        assert!(html.contains("setRemoteText(fileViewerTextElement, payload.content || \"\");"));
         assert!(!html.contains("fileViewerTextElement.innerHTML"));
     }
 
@@ -1383,9 +1385,9 @@ mod tests {
         assert!(!html.contains("order: KEY_ORDER,"));
         assert!(!html.contains("function resolveKeyIds()"));
         assert!(html.contains("const KEY_CATEGORIES = ["));
-        assert!(html.contains("id: \"nav\", name: \"Navigation\""));
-        assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
-        assert!(html.contains("id: \"fn\", name: \"Function\""));
+        assert!(html.contains("id: \"nav\", name: t(\"Navigation\")"));
+        assert!(html.contains("id: \"ctrl\", name: t(\"Ctrl keys\")"));
+        assert!(html.contains("id: \"fn\", name: t(\"Function\")"));
         assert!(html.contains("function renderKeyPopover()"));
         assert!(html.contains("function renderInputLayoutEditor()"));
         // Chips move by long-press drag across segments, rows, and the hidden section;
@@ -1397,7 +1399,9 @@ mod tests {
             "drop.element.classList.add(drop.after ? \"drop-after\" : \"drop-before\");"
         ));
         assert!(html.contains("function installSettingsTabs()"));
-        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset input action layout\");"));
+        assert!(html.contains(
+            "setRemoteAttribute(reset, \"aria-label\", t(\"Reset input action layout\"));"
+        ));
         assert!(html.contains("`Move ${hint} to start`"));
         assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
@@ -1530,7 +1534,7 @@ mod tests {
         assert!(html.contains("function canPlaceInputAction(actionId, row)"));
         // Tapping a hidden chip is "use this", not "select this".
         assert!(html.contains("function useInputAction(actionId)"));
-        assert!(html.contains("hiddenOption.textContent = \"Hidden\";"));
+        assert!(html.contains("setRemoteText(hiddenOption, t(\"Hidden\"));"));
         assert!(html.contains("return actionId !== \"keys\" || row === \"main\";"));
         assert!(html.contains("keyBarConfig.expanded = false;"));
         assert!(!html.contains("id=\"keyBarSettings\""));
@@ -1550,7 +1554,7 @@ mod tests {
         assert!(html.contains("notifRecent: { label: \"N←\", nav: [\"notification\", \"recent\"]"));
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
         // Grouped in the hidden section, with the flick pad placed by default.
-        assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
+        assert!(html.contains("id: \"step\", name: t(\"Pane/Alert nav\")"));
         assert!(html.contains("\"soft:navPad\""));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
         assert!(html.contains("const NAV_FLICK_TARGETS = REMOTE_NAV_TARGETS;"));
@@ -1568,9 +1572,9 @@ mod tests {
         assert!(html.contains("if (!leaseId || navStepPending >= 2) return;"));
         assert!(html.contains("await loadNavigation(data.target.terminalId || null);"));
         assert!(
-            html.contains("no_included_panes: \"Every pane is excluded from pane navigation.\"")
+            html.contains("no_included_panes: t(\"Every pane is excluded from pane navigation.\")")
         );
-        assert!(html.contains("no_unread_notifications: \"No unread notifications.\""));
+        assert!(html.contains("no_unread_notifications: t(\"No unread notifications.\")"));
         // Nav keys gate on the lease only (escape-seq keys need a terminal
         // too); alert keys idle at zero unread and carry one count badge.
         assert!(html.contains("const isAlertKey = def.nav && def.nav[0] === \"notification\";"));
@@ -1948,7 +1952,9 @@ mod tests {
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
         assert!(html.contains("function renderComposerSettingsSection()"));
-        assert!(html.contains("<h2 class=\"nav-section-title\">Composer</h2>"));
+        assert!(html.contains(
+            "<h2 class=\"nav-section-title\" data-remote-i18n=\"Composer\">Composer</h2>"
+        ));
         assert!(html.contains("\"composerHideAgentInputToggle\""));
         assert!(html.contains("\"Hide unused agent input\""));
         assert!(html.contains("function scrollTowardComposerBottom()"));
@@ -2156,7 +2162,7 @@ mod tests {
 
         assert!(html.contains("error.status = status;"));
         assert!(heartbeat_error.contains("isFatalRemoteControlError(err) || heartbeatTimedOut()"));
-        assert!(heartbeat_error.contains("loseRemoteControl(`Control returned to the host."));
+        assert!(heartbeat_error.contains("loseRemoteControl(tr`Control returned to the host."));
         assert!(heartbeat_error.contains("scheduleTransientConnectionNotice(\"heartbeat\")"));
         assert!(heartbeat_error.contains("scheduleHeartbeatRetry()"));
         assert!(heartbeat_request.contains("signal: controller.signal"));

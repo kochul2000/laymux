@@ -1,4 +1,5 @@
 import { taskStatusGlyph } from "../lib/task-status-glyph";
+import { clearRemoteTextBinding } from "./remote-i18n.js";
 export { fileKindIconName, fileKindColor, FILE_KIND_ICON_SIZE } from "../lib/file-kind-icon";
 import {
   ArrowDown,
@@ -149,6 +150,7 @@ export function createRemoteIcon(
 }
 
 export function setRemoteIcon(host, name, options) {
+  clearRemoteTextBinding(host);
   host.replaceChildren(createRemoteIcon(name, options));
 }
 

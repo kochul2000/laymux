@@ -68,6 +68,27 @@ let mockAppUpdateStatus: typeof DEFAULT_APP_UPDATE_STATUS & { channel: string } 
   DEFAULT_APP_UPDATE_STATUS;
 
 describe("SettingsView", () => {
+  it("저장 실패는 오류와 재시도를 유지하고 추가 편집 취소 뒤에도 재시도한다", async () => {
+    const user = userEvent.setup();
+    vi.mocked(persistSession).mockRejectedValueOnce(new Error("disk full"));
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("pane-link-enabled-toggle");
+    await user.click(toggle);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
+    expect(screen.getByTestId("save-settings-btn")).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByTestId("discard-settings-btn"));
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent("disk full");
+    await user.click(screen.getByTestId("save-settings-btn"));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(persistSession).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("save-settings-btn")).toBeDisabled();
+  });
+
   it("pane 링크 토글은 기본 켬이며 저장 뒤 끔이 적용된다", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
@@ -677,6 +698,8 @@ describe("SettingsView", () => {
 
     const removeBtn = screen.getByTestId("remove-profile-1");
     await user.click(removeBtn);
+    expect(useSettingsStore.getState().profiles).toHaveLength(2);
+    await user.click(removeBtn);
 
     expect(useSettingsStore.getState().profiles).toHaveLength(1);
   });
@@ -684,6 +707,15 @@ describe("SettingsView", () => {
   it("shows add profile button", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("add-profile-btn")).toBeInTheDocument();
+  });
+
+  it("전역 클릭 확인을 끄면 프로필 삭제도 첫 클릭에 적용한다", async () => {
+    useSettingsStore.setState({ confirmDestructiveActions: false });
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("remove-profile-1"));
+    expect(useSettingsStore.getState().profiles).toHaveLength(1);
+    useSettingsStore.setState({ confirmDestructiveActions: true });
   });
 
   // -- Profile sub-tabs --
@@ -796,7 +828,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByTestId("add-keybinding-btn")).toBeInTheDocument();
   });
 
@@ -804,7 +836,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByTestId("default-keybindings")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Shift+B")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Alt+1")).toBeInTheDocument();
@@ -815,7 +847,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Draft should show the new binding but store should not have it yet
@@ -834,7 +866,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     // Remove the custom keybinding
     await user.click(screen.getByTestId("remove-keybinding-0"));
 
@@ -850,7 +882,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Discard
@@ -864,14 +896,14 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Navigate away
-    await user.click(screen.getByText("Startup"));
+    await user.click(screen.getByTestId("nav-startup"));
 
     // Navigate back
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
 
     // Save should flush the added keybinding
     await user.click(screen.getByTestId("save-settings-btn"));
@@ -884,7 +916,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     // pane.focus 기본값 kbd를 클릭해 캡처 시작
     await user.click(screen.getByText("Alt+Arrow"));
     const captureBox = screen.getByText("Press keys...");
@@ -909,7 +941,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     expect(screen.getByTestId("add-color-scheme-btn")).toBeInTheDocument();
   });
 
@@ -918,7 +950,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Store should be unchanged
@@ -934,7 +966,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // Delete the first scheme
     await user.click(screen.getByText("Delete"));
 
@@ -951,7 +983,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const originalName = useSettingsStore.getState().colorSchemes[0].name;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // The name input is a text input, not the select dropdown
     const nameInput = screen
       .getAllByDisplayValue(originalName)
@@ -973,7 +1005,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Discard
@@ -988,14 +1020,14 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Navigate away
-    await user.click(screen.getByText("Startup"));
+    await user.click(screen.getByTestId("nav-startup"));
 
     // Navigate back
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
 
     // Save should flush the added scheme
     await user.click(screen.getByTestId("save-settings-btn"));
@@ -1006,7 +1038,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // The preview should exist and show draft values
     const preview = document.querySelector("[class*='font-mono']") as HTMLElement;
     expect(preview).toBeTruthy();
@@ -1159,7 +1191,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("Pane")).toBeInTheDocument();
     expect(screen.getByText("UI")).toBeInTheDocument();

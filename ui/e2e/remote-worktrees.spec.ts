@@ -1,6 +1,8 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
+test.use({ locale: "ko-KR" });
+
 const main = {
   path: "/work/main",
   branch: "main",

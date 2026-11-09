@@ -161,7 +161,9 @@ async function installApiMocks(
 }
 
 async function openDeviceSettings(page: Page) {
-  await page.locator("#navToggle").click();
+  if ((await page.locator("#navToggle").getAttribute("aria-expanded")) !== "true") {
+    await page.locator("#navToggle").click();
+  }
   await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
   // Settings is paginated; the display preferences live on their own tab.
   await page

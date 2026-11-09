@@ -47,7 +47,7 @@ for (const [width, drawerWidth] of [
       await page.screenshot({ path: "../.screenshots/settings-remote-display.png" });
     }
 
-    for (const name of ["Input bar", "Floating", "Composer", "Display", "Panels", "App"]) {
+    for (const name of ["Input", "Floating", "Composer", "Display", "Panels", "App"]) {
       await page.getByRole("tab", { name, exact: true }).click();
       const panel = page.getByRole("tabpanel");
       await expect(panel).toBeVisible();
@@ -57,7 +57,7 @@ for (const [width, drawerWidth] of [
           titles.map((title) => parseFloat(getComputedStyle(title).fontSize)),
         );
       for (const titleSize of titleSizes) expect(titleSize).toBeLessThanOrEqual(18);
-      if (name === "Input bar") {
+      if (name === "Input") {
         // Validate the expanded editors too, including the minimum 200px menu.
         await page.locator('#inputLayoutEditor [data-layout-action="soft:c-c"]').click();
         for (const id of ["inputAvailableKeys", "inputCustomKey", "inputButtonSizes"]) {

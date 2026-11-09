@@ -1,3 +1,4 @@
+import { setRemoteAttribute, setRemoteHtml, t, setRemoteText } from "./remote-i18n.js";
 import { setRemoteIcon } from "./remote-icons.js";
 
 // Workspace operations stay local to the Remote surface; the host owns names.
@@ -7,26 +8,10 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
   dialog.className = "workspace-manager";
   dialog.id = "workspaceManager";
   dialog.setAttribute("aria-labelledby", "workspaceManagerTitle");
-  dialog.innerHTML = `
-    <div class="workspace-manager-heading">
-      <h2 id="workspaceManagerTitle"></h2>
-      <button type="button" class="item-manager-dismiss" data-workspace-action="close" aria-label="Close workspace management" title="Close menu"></button>
-    </div>
-    <div id="workspaceManagerActions">
-      <button type="button" data-workspace-action="rename">Rename workspace</button>
-      <button type="button" data-workspace-action="template">Save as template</button>
-      <button type="button" data-workspace-action="hide">Hide workspace</button>
-      <button type="button" data-workspace-action="remove" class="pane-close-button" hidden>Close workspace</button>
-    </div>
-    <form id="workspaceRenameForm" hidden>
-      <label for="workspaceNameInput">Workspace name</label>
-      <input id="workspaceNameInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required />
-      <div class="workspace-manager-footer">
-        <button type="button" data-workspace-action="cancel">Cancel</button>
-        <button type="submit" class="primary">Save</button>
-      </div>
-    </form>
-    <p role="alert" hidden></p>`;
+  setRemoteHtml(
+    dialog,
+    '\n    <div class="workspace-manager-heading">\n      <h2 id="workspaceManagerTitle"></h2>\n      <button type="button" class="item-manager-dismiss" data-workspace-action="close" aria-label="Close workspace management" title="Close menu" data-remote-i18n-title="Close menu" data-remote-i18n-aria-label="Close workspace management"></button>\n    </div>\n    <div id="workspaceManagerActions">\n      <button type="button" data-workspace-action="rename" data-remote-i18n="Rename workspace">Rename workspace</button>\n      <button type="button" data-workspace-action="template" data-remote-i18n="Save as template">Save as template</button>\n      <button type="button" data-workspace-action="hide" data-remote-i18n="Hide workspace">Hide workspace</button>\n      <button type="button" data-workspace-action="remove" class="pane-close-button" hidden data-remote-i18n="Close workspace">Close workspace</button>\n    </div>\n    <form id="workspaceRenameForm" hidden>\n      <label for="workspaceNameInput" data-remote-i18n="Workspace name">Workspace name</label>\n      <input id="workspaceNameInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required />\n      <div class="workspace-manager-footer">\n        <button type="button" data-workspace-action="cancel" data-remote-i18n="Cancel">Cancel</button>\n        <button type="submit" class="primary" data-remote-i18n="Save">Save</button>\n      </div>\n    </form>\n    <p role="alert" hidden></p>',
+  );
   document.body.append(dialog);
   setRemoteIcon(dialog.querySelector('[data-workspace-action="close"]'), "X");
   const title = dialog.querySelector("h2");
@@ -64,10 +49,16 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
     });
     hideButton.disabled = value || !canHide;
     removeButton.disabled = value || !canRemove;
-    removeButton.title = canRemove
-      ? "Close workspace"
-      : "The last visible workspace cannot be closed";
-    hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";
+    setRemoteAttribute(
+      removeButton,
+      "title",
+      canRemove ? t("Close workspace") : t("The last visible workspace cannot be closed"),
+    );
+    setRemoteAttribute(
+      hideButton,
+      "title",
+      canHide ? t("Hide workspace") : t("The last visible workspace cannot be hidden"),
+    );
   }
 
   async function perform(operation) {
@@ -80,7 +71,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
       if (revision === selectedRevision) close();
     } catch (err) {
       if (revision !== selectedRevision || !authorized()) return;
-      error.textContent = err.message || String(err);
+      setRemoteText(error, err.message || String(err));
       error.hidden = false;
     } finally {
       if (revision === selectedRevision) setBusy(false);
@@ -92,7 +83,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
     actions.hidden = true;
     form.hidden = false;
     formMode = "rename";
-    form.querySelector("label").textContent = "Workspace name";
+    setRemoteText(form.querySelector("label"), t("Workspace name"));
     input.value = target.name;
     input.focus();
     input.select();
@@ -102,7 +93,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
     formMode = "template";
     actions.hidden = true;
     form.hidden = false;
-    form.querySelector("label").textContent = "Template name";
+    setRemoteText(form.querySelector("label"), t("Template name"));
     input.value = target.name;
     input.focus();
     input.select();
@@ -119,8 +110,10 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
     if (!authorized()) return;
     const name = input.value.trim();
     if (!name) {
-      error.textContent =
-        formMode === "template" ? "Enter a template name." : "Enter a workspace name.";
+      setRemoteText(
+        error,
+        formMode === "template" ? t("Enter a template name.") : t("Enter a workspace name."),
+      );
       error.hidden = false;
       input.focus();
       return;
@@ -177,7 +170,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
       canHide = canHideWorkspace;
       canRemove = Boolean(remove && options.canClose);
       removeButton.hidden = !remove;
-      title.textContent = target.name;
+      setRemoteText(title, target.name);
       actions.hidden = false;
       form.hidden = true;
       error.hidden = true;
@@ -198,7 +191,11 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
       canRemove = Boolean(remove && workspaces.filter((item) => !item.hidden).length > 1);
       removeButton.disabled = busy || !canRemove;
       hideButton.disabled = busy || !canHide;
-      hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";
+      setRemoteAttribute(
+        hideButton,
+        "title",
+        canHide ? t("Hide workspace") : t("The last visible workspace cannot be hidden"),
+      );
     },
     isOpen: () => dialog.open,
     isOpenFor: (id) => dialog.open && target?.id === id,

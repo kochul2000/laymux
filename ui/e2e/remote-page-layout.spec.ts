@@ -951,7 +951,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
     // Returning from Connection retains App; select Input bar explicitly.
     await expect(page.locator("#settingsPanelApp")).toBeVisible();
-    await page.getByRole("tab", { name: "Input bar", exact: true }).click();
+    await page.getByRole("tab", { name: "Input", exact: true }).click();
     await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
     await expect(page.locator("#displaySection")).toBeHidden();
     await page.locator('#settingsTabs [data-settings-panel="display"]').click();
@@ -1280,9 +1280,9 @@ test.describe("remote mobile layout", () => {
     const beta = page.locator(".workspace-item", { hasText: "Beta" });
     await expect(beta.locator(".workspace-pane-row")).toHaveCount(1);
     await expect(beta.locator(".pane-env")).toHaveText("PS");
-    await expect(beta.locator(".pane-activity")).toHaveText("running");
+    await expect(beta.locator(".pane-activity")).toHaveText("Running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
-    const commandStatus = beta.getByRole("img", { name: "Command running" });
+    const commandStatus = beta.getByRole("img", { name: "Active" });
     await expect(commandStatus).toHaveCount(1);
     await expect(commandStatus).not.toHaveAttribute("title");
     await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
@@ -1638,7 +1638,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#navToggle").click();
 
     const beta = page.locator(".workspace-item", { hasText: "Beta" });
-    await expect(beta.locator(".pane-activity")).toHaveText("running");
+    await expect(beta.locator(".pane-activity")).toHaveText("Running");
     await expect(
       beta.locator('.pane-command-status svg[data-remote-icon-name="Hourglass"]'),
     ).toHaveCount(1);

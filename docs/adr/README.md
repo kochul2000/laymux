@@ -401,6 +401,9 @@ ADR 이 필요한 대표 기준:
 | [0375](0375-codex-startup-color-owner-reply.md) | Codex 복원 최초 색상 응답은 초기 테마 snapshot으로 PTY 소유자가 전달한다 | Accepted |
 | [0376](0376-claude-slash-command-display-observation.md) | Claude 슬래시 명령의 완성된 이름을 제출 경계에서 관측한다 | Accepted |
 | [0377](0377-stack-strip-plus-appends.md) | 스택 전환 줄의 +는 가장 오른쪽에 레이어를 추가한다 | Accepted |
+| [0378](0378-settings-immediate-action-feedback.md) | 설정 즉시 적용 안내와 프로필 삭제 확인 | Accepted |
+| [0379](0379-remote-settings-by-input-task.md) | Remote 설정을 입력 과업에 따라 묶는다 | Accepted |
+| [0380](0380-remote-device-language-and-message-boundaries.md) | Remote 언어는 기기가 소유하고 제품 문구만 명시적으로 번역한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

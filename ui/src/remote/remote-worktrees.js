@@ -1,6 +1,13 @@
+import { setRemoteText, tr, t, setRemoteAttribute, joinRemoteMessages } from "./remote-i18n.js";
 /* global document, window */
-import { worktreeBlockerLabel, worktreeBranchLabel } from "../lib/worktree-presentation.ts";
-import { worktreeFolderName, worktreeRowStatus } from "../lib/worktree-display.ts";
+import {
+  formatWorktreeBlockerLabel as blockerLabel,
+  worktreeBranchLabel as branchLabel,
+} from "../lib/worktree-presentation.ts";
+import { worktreeFolderName, worktreeRowStatus as rowStatus } from "../lib/worktree-display.ts";
+const worktreeBlockerLabel = (code) => blockerLabel(code, t);
+const worktreeBranchLabel = (branch) => branchLabel(branch, t);
+const worktreeRowStatus = (entry, value) => rowStatus(entry, value, true, t);
 
 /** Remote owns presentation only; the host owns Git inspection and removal protection. */
 export function createRemoteWorktrees({
@@ -52,7 +59,7 @@ export function createRemoteWorktrees({
   const message = (reason) => (reason instanceof Error ? reason.message : String(reason));
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
-    if (text !== undefined) element.textContent = text;
+    if (text !== undefined) setRemoteText(element, text);
     if (className) element.className = className;
     return element;
   };
@@ -69,7 +76,7 @@ export function createRemoteWorktrees({
       body: JSON.stringify({ leaseId: owner.leaseId, ...body }),
     });
   const counts = (value) =>
-    `변경 ${value.trackedChanges} · 미추적 ${value.untrackedFiles} · 무시 ${value.ignoredFiles}`;
+    tr`변경 ${value.trackedChanges} · 미추적 ${value.untrackedFiles} · 무시 ${value.ignoredFiles}`;
 
   function renderList() {
     const focusedPath = list.contains(document.activeElement)
@@ -78,9 +85,11 @@ export function createRemoteWorktrees({
     const entries = snapshot?.worktrees || [];
     const candidates = entries.filter((entry) => inspections.get(entry.path)?.value?.canRemove);
     const pending = error ? 0 : entries.length - inspections.size;
-    $("worktreesAll").textContent = `전체 ${entries.length}`;
-    $("worktreesCandidates").textContent =
-      `정리 후보 ${loading || pending ? "· 검사 중" : candidates.length}`;
+    setRemoteText($("worktreesAll"), tr`전체 ${entries.length}`);
+    setRemoteText(
+      $("worktreesCandidates"),
+      tr`정리 후보 ${loading || pending ? t("· 검사 중") : candidates.length}`,
+    );
     for (const [id, value] of [
       ["worktreesAll", "all"],
       ["worktreesCandidates", "candidates"],
@@ -88,20 +97,24 @@ export function createRemoteWorktrees({
       $(id).classList.toggle("active", filter === value);
       $(id).setAttribute("aria-selected", String(filter === value));
     }
-    $("worktreesRepo").textContent = worktreeFolderName(snapshot?.repositoryPath || "");
-    $("worktreesRepo").title = snapshot?.repositoryPath || "";
+    setRemoteText($("worktreesRepo"), worktreeFolderName(snapshot?.repositoryPath || ""));
+    setRemoteAttribute($("worktreesRepo"), "title", snapshot?.repositoryPath || "");
     $("worktreesRefresh").disabled = removing || loading;
     status.classList.toggle("error", Boolean(error));
-    status.textContent =
+    const statusMessage =
       error ||
       notice ||
       (loading
-        ? "워크트리 목록을 읽고 있습니다…"
+        ? t("워크트리 목록을 읽고 있습니다…")
         : pending
-          ? `내용 검사 중 · ${inspections.size}/${entries.length}`
+          ? tr`내용 검사 중 · ${inspections.size}/${entries.length}`
           : "");
-    if (snapshot?.usageWarnings?.length)
-      status.textContent += ` ${snapshot.usageWarnings.join(" · ")}`;
+    setRemoteText(
+      status,
+      snapshot?.usageWarnings?.length
+        ? tr`${statusMessage} ${snapshot.usageWarnings.join(" · ")}`
+        : statusMessage,
+    );
     list.replaceChildren();
     list.hidden = Boolean(selected);
     const visible = filter === "all" ? entries : candidates;
@@ -115,15 +128,15 @@ export function createRemoteWorktrees({
       row.append(node("strong", worktreeFolderName(entry.path)));
       const path = node(
         "span",
-        `${worktreeBranchLabel(entry.branch)}${entry.isMain ? " · 기본" : ""}`,
+        tr`${worktreeBranchLabel(entry.branch)}${entry.isMain ? t(" · 기본") : ""}`,
         "worktree-path",
       );
-      path.title = entry.path;
+      setRemoteAttribute(path, "title", entry.path);
       row.append(path);
       const summary = error
-        ? "목록 갱신 실패"
+        ? t("목록 갱신 실패")
         : result?.error
-          ? `검사 실패: ${result.error}`
+          ? tr`검사 실패: ${result.error}`
           : worktreeRowStatus(entry, value);
       row.append(node("span", summary, "worktree-meta"));
       list.append(row);
@@ -132,7 +145,7 @@ export function createRemoteWorktrees({
       list.append(
         node(
           "p",
-          pending ? "검사가 끝난 정리 후보부터 표시합니다." : "현재 정리 후보가 없습니다.",
+          pending ? t("검사가 끝난 정리 후보부터 표시합니다.") : t("현재 정리 후보가 없습니다."),
           "github-status",
         ),
       );
@@ -153,15 +166,15 @@ export function createRemoteWorktrees({
     heading.append(
       node(
         "strong",
-        `${worktreeFolderName(selected.path)} · ${worktreeBranchLabel(selected.branch)}`,
+        tr`${worktreeFolderName(selected.path)} · ${worktreeBranchLabel(selected.branch)}`,
       ),
-      button("상세 닫기", clearSelection, removing),
+      button(t("상세 닫기"), clearSelection, removing),
     );
     detail.append(heading, node("p", selected.path, "worktree-detail-path"));
     const actions = node("div", undefined, "worktree-actions");
     const selectedPath = selected.path;
     actions.append(
-      button("경로 복사", () => {
+      button(t("경로 복사"), () => {
         const revision = selectionRevision;
         copy(selectedPath).catch((reason) => {
           if (isOpen() && revision === selectionRevision) {
@@ -174,7 +187,7 @@ export function createRemoteWorktrees({
     detail.append(actions);
     if (detailError) detail.append(node("p", detailError, "worktree-error"));
     if (!inspection) {
-      if (!detailError) detail.append(node("p", error || "최신 상태를 검사하고 있습니다…"));
+      if (!detailError) detail.append(node("p", error || t("최신 상태를 검사하고 있습니다…")));
       return;
     }
     detail.append(
@@ -185,16 +198,20 @@ export function createRemoteWorktrees({
       node(
         "p",
         inspection.upstream
-          ? `${inspection.upstream} · 앞섬 ${inspection.ahead ?? "?"} / 뒤처짐 ${inspection.behind ?? "?"}`
-          : "추적 브랜치 없음",
+          ? tr`${inspection.upstream} · 앞섬 ${inspection.ahead ?? "?"} / 뒤처짐 ${inspection.behind ?? "?"}`
+          : t("추적 브랜치 없음"),
         "worktree-meta",
       ),
     );
     for (const usage of inspection.usage || []) {
       const state =
-        usage.kind === "saved" ? "저장된 세션" : usage.kind === "daemon" ? "연결 대기" : "실행 중";
+        usage.kind === "saved"
+          ? t("저장된 세션")
+          : usage.kind === "daemon"
+            ? t("연결 대기")
+            : t("실행 중");
       const move = button(
-        `${usage.workspaceName || "터미널"} · ${usage.agentType || "터미널"} · ${state}`,
+        tr`${usage.workspaceName || t("터미널")} · ${usage.agentType || t("터미널")} · ${state}`,
         async () => {
           if (!matchesContext(context)) {
             syncContext();
@@ -214,7 +231,11 @@ export function createRemoteWorktrees({
         },
         !usage.terminalId || !usage.paneId || removing,
       );
-      move.title = usage.paneId ? usage.cwd : "이 터미널은 이동할 pane에 연결되어 있지 않습니다";
+      setRemoteAttribute(
+        move,
+        "title",
+        usage.paneId ? usage.cwd : t("이 터미널은 이동할 pane에 연결되어 있지 않습니다"),
+      );
       detail.append(move);
     }
     for (const warning of inspection.usageWarnings || [])
@@ -223,7 +244,7 @@ export function createRemoteWorktrees({
       detail.append(
         node(
           "p",
-          `보존: ${inspection.blockers.map(worktreeBlockerLabel).join(" · ")}`,
+          tr`보존: ${joinRemoteMessages(inspection.blockers.map(worktreeBlockerLabel))}`,
           "worktree-warning",
         ),
       );
@@ -232,22 +253,26 @@ export function createRemoteWorktrees({
       files.append(
         node(
           "summary",
-          `변경 파일 목록 (${inspection.files.length}${inspection.filesTruncated ? "+" : ""})`,
+          tr`변경 파일 목록 (${inspection.files.length}${inspection.filesTruncated ? "+" : ""})`,
         ),
       );
       const items = node("div", undefined, "worktree-files");
       for (const file of inspection.files) {
         const kind =
-          file.kind === "tracked" ? "변경" : file.kind === "untracked" ? "미추적" : "무시";
+          file.kind === "tracked" ? t("변경") : file.kind === "untracked" ? t("미추적") : t("무시");
         const path = `${selected.path.replace(/\/$/, "")}/${file.path}`;
         const fileButton = button(
-          `${kind} · ${file.path}`,
+          tr`${kind} · ${file.path}`,
           () => openFile(path),
           !canOpenFile() || removing,
         );
-        fileButton.title = canOpenFile()
-          ? "파일 뷰어에서 내용을 확인합니다"
-          : "파일 뷰어에 다시 연결해 주세요";
+        setRemoteAttribute(
+          fileButton,
+          "title",
+          canOpenFile()
+            ? t("파일 뷰어에서 내용을 확인합니다")
+            : t("파일 뷰어에 다시 연결해 주세요"),
+        );
         items.append(fileButton);
       }
       files.append(items);
@@ -256,17 +281,19 @@ export function createRemoteWorktrees({
     detail.append(
       node(
         "p",
-        "정리 후보는 파일 변경과 laymux 사용 여부 기준입니다. 병합 여부와 로컬 커밋은 별도로 확인하세요.",
+        t(
+          "정리 후보는 파일 변경과 laymux 사용 여부 기준입니다. 병합 여부와 로컬 커밋은 별도로 확인하세요.",
+        ),
         "worktree-meta",
       ),
     );
     if (confirming) {
       const confirmation = node("div", undefined, "worktree-confirmation");
-      confirmation.append(node("p", `${selected.path} 폴더를 제거합니다. 브랜치는 유지됩니다.`));
+      confirmation.append(node("p", tr`${selected.path} 폴더를 제거합니다. 브랜치는 유지됩니다.`));
       confirmation.append(
-        button(removing ? "제거 중…" : "제거 확인", () => void remove(), removing),
+        button(removing ? t("제거 중…") : t("제거 확인"), () => void remove(), removing),
         button(
-          "취소",
+          t("취소"),
           () => {
             confirming = false;
             renderDetail();
@@ -277,16 +304,20 @@ export function createRemoteWorktrees({
       detail.append(confirmation);
     } else {
       const removeButton = button(
-        "워크트리 제거",
+        t("워크트리 제거"),
         () => {
           confirming = true;
           renderDetail();
         },
         !inspection.canRemove || removing,
       );
-      removeButton.title = inspection.canRemove
-        ? "제거할 경로를 확인합니다"
-        : inspection.blockers.map(worktreeBlockerLabel).join(" · ");
+      setRemoteAttribute(
+        removeButton,
+        "title",
+        inspection.canRemove
+          ? t("제거할 경로를 확인합니다")
+          : joinRemoteMessages(inspection.blockers.map(worktreeBlockerLabel)),
+      );
       detail.append(removeButton);
     }
     if (focusedLabel && isOpen())
@@ -428,7 +459,7 @@ export function createRemoteWorktrees({
     try {
       await request("/remove", { cwd, path, expectedHead });
       if (!valid(current) || revision !== selectionRevision) return;
-      notice = `제거 완료: ${path}`;
+      notice = tr`제거 완료: ${path}`;
       await refresh();
     } catch (reason) {
       if (!valid(current) || revision !== selectionRevision) return;

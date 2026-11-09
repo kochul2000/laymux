@@ -648,6 +648,9 @@ test("opens original HTML in an isolated tab next to Download", async ({ context
   const popup = await popupPromise;
   await expect(popup.frameLocator("iframe").locator("h1")).toHaveText("host source");
   await expect(popup.locator("iframe")).toHaveAttribute("sandbox", "");
+  await expect(popup).toHaveTitle("notes.html");
+  await expect(popup.locator("iframe")).toHaveAttribute("title", "notes.html");
+  await popup.screenshot({ path: "test-results/remote-file-open-popup.png" });
   expect(await popup.evaluate(() => window.opener)).toBeNull();
   expect(downloadRequests[0]).toEqual({
     lease: "lease-481",

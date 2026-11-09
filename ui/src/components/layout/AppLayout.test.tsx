@@ -214,7 +214,8 @@ describe("AppLayout", () => {
 
   it("does not show settings modal by default", () => {
     render(<AppLayout />);
-    expect(screen.queryByTestId("settings-modal")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-modal")).not.toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
   });
 
   it("shows settings modal when settingsModalOpen is true", () => {

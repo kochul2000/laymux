@@ -1,3 +1,4 @@
+import { setRemoteText, setRemoteAttribute, tr } from "./remote-i18n.js";
 // Native editing owns text, selection and composition. This boundary only maps
 // non-editable attachment nodes to the existing raw-path draft (ADR-0236).
 export function createComposerEditor(element) {
@@ -122,8 +123,8 @@ export function createComposerEditor(element) {
       (chip) => chips.get(chip)?.image,
     );
     for (const [index, chip] of images.entries()) {
-      const label = `Image${images.length > 1 ? ` ${index + 1}` : ""}`;
-      if (chip.textContent !== label) chip.textContent = label;
+      const label = tr`Image${images.length > 1 ? ` ${index + 1}` : ""}`;
+      if (chip.textContent !== String(label)) setRemoteText(chip, label);
     }
   }
 
@@ -144,13 +145,13 @@ export function createComposerEditor(element) {
       const chip = document.createElement("span");
       chip.className = "composer-attachment";
       chip.contentEditable = "false";
-      chip.title = `${attachment.name}\n${attachment.path}`;
-      chip.setAttribute("aria-label", attachment.name);
+      setRemoteAttribute(chip, "title", `${attachment.name}\n${attachment.path}`);
+      setRemoteAttribute(chip, "aria-label", attachment.name);
       if (!attachment.image) {
         const dot = attachment.name.lastIndexOf(".");
         const name = document.createElement("span");
         name.className = "composer-attachment-name";
-        name.textContent = dot > 0 ? attachment.name.slice(0, dot) : attachment.name;
+        setRemoteText(name, dot > 0 ? attachment.name.slice(0, dot) : attachment.name);
         chip.append(name, dot > 0 ? attachment.name.slice(dot) : "");
       }
       chips.set(chip, attachment);

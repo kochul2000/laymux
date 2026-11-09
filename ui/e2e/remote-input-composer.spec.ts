@@ -1456,7 +1456,8 @@ test("physical keyboard shortcuts drive the lease-gated host actions (ADR-0269)"
   await connect(page);
   // ADR-0273: the optional Nav override is off for PC-binding coverage.
   await openRemoteSettings(page);
-  await page.getByRole("tab", { name: "Input bar", exact: true }).click();
+  await page.getByRole("tab", { name: "Input", exact: true }).click();
+  await page.locator("#physicalKeyboardSection > summary").click();
   await page.locator("#useRemoteNavigationKeys").uncheck();
   await page.locator("#navToggle").click();
   const editor = page.locator("#composerInput");
@@ -1599,7 +1600,9 @@ test("Settings lists the physical keyboard shortcuts with host rebinds", async (
   });
   await connect(page);
   await openRemoteSettings(page);
-  await page.locator('#settingsTabs [data-settings-panel="app"]').click();
+  await page.locator('#settingsTabs [data-settings-panel="inputBar"]').click();
+  await page.locator("#physicalKeyboardSection > summary").click();
+  await page.locator("#keyboardShortcutsSection > summary").click();
 
   const list = page.locator("#keyboardShortcutList");
   await expect(list).toBeVisible();

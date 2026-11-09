@@ -1,3 +1,4 @@
+import { t, tr, remoteError } from "./remote-i18n.js";
 import schema from "./remote-settings-schema.json";
 
 function validateValue(field, value, key) {
@@ -22,17 +23,18 @@ function validateValue(field, value, key) {
     (field.maxItems !== undefined && value.length > field.maxItems) ||
     (field.uniqueItems && new Set(value).size !== value.length)
   ) {
-    throw new Error(`허용되지 않는 Remote 설정값: ${key}; ${JSON.stringify(field)}`);
+    throw remoteError(tr`허용되지 않는 Remote 설정값: ${key}; ${JSON.stringify(field)}`);
   }
   if (field.type === "array")
     value.forEach((item, index) => validateValue(field.items, item, `${key}/${index}`));
   if (field.type === "object") {
     for (const required of field.required || []) {
-      if (!Object.hasOwn(value, required)) throw new Error(`필수 Remote 설정: ${key}/${required}`);
+      if (!Object.hasOwn(value, required))
+        throw remoteError(tr`필수 Remote 설정: ${key}/${required}`);
     }
     for (const [child, item] of Object.entries(value)) {
       if (!Object.hasOwn(field.properties, child))
-        throw new Error(`알 수 없는 Remote 설정: ${key}/${child}`);
+        throw remoteError(tr`알 수 없는 Remote 설정: ${key}/${child}`);
       validateValue(field.properties[child], item, `${key}/${child}`);
     }
   }
@@ -40,11 +42,11 @@ function validateValue(field, value, key) {
 
 export function validateRemoteSettings(current, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-    throw new Error("설정 patch는 JSON object여야 합니다.");
+    throw remoteError(t("설정 patch는 JSON object여야 합니다."));
   }
   for (const [key, value] of Object.entries(patch)) {
     const field = Object.hasOwn(schema.properties, key) ? schema.properties[key] : null;
-    if (!field) throw new Error(`알 수 없는 Remote 기기 설정: ${key}`);
+    if (!field) throw remoteError(tr`알 수 없는 Remote 기기 설정: ${key}`);
     validateValue(field, value, key);
   }
   const candidate = { ...current, ...patch };
@@ -54,14 +56,14 @@ export function validateRemoteSettings(current, patch) {
     new Set(userKeys.map((key) => key.id)).size !== userKeys.length ||
     userKeys.some((key) => key.label.trim() !== key.label)
   ) {
-    throw new Error("사용자 키 ID는 고유해야 하며 라벨 양끝 공백은 허용하지 않습니다.");
+    throw remoteError(t("사용자 키 ID는 고유해야 하며 라벨 양끝 공백은 허용하지 않습니다."));
   }
   const placed = new Set();
   for (const [row, segments] of Object.entries(candidate.inputBarZones || {})) {
     for (const ids of Object.values(segments))
       for (const id of ids) {
         if (!actions.has(id) || placed.has(id) || (id === "keys" && row !== "main"))
-          throw new Error(`입력바 액션 배치 오류: ${id}`);
+          throw remoteError(tr`입력바 액션 배치 오류: ${id}`);
         placed.add(id);
       }
   }
@@ -73,13 +75,13 @@ export function validateRemoteSettings(current, patch) {
         !actions.has(button.actionId) || ["soft:dpad", "soft:navPad"].includes(button.actionId),
     )
   ) {
-    throw new Error("플로팅 버튼 ID·액션이 올바르지 않습니다. 패드는 전용 설정을 사용하세요.");
+    throw remoteError(t("플로팅 버튼 ID·액션이 올바르지 않습니다. 패드는 전용 설정을 사용하세요."));
   }
   if (
     candidate.composerIdleOpacity > candidate.composerFocusedOpacity ||
     candidate.composerFocusedOpacity > candidate.composerActiveOpacity
   ) {
-    throw new Error("입력창 불투명도는 idle ≤ focused ≤ active여야 합니다.");
+    throw remoteError(t("입력창 불투명도는 idle ≤ focused ≤ active여야 합니다."));
   }
   return candidate;
 }
@@ -106,11 +108,11 @@ export function createRemoteSettingsBridge(readSettings, applySettings, clientId
     if (result?.requestId === command.requestId) return true;
     try {
       if (globalThis.performance.now() - requestStartedAt >= command.validForMs) {
-        throw new Error("설정 변경 요청이 만료됐습니다. 최신 값을 조회하세요.");
+        throw remoteError(t("설정 변경 요청이 만료됐습니다. 최신 값을 조회하세요."));
       }
       const current = snapshot();
       if (current.revision !== command.expectedRevision) {
-        throw new Error("Remote 설정 revision 충돌입니다. 최신 값을 조회하세요.");
+        throw remoteError(t("Remote 설정 revision 충돌입니다. 최신 값을 조회하세요."));
       }
       const candidate = validateRemoteSettings(current.settings, command.patch);
       applySettings(candidate, command.patch);

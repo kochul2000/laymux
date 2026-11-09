@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useEffect } from "react";
+import { Activity, useCallback, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -408,7 +408,7 @@ export function AppLayout() {
       )}
 
       {/* Settings Modal — portaled to body to escape dock stacking contexts */}
-      {settingsModalOpen && (
+      <Activity mode={settingsModalOpen ? "visible" : "hidden"}>
         <ModalOverlay
           testIdPrefix="settings-modal"
           title="Settings"
@@ -419,7 +419,7 @@ export function AppLayout() {
             <SettingsView />
           </div>
         </ModalOverlay>
-      )}
+      </Activity>
 
       {/* Remote Access Modal */}
       {remoteAccessModalOpen && (
