@@ -1,3 +1,4 @@
+import { setRemoteText, tr, t } from "./remote-i18n.js";
 import { WORKSPACE_CLOSE_GRACE_MS } from "../lib/workspace-close-timing.ts";
 
 // The host owns actual close deadlines; this surface only renders undo affordances.
@@ -32,10 +33,10 @@ export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
         element.setAttribute("role", "status");
         element.setAttribute("aria-live", "polite");
         const message = document.createElement("span");
-        message.textContent = `Closing ${item.name}…`;
+        setRemoteText(message, tr`Closing ${item.name}…`);
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = "Restore";
+        setRemoteText(button, t("Restore"));
         button.dataset.workspaceRestore = item.id;
         const countdown = document.createElement("div");
         countdown.className = "toast-countdown";

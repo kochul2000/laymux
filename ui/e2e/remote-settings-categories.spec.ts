@@ -39,7 +39,7 @@ for (const [width, menuFontSize] of [
       });
       expect(wordLines, `${await tab.textContent()}: 분류 이름의 단어를 쪼개지 않는다`).toBe(1);
     }
-    await tabs.getByRole("tab", { name: "Input bar", exact: true }).focus();
+    await tabs.getByRole("tab", { name: "Input", exact: true }).focus();
     await page.keyboard.press("End");
     await expect(tabs.getByRole("tab", { name: "App", exact: true })).toBeFocused();
   });

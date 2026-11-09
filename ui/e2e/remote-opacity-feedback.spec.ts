@@ -6,7 +6,7 @@ test("불투명도 순서와 연동 조정을 해당 입력 옆에서 설명한�
   await page.goto("http://remote.test/remote/");
   await page.locator("#drawerBack").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.getByRole("tab", { name: "Display", exact: true }).click();
+  await page.getByRole("tab", { name: "Composer", exact: true }).click();
   await expect(page.locator("#remoteComposerOpacityHint")).toContainText("Idle ≤ Focused ≤ Active");
   await page.locator("#remoteComposerActiveOpacity").fill("40");
   await page.locator("#remoteComposerActiveOpacity").press("Tab");

@@ -13,9 +13,19 @@ const BLOCKER_LABELS: Record<string, string> = {
   usage_unknown: "laymux 사용 여부 확인 실패",
   index_flags: "변경 감지를 생략한 파일 있음",
 };
-export function worktreeBlockerLabel(code: string): string {
-  return BLOCKER_LABELS[code] ?? code;
+export type WorktreeMessage = (key: string, values?: Array<string | number>) => string;
+export const worktreeMessage: WorktreeMessage = (key, values = []) =>
+  key.replace(/\{(\d+)\}/g, (match, index: string) => String(values[Number(index)] ?? match));
+
+export function formatWorktreeBlockerLabel(code: string, message: WorktreeMessage): string {
+  return BLOCKER_LABELS[code] ? message(BLOCKER_LABELS[code]) : code;
 }
-export function worktreeBranchLabel(branch?: string): string {
-  return branch?.replace(/^refs\/heads\//, "") || "브랜치 없음";
+export function worktreeBlockerLabel(code: string): string {
+  return formatWorktreeBlockerLabel(code, worktreeMessage);
+}
+export function worktreeBranchLabel(
+  branch?: string,
+  message: WorktreeMessage = worktreeMessage,
+): string {
+  return branch?.replace(/^refs\/heads\//, "") || message("브랜치 없음");
 }

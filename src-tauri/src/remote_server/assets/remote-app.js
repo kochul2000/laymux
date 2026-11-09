@@ -1,3 +1,4 @@
+import { remoteError, initializeRemoteLanguage, setRemoteLanguage, remoteLanguageSetting, remoteAttributeMessage, joinRemoteMessages, t, tr, setRemoteAttribute, setRemoteText, setRemoteHtml } from "../../../../ui/src/remote/remote-i18n.js";
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
@@ -32,6 +33,15 @@ import {
 } from "../../../../ui/src/lib/codex-transcript-wheel.ts";
 
       (() => {
+        initializeRemoteLanguage();
+        const languageSelect = document.getElementById("remoteLanguage");
+        languageSelect.value = remoteLanguageSetting();
+        languageSelect.addEventListener("change", () => {
+          const persisted = setRemoteLanguage(languageSelect.value);
+          setRemoteText(document.getElementById("remoteLanguageStatus"), persisted
+            ? t("Saved on this device.")
+            : t("Applied for now; device storage is unavailable."));
+        });
         hydrateRemoteIcons(document);
         const $ = (id) => document.getElementById(id);
         const paneCloseKeyConfirmation = createPaneCloseKeyConfirmation(document);
@@ -267,14 +277,14 @@ import {
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const COMMAND_STATUS_LABELS = Object.freeze({
-          Hourglass: "Active",
-          Check: "Command succeeded",
-          X: "Command failed",
-          Ban: "Interrupted",
-          Circle: "Task ended · result unobserved",
-          Minus: "Idle",
-          Dot: "Task unconfirmed",
-          CircleAlert: "Response or approval needed",
+          Hourglass: t("Active"),
+          Check: t("Command succeeded"),
+          X: t("Command failed"),
+          Ban: t("Interrupted"),
+          Circle: t("Task ended · result unobserved"),
+          Minus: t("Idle"),
+          Dot: t("Task unconfirmed"),
+          CircleAlert: t("Response or approval needed"),
         });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
@@ -305,7 +315,7 @@ import {
         let remoteAttachmentRelayMaxBytes = null;
         const REMOTE_ATTACHMENT_DEFAULT_ACCEPT = attachmentInput.getAttribute("accept") || "";
         function attachmentMibLabel(bytes) {
-          return `${Math.round(bytes / (1024 * 1024))} MiB`;
+          return tr`${Math.round(bytes / (1024 * 1024))} MiB`;
         }
         function remoteAttachmentLimitLabel() {
           return attachmentMibLabel(remoteAttachmentMaxBytes);
@@ -316,13 +326,9 @@ import {
             remoteAttachmentRelayMaxBytes !== null &&
             remoteAttachmentRelayMaxBytes < remoteAttachmentHostMaxBytes
           ) {
-            return (
-              `${subject} exceeds the Cloud relay payload limit of ` +
-              `${attachmentMibLabel(remoteAttachmentRelayMaxBytes)}. Connect through Tailscale ` +
-              `(direct Remote) to attach up to ${attachmentMibLabel(remoteAttachmentHostMaxBytes)}.`
-            );
+            return tr`${subject} exceeds the Cloud relay payload limit of ${attachmentMibLabel(remoteAttachmentRelayMaxBytes)}. Connect through Tailscale (direct Remote) to attach up to ${attachmentMibLabel(remoteAttachmentHostMaxBytes)}.`;
           }
-          return `${subject} exceeds the ${remoteAttachmentLimitLabel()} attachment limit.`;
+          return tr`${subject} exceeds the ${remoteAttachmentLimitLabel()} attachment limit.`;
         }
         function applyRemoteAttachmentPolicy(policy) {
           if (!policy || typeof policy !== "object") return;
@@ -343,10 +349,7 @@ import {
                 .filter((extension) => /^[a-z0-9]{1,16}$/.test(String(extension)))
                 .map((extension) => `.${extension}`)
             : [];
-          attachmentInput.setAttribute(
-            "accept",
-            [REMOTE_ATTACHMENT_DEFAULT_ACCEPT, ...extra].filter(Boolean).join(","),
-          );
+          attachmentInput.setAttribute("accept", [REMOTE_ATTACHMENT_DEFAULT_ACCEPT, ...extra].filter(Boolean).join(","));
         }
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
@@ -371,7 +374,7 @@ import {
             });
             if (leaseId !== selectedLeaseId) return;
             await loadNavigation(activeTerminalId, { openOutput: false });
-            setStatus("Workspace renamed.");
+            setStatus(t("Workspace renamed."));
           },
           hide: (id) => setWorkspaceVisibility(id, true),
           remove: async (id, selectedLeaseId) => {
@@ -395,12 +398,12 @@ import {
               await loadWorkspaceLayouts();
             } catch (error) {
               if (leaseId === selectedLeaseId) {
-                setStatus(`Workspace template saved. Reopen the template list to refresh it: ${error.message || String(error)}`, true);
+                setStatus(tr`Workspace template saved. Reopen the template list to refresh it: ${error.message || String(error)}`, true);
               }
               return;
             }
             if (leaseId !== selectedLeaseId) return;
-            setStatus("Workspace template saved.");
+            setStatus(t("Workspace template saved."));
           },
         });
         const paneManager = createPaneManager({
@@ -422,7 +425,7 @@ import {
             const panes = workspace.panes || [];
             const slots = new Set(panes.map((pane) => pane.slotId || pane.id));
             return panes.map((pane) => ({
-              ...pane, label: `${workspace.name} \u00b7 Pane ${pane.paneNumber || ""}`,
+              ...pane, label: tr`${workspace.name} · Pane ${pane.paneNumber || ""}`,
               hidden: Boolean(pane.hidden), canHide: true,
               canClose: slots.size > 1 || Number(pane.layerCount) > 1,
             }));
@@ -436,8 +439,8 @@ import {
           return targets;
         }
         const headerIconFields = {
-          headerFiles: "Files", headerGithub: "GitHub", headerWorktrees: "Worktrees", headerMemo: "Memo",
-          headerSpatialExclusion: "Pane navigation shortcut", headerDesktopMode: "PC mode",
+          headerFiles: t("Files"), headerGithub: t("GitHub"), headerWorktrees: t("Worktrees"), headerMemo: t("Memo"),
+          headerSpatialExclusion: t("Pane navigation shortcut"), headerDesktopMode: t("PC mode"),
         };
         const headerIconKeys = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, `laymux.remote.${key}`]));
         let headerIcons = Object.fromEntries(Object.entries(headerIconKeys).map(([key, storageKey]) => [key, loadLocalToggle(storageKey)]));
@@ -710,13 +713,6 @@ import {
         let physicalKeyboardConnected = null;
         let physicalKeyboardToastTimer = null;
         const PHYSICAL_KEYBOARD_TOAST_DURATION_MS = 3000;
-        // Match the existing Remote relay's device-local ko/en language policy.
-        const PHYSICAL_KEYBOARD_TOAST_LANG = (navigator.language || "en").toLowerCase().startsWith("ko")
-          ? "ko" : "en";
-        const PHYSICAL_KEYBOARD_TOAST_STRINGS = {
-          ko: { connected: "물리 키보드가 연결되었습니다.", disconnected: "물리 키보드 연결이 해제되었습니다." },
-          en: { connected: "Physical keyboard connected.", disconnected: "Physical keyboard disconnected." },
-        };
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -787,7 +783,7 @@ import {
         // A checkpoint stops one whole line short of its budget at most, so this
         // much slack still counts as "the budget was the limit".
         const HISTORY_EXPANSION_BUDGET_SLACK_BYTES = 8 * 1024;
-        const HISTORY_EXPANSION_BUSY_STATUS = "Loading earlier output…";
+        const HISTORY_EXPANSION_BUSY_STATUS = t("Loading earlier output…");
         const HISTORY_EXPANSION_LIMIT_NOTICE_MS = 2000;
         // How long a scroll gesture keeps vouching for viewport movement.
         const TERMINAL_USER_SCROLL_WINDOW_MS = 1500;
@@ -933,7 +929,7 @@ import {
         }
 
         function renderStatus(message, error, warning, busy) {
-          statusTextEl.textContent = message;
+          setRemoteText(statusTextEl, message);
           statusEl.classList.toggle("error", error);
           statusEl.classList.toggle("warning", warning);
           statusEl.setAttribute("aria-busy", busy ? "true" : "false");
@@ -960,7 +956,7 @@ import {
             transientConnectionNoticeTimer = null;
             if (!leaseId || !hasTransientConnectionInterruption()) return;
             transientConnectionNoticeVisible = true;
-            setBusyStatus("Connection interrupted. Reconnecting…", false, true);
+            setBusyStatus(t("Connection interrupted. Reconnecting…"), false, true);
           }, TRANSIENT_CONNECTION_NOTICE_DELAY_MS);
         }
 
@@ -974,7 +970,7 @@ import {
           }
           if (transientConnectionNoticeVisible) {
             transientConnectionNoticeVisible = false;
-            setStatus(recoveredMessage || "Connected.");
+            setStatus(recoveredMessage || t("Connected."));
           }
         }
 
@@ -1053,7 +1049,7 @@ import {
         }
 
         function remoteResponseError(status, body = {}) {
-          const error = new Error(body.error || `Remote request failed (${status})`);
+          const error = new Error(body.error || tr`Remote request failed (${status})`);
           error.status = status;
           for (const field of [
             "code",
@@ -1071,14 +1067,14 @@ import {
         function androidRemoteFetch(path, options = {}) {
           return new Promise((resolve, reject) => {
             if (options.signal?.aborted) {
-              reject(new DOMException("The operation was aborted.", "AbortError"));
+              reject(new DOMException(t("The operation was aborted."), "AbortError"));
               return;
             }
             const requestId = `http-${androidHttpDocumentId}-${++nextAndroidHttpRequestId}`;
             const abort = () => {
               if (!androidHttpRequests.delete(requestId)) return;
               cancelAndroidRemoteHttp(requestId);
-              reject(new DOMException("The operation was aborted.", "AbortError"));
+              reject(new DOMException(t("The operation was aborted."), "AbortError"));
             };
             options.signal?.addEventListener("abort", abort, { once: true });
             androidHttpRequests.set(requestId, {
@@ -1127,7 +1123,7 @@ import {
               const prefix = "/remote/v1/terminals/";
               const suffix = "/output";
               if (!parsed.pathname.startsWith(prefix) || !parsed.pathname.endsWith(suffix)) {
-                throw new Error("Invalid Remote output path.");
+                throw remoteError(t("Invalid Remote output path."));
               }
               const encodedTerminalId = parsed.pathname.slice(prefix.length, -suffix.length);
               this.terminalId = decodeURIComponent(encodedTerminalId);
@@ -1135,10 +1131,10 @@ import {
               const historyKib = Number.parseInt(parsed.searchParams.get("historyKib") || "", 10);
               this.historyKib = Number.isSafeInteger(historyKib) && historyKib > 0 ? historyKib : 0;
               if (!this.terminalId || !this.leaseId) {
-                throw new Error("Remote output identity is missing.");
+                throw remoteError(t("Remote output identity is missing."));
               }
               if (!window.LaymuxOutputTransport?.postMessage) {
-                throw new Error("Secure binary output bridge is unavailable.");
+                throw remoteError(t("Secure binary output bridge is unavailable."));
               }
               androidOutputSockets.set(this.streamId, this);
               setTimeout(() => {
@@ -1176,7 +1172,7 @@ import {
             }
             if (kind === 2) {
               if (this.readyState !== 1 || payload.byteLength < 1) {
-                this.fail("Secure output bridge record is invalid.");
+                this.fail(t("Secure output bridge record is invalid."));
                 return;
               }
               const recordKind = payload[0];
@@ -1191,7 +1187,7 @@ import {
                 this.onmessage?.({ data: payload.slice(1).buffer, target: this });
                 return;
               }
-              this.fail("Secure output record type is invalid.");
+              this.fail(t("Secure output record type is invalid."));
               return;
             }
             if (kind === 3) {
@@ -1288,7 +1284,7 @@ import {
             if (!request) return;
             androidHttpRequests.delete(requestId);
             request.cleanup();
-            request.reject(new Error(message || "Secure Remote request failed."));
+            request.reject(new Error(message || t("Secure Remote request failed.")));
           },
           onNativeForeground() {
             if (!androidE2eMode) return false;
@@ -1315,7 +1311,7 @@ import {
             for (const [requestId, request] of pendingRequests) {
               cancelAndroidRemoteHttp(requestId);
               request.cleanup();
-              request.reject(new Error("Secure Remote transport resumed after background."));
+              request.reject(remoteError(t("Secure Remote transport resumed after background.")));
             }
 
             // Native output sockets were closed onStop and no longer have a
@@ -1531,12 +1527,12 @@ import {
         }
 
         function updateRemoteDisplaySettingsControls(
-          message = "Saved on this device.",
+          message = t("Saved on this device."),
           error = false,
         ) {
-          remoteDisplaySettingsStatus.textContent = message;
+          setRemoteText(remoteDisplaySettingsStatus, message);
           remoteDisplaySettingsStatus.classList.toggle("error", error);
-          $("remoteButtonSizeStatus").textContent = message;
+          setRemoteText($("remoteButtonSizeStatus"), message);
           $("remoteButtonSizeStatus").classList.toggle("error", error);
         }
 
@@ -1556,8 +1552,8 @@ import {
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
-          $("remoteMainButtonScale").textContent = `${normalized.mainButtonScale}%`;
-          $("remoteKeysButtonScale").textContent = `${normalized.keysButtonScale}%`;
+          setRemoteText($("remoteMainButtonScale"), `${normalized.mainButtonScale}%`);
+          setRemoteText($("remoteKeysButtonScale"), `${normalized.keysButtonScale}%`);
           // The user-facing percentage is relative to the unchanged physical
           // baseline, so 100% remains the size previously shown as 110%.
           const buttonBaselineScale = Number.parseFloat(
@@ -1572,10 +1568,10 @@ import {
           remoteNavigationPinnedInput.checked = normalized.navigationPinned;
           navigationPinButton.setAttribute("aria-pressed", String(normalized.navigationPinned));
           const navigationPinLabel = normalized.navigationPinned
-            ? "Unpin workspace menu"
-            : "Pin workspace menu";
-          navigationPinButton.setAttribute("aria-label", navigationPinLabel);
-          navigationPinButton.title = navigationPinLabel;
+            ? t("Unpin workspace menu")
+            : t("Pin workspace menu");
+          setRemoteAttribute(navigationPinButton, "aria-label", navigationPinLabel);
+          setRemoteAttribute(navigationPinButton, "title", navigationPinLabel);
           remoteNavigationWidthInput.value = String(normalized.navigationWidth);
           remoteNavigationPinCutoffInput.value = String(normalized.navigationPinCutoff);
           remoteComposerIdleOpacityInput.value = String(normalized.composerIdleOpacity);
@@ -1654,20 +1650,20 @@ import {
           });
           const persisted = persistDeviceDisplaySettings(normalized);
           const opacityAdjustments = [
-            ["composerIdleOpacity", "Idle", remoteComposerIdleOpacityInput],
-            ["composerFocusedOpacity", "Focused", remoteComposerFocusedOpacityInput],
-            ["composerActiveOpacity", "Active", remoteComposerActiveOpacityInput],
+            ["composerIdleOpacity", t("Idle"), remoteComposerIdleOpacityInput],
+            ["composerFocusedOpacity", t("Focused"), remoteComposerFocusedOpacityInput],
+            ["composerActiveOpacity", t("Active"), remoteComposerActiveOpacityInput],
           ].filter(([key, , input]) => Number(input.value) !== normalized[key])
-            .map(([key, label]) => `${label} ${normalized[key]}%`);
+            .map(([key, label]) => tr`${label} ${normalized[key]}%`);
           applyRemoteDisplaySettings(normalized);
           updateRemoteDisplaySettingsControls(
-            persisted ? "Saved on this device." : "Could not save on this device.",
+            persisted ? t("Saved on this device.") : t("Could not save on this device."),
             !persisted,
           );
           const opacityStatus = $("remoteComposerOpacityStatus");
-          opacityStatus.textContent = persisted
-            ? opacityAdjustments.length ? `Also adjusted: ${opacityAdjustments.join(", ")}.` : ""
-            : "Could not save on this device.";
+          setRemoteText(opacityStatus, persisted
+            ? opacityAdjustments.length ? tr`Also adjusted: ${joinRemoteMessages(opacityAdjustments, ", ")}.` : ""
+            : t("Could not save on this device."));
           opacityStatus.classList.toggle("error", !persisted);
         }
 
@@ -1679,21 +1675,21 @@ import {
           const downloaded = Number(status?.downloadedBytes) || 0;
           const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
           // The channel is the PC's setting; Remote only reports it (ADR-0190).
-          const betaChannelNote = status?.channel === "beta" ? " Following the beta channel." : "";
+          const betaChannelNote = status?.channel === "beta" ? t(" Following the beta channel.") : "";
           const defaultMessage = !status
-            ? "Update status unavailable."
+            ? t("Update status unavailable.")
             : !status.enabled
-              ? `Development build ${status.currentVersion}; self-update is disabled.`
+              ? tr`Development build ${status.currentVersion}; self-update is disabled.`
               : operation === "checking"
-                ? "Checking GitHub Releases..."
+                ? t("Checking GitHub Releases...")
                 : operation === "downloading"
-                  ? `Downloading ${availableVersion || "update"}${percent === null ? "..." : ` (${percent}%)`}`
+                  ? tr`Downloading ${availableVersion || "update"}${percent === null ? "..." : ` (${percent}%)`}`
                   : operation === "installing"
-                    ? "Installing update; the PC will restart..."
+                    ? t("Installing update; the PC will restart...")
                     : availableVersion
-                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).${betaChannelNote}`
-                      : `Laymux ${status.currentVersion} is up to date.${betaChannelNote}`;
-          pcUpdateStatusElement.textContent = message || status?.lastError || defaultMessage;
+                      ? tr`Laymux ${availableVersion} is available (current ${status.currentVersion}).${betaChannelNote}`
+                      : tr`Laymux ${status.currentVersion} is up to date.${betaChannelNote}`;
+          setRemoteText(pcUpdateStatusElement, message || status?.lastError || defaultMessage);
           pcUpdateStatusElement.classList.toggle("error", isError || Boolean(status?.lastError));
           // The drawer button's dot says "there is an update in Settings"; with
           // Settings paginated it has to name the page too, or it points at a
@@ -1706,7 +1702,7 @@ import {
         async function loadPcUpdateStatus({ check = false } = {}) {
           if (pcUpdateRequestInFlight) return;
           pcUpdateRequestInFlight = true;
-          renderPcUpdateStatus(check ? "Checking GitHub Releases..." : null);
+          renderPcUpdateStatus(check ? t("Checking GitHub Releases...") : null);
           try {
             pcUpdateStatus = await remoteFetch(check ? "/remote/v1/update/check" : "/remote/v1/update", {
               ...(check ? { method: "POST" } : {}),
@@ -1731,7 +1727,7 @@ import {
           if (!selectedLeaseId || !pcUpdateStatus?.availableVersion || pcUpdateRequestInFlight) return;
           if (pcUpdateStatus.operation !== "idle") return;
           pcUpdateRequestInFlight = true;
-          renderPcUpdateStatus("Starting signed update...");
+          renderPcUpdateStatus(t("Starting signed update..."));
           try {
             pcUpdateStatus = await remoteFetch("/remote/v1/update/install", {
               method: "POST",
@@ -1805,14 +1801,14 @@ import {
         const REMOTE_GITHUB_PENDING_RETRY_MS = 1000;
         const REMOTE_GITHUB_ACTIONS = Object.freeze({
           issues: [
-            ["issue.close", "Close as completed", false],
-            ["issue.closeNotPlanned", "Close as not planned", false],
+            ["issue.close", t("Close as completed"), false],
+            ["issue.closeNotPlanned", t("Close as not planned"), false],
           ],
           pulls: [
-            ["pr.merge", "Merge (merge commit)", true],
-            ["pr.squash", "Squash and merge", true],
-            ["pr.rebase", "Rebase and merge", true],
-            ["pr.close", "Close", false],
+            ["pr.merge", t("Merge (merge commit)"), true],
+            ["pr.squash", t("Squash and merge"), true],
+            ["pr.rebase", t("Rebase and merge"), true],
+            ["pr.close", t("Close"), false],
           ],
         });
 
@@ -1866,13 +1862,13 @@ import {
             case "pending":
               return "";
             case "notAGithubRepo":
-              return "No GitHub repository for this terminal's CWD";
+              return t("No GitHub repository for this terminal's CWD");
             case "ghMissing":
-              return "`gh` not found on PATH";
+              return t("`gh` not found on PATH");
             case "unauthorized":
-              return "Run `gh auth login` to read issues and PRs";
+              return t("Run `gh auth login` to read issues and PRs");
             case "failed":
-              return status.message || "GitHub request failed";
+              return status.message || t("GitHub request failed");
             default:
               return "";
           }
@@ -1882,7 +1878,7 @@ import {
           const timestamp = Date.parse(value || "");
           if (!Number.isFinite(timestamp)) return "";
           const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-          if (seconds < 60) return "just now";
+          if (seconds < 60) return t("just now");
           const minutes = Math.round(seconds / 60);
           if (minutes < 60) return `${minutes}m`;
           const hours = Math.round(minutes / 60);
@@ -1894,8 +1890,8 @@ import {
           const button = document.createElement("button");
           button.type = "button";
           button.className = className;
-          button.setAttribute("aria-label", label);
-          button.title = label;
+          setRemoteAttribute(button, "aria-label", label);
+          setRemoteAttribute(button, "title", label);
           setRemoteIcon(button, icon);
           return button;
         }
@@ -1903,28 +1899,28 @@ import {
         function renderGithubView() {
           const issues = Array.isArray(githubSnapshot?.issues) ? githubSnapshot.issues : [];
           const pulls = Array.isArray(githubSnapshot?.pulls) ? githubSnapshot.pulls : [];
-          githubIssuesCountElement.textContent = String(issues.length);
-          githubPullsCountElement.textContent = String(pulls.length);
+          setRemoteText(githubIssuesCountElement, String(issues.length));
+          setRemoteText(githubPullsCountElement, String(pulls.length));
           githubIssuesTabButton.classList.toggle("active", githubTab === "issues");
           githubPullsTabButton.classList.toggle("active", githubTab === "pulls");
           githubIssuesTabButton.setAttribute("aria-selected", String(githubTab === "issues"));
           githubPullsTabButton.setAttribute("aria-selected", String(githubTab === "pulls"));
-          githubRepoElement.textContent = githubSnapshot?.repo || "";
-          githubRepoElement.title = githubSnapshot?.repo || "";
+          setRemoteText(githubRepoElement, githubSnapshot?.repo || "");
+          setRemoteAttribute(githubRepoElement, "title", githubSnapshot?.repo || "");
           githubRefreshButton.disabled = githubActionInFlight;
           const status = githubError || githubStatusMessage(githubSnapshot?.status);
-          githubStatusElement.textContent = status;
+          setRemoteText(githubStatusElement, status);
           githubStatusElement.classList.toggle("error", Boolean(githubError || githubSnapshot?.status?.type === "failed"));
           githubListElement.replaceChildren();
           const items = githubTab === "issues" ? issues : pulls;
           if (!githubSnapshot && !githubError) {
-            githubStatusElement.textContent = "Loading GitHub items...";
+            setRemoteText(githubStatusElement, t("Loading GitHub items..."));
             return;
           }
           if (!status && githubSnapshot?.status?.type === "ready" && items.length === 0) {
-            githubStatusElement.textContent = githubTab === "issues"
-              ? "No open issues"
-              : "No open pull requests";
+            setRemoteText(githubStatusElement, githubTab === "issues"
+              ? t("No open issues")
+              : t("No open pull requests"));
           }
           for (const item of items) {
             const row = document.createElement("div");
@@ -1934,39 +1930,39 @@ import {
             const main = document.createElement("button");
             main.type = "button";
             main.className = "github-row-main";
-            main.title = item.title || "";
+            setRemoteAttribute(main, "title", item.title || "");
             const number = document.createElement("span");
             number.className = "github-number";
-            number.textContent = `#${item.number}`;
+            setRemoteText(number, `#${item.number}`);
             main.append(number);
             if (item.isDraft) {
               const draft = document.createElement("span");
               draft.className = "github-draft";
-              draft.textContent = "DRAFT";
+              setRemoteText(draft, "DRAFT");
               main.append(draft);
             }
             const copy = document.createElement("span");
             copy.className = "github-row-copy";
             const title = document.createElement("span");
             title.className = "github-title";
-            title.textContent = item.title || "";
+            setRemoteText(title, item.title || "");
             const meta = document.createElement("span");
             meta.className = "github-meta";
             if (item.author) {
               const author = document.createElement("span");
-              author.textContent = `@${item.author}`;
+              setRemoteText(author, `@${item.author}`);
               meta.append(author);
             }
             const updated = githubRelativeTime(item.updatedAt);
             if (updated) {
               const time = document.createElement("span");
-              time.textContent = updated;
+              setRemoteText(time, updated);
               meta.append(time);
             }
             for (const labelText of (Array.isArray(item.labels) ? item.labels : []).slice(0, 2)) {
               const label = document.createElement("span");
               label.className = "github-label";
-              label.textContent = labelText;
+              setRemoteText(label, labelText);
               meta.append(label);
             }
             copy.append(title, meta);
@@ -1974,23 +1970,23 @@ import {
             main.addEventListener("click", () => openRemoteUrl(item.url));
             row.append(main);
 
-            const copyLink = githubIconButton("Copy", "Copy link");
+            const copyLink = githubIconButton("Copy", t("Copy link"));
             copyLink.addEventListener("click", () => {
               writeClipboardText(item.url)
-                .then(() => setStatus(`Copied #${item.number} link`))
-                .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+                .then(() => setStatus(tr`Copied #${item.number} link`))
+                .catch((error) => setStatus(tr`Copy failed: ${error.message || error}`, true));
             });
             row.append(copyLink);
             if (githubTab === "pulls" && item.headRefName) {
-              const copyBranch = githubIconButton("GitBranch", "Copy branch");
+              const copyBranch = githubIconButton("GitBranch", t("Copy branch"));
               copyBranch.addEventListener("click", () => {
                 writeClipboardText(item.headRefName)
-                  .then(() => setStatus(`Copied ${item.headRefName}`))
-                  .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+                  .then(() => setStatus(tr`Copied ${item.headRefName}`))
+                  .catch((error) => setStatus(tr`Copy failed: ${error.message || error}`, true));
               });
               row.append(copyBranch);
             }
-            const menuButton = githubIconButton("Ellipsis", "GitHub actions");
+            const menuButton = githubIconButton("Ellipsis", t("GitHub actions"));
             menuButton.setAttribute("aria-expanded", String(githubOpenMenu === item.number));
             menuButton.addEventListener("click", () => {
               const opening = githubOpenMenu !== item.number;
@@ -2013,17 +2009,17 @@ import {
               if (githubConfirming?.number === item.number) {
                 const prompt = document.createElement("div");
                 prompt.className = "github-menu-action";
-                prompt.textContent = githubConfirming.label;
+                setRemoteText(prompt, githubConfirming.label);
                 const confirm = document.createElement("button");
                 confirm.type = "button";
                 confirm.className = "github-menu-action github-menu-confirm";
-                confirm.textContent = githubActionInFlight ? "Working..." : "Confirm";
+                setRemoteText(confirm, githubActionInFlight ? t("Working...") : t("Confirm"));
                 confirm.disabled = githubActionInFlight;
                 confirm.addEventListener("click", () => runRemoteGithubAction(item.number, githubConfirming.action));
                 const cancel = document.createElement("button");
                 cancel.type = "button";
                 cancel.className = "github-menu-action";
-                cancel.textContent = "Cancel";
+                setRemoteText(cancel, t("Cancel"));
                 cancel.disabled = githubActionInFlight;
                 cancel.addEventListener("click", () => {
                   githubConfirming = null;
@@ -2035,7 +2031,7 @@ import {
                   const actionButton = document.createElement("button");
                   actionButton.type = "button";
                   actionButton.className = `github-menu-action${danger ? " danger" : ""}`;
-                  actionButton.textContent = label;
+                  setRemoteText(actionButton, label);
                   actionButton.addEventListener("click", () => {
                     githubConfirming = { number: item.number, action, label };
                     renderGithubView();
@@ -2162,10 +2158,10 @@ import {
           fileViewerPathInput.disabled = !connected;
           openFileViewerButton.disabled = !connected || !fileViewerPathInput.value.trim();
           const text = message || (connected
-            ? "Enter a host file path."
-            : "Connect to open a host file.");
-          fileViewerStatusElement.textContent = text;
-          fileViewerStatusElement.title = "";
+            ? t("Enter a host file path.")
+            : t("Connect to open a host file."));
+          setRemoteText(fileViewerStatusElement, text);
+          setRemoteAttribute(fileViewerStatusElement, "title", "");
           fileViewerStatusElement.classList.toggle("error", isError);
           renderHostViewerIndicator();
         }
@@ -2201,9 +2197,9 @@ import {
           const unread = hostViewerUnread();
           fileExplorerHeaderButton.classList.toggle("host-viewer-unread", unread);
           if (!unread) stopHostViewerBlink();
-          const label = unread ? "Open the file shown on PC" : "Browse host files";
-          fileExplorerHeaderButton.setAttribute("aria-label", label);
-          fileExplorerHeaderButton.title = label;
+          const label = unread ? t("Open the file shown on PC") : t("Browse host files");
+          setRemoteAttribute(fileExplorerHeaderButton, "aria-label", label);
+          setRemoteAttribute(fileExplorerHeaderButton, "title", label);
         }
 
         function hostViewerOpenKey(source) {
@@ -2239,7 +2235,7 @@ import {
           const tappedKey = hostViewerSignalKey;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
-          const requestRevision = showBlankFileViewerOverlay("PC viewer", "", "Loading file…");
+          const requestRevision = showBlankFileViewerOverlay("PC viewer", "", t("Loading file…"));
           const stale = () =>
             requestRevision !== fileViewerRequestRevision ||
             leaseId !== requestLeaseId ||
@@ -2287,7 +2283,7 @@ import {
 
         function applyFileViewerZoom() {
           const percent = Math.round(fileViewerZoom * 100);
-          fileViewerZoomLevelElement.textContent = `${percent}%`;
+          setRemoteText(fileViewerZoomLevelElement, `${percent}%`);
           if (fileViewerKind === "image") {
             // Real width, not a transform: a scaled element keeps its original
             // box, so the scroll container would never let the user reach the
@@ -2315,7 +2311,7 @@ import {
           fileViewerBodyElement.style.removeProperty("--file-viewer-image-width");
           fileViewerBodyElement.style.removeProperty("--file-viewer-image-max-width");
           fileViewerBodyElement.style.removeProperty("--file-viewer-text-size");
-          fileViewerZoomLevelElement.textContent = "100%";
+          setRemoteText(fileViewerZoomLevelElement, "100%");
         }
 
         function adjustFileViewerZoom(direction) {
@@ -2345,21 +2341,21 @@ import {
           fileViewerDirectoryElement.hidden = true;
           fileViewerImageElement.removeAttribute("src");
           fileViewerPreviewElement.removeAttribute("srcdoc");
-          fileViewerTextElement.textContent = "";
-          fileViewerBinaryElement.textContent = "";
-          fileViewerDirectoryElement.textContent = "";
+          setRemoteText(fileViewerTextElement, "");
+          setRemoteText(fileViewerBinaryElement, "");
+          setRemoteText(fileViewerDirectoryElement, "");
         }
 
         function setFileViewerMessage(message, isError = false) {
-          fileViewerMessageElement.textContent = message;
+          setRemoteText(fileViewerMessageElement, message);
           fileViewerMessageElement.classList.toggle("error", isError);
           fileViewerMessageElement.hidden = false;
         }
 
         function formatFileViewerBytes(value) {
-          if (!Number.isFinite(value) || value < 0) return "Unknown size";
+          if (!Number.isFinite(value) || value < 0) return t("Unknown size");
           if (value < 1024) return `${value} B`;
-          const units = ["KiB", "MiB", "GiB"];
+          const units = [t("KiB"), "MiB", "GiB"];
           let size = value / 1024;
           let unit = units[0];
           for (let index = 1; index < units.length && size >= 1024; index += 1) {
@@ -2383,14 +2379,14 @@ import {
             fileViewerPreviewElement.srcdoc = payload.previewDocument;
             fileViewerPreviewElement.hidden = false;
             if (payload.truncated) {
-              setFileViewerMessage("Preview truncated at the Remote viewer limit.");
+              setFileViewerMessage(t("Preview truncated at the Remote viewer limit."));
             }
           } else if (payload.kind === "text") {
             fileViewerKind = "text";
-            fileViewerTextElement.textContent = payload.content || "";
+            setRemoteText(fileViewerTextElement, payload.content || "");
             fileViewerTextElement.hidden = false;
             if (payload.truncated) {
-              setFileViewerMessage("Preview truncated at the Remote viewer limit.");
+              setFileViewerMessage(t("Preview truncated at the Remote viewer limit."));
             }
           } else if (
             payload.kind === "image" &&
@@ -2400,24 +2396,23 @@ import {
             fileViewerImageElement.src = payload.dataUrl;
             fileViewerImageElement.hidden = false;
           } else if (payload.kind === "binary") {
-            fileViewerBinaryElement.textContent = `Binary or unsupported file · ${formatFileViewerBytes(payload.size)}`;
+            setRemoteText(fileViewerBinaryElement, tr`Binary or unsupported file · ${formatFileViewerBytes(payload.size)}`);
             fileViewerBinaryElement.hidden = false;
           } else if (payload.kind === "pdf") {
             // PDF and archive are classified by the shared desktop command, so
             // they reach Remote too. Remote deliberately does not render them
             // (ADR-0109): say what the file is instead of failing.
-            fileViewerBinaryElement.textContent =
-              "PDF · open this file in the desktop viewer to read it.";
+            setRemoteText(fileViewerBinaryElement, t("PDF · open this file in the desktop viewer to read it."));
             fileViewerBinaryElement.hidden = false;
           } else if (payload.kind === "archive") {
             const count = Number.isFinite(payload.totalEntries)
               ? payload.totalEntries
               : (payload.entries || []).length;
-            const suffix = count === 1 ? "entry" : "entries";
-            fileViewerBinaryElement.textContent = `Archive (${payload.format || "unknown"}) · ${count} ${suffix} · open this file in the desktop viewer to browse it.`;
+            const suffix = count === 1 ? t("entry") : t("entries");
+            setRemoteText(fileViewerBinaryElement, tr`Archive (${payload.format || "unknown"}) · ${count} ${suffix} · open this file in the desktop viewer to browse it.`);
             fileViewerBinaryElement.hidden = false;
           } else {
-            throw new Error("Unsupported viewer response");
+            throw remoteError(t("Unsupported viewer response"));
           }
           fileViewerZoomElement.hidden = !fileViewerZoomable();
         }
@@ -2442,8 +2437,8 @@ import {
           hideFileViewerContent();
           resetFileViewerZoom();
           fileViewerZoomElement.hidden = true;
-          fileViewerTitleElement.textContent = "";
-          fileViewerTitleElement.title = "";
+          setRemoteText(fileViewerTitleElement, "");
+          setRemoteAttribute(fileViewerTitleElement, "title", "");
           fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDownloadButton.hidden = false;
@@ -2468,8 +2463,8 @@ import {
           resetFileViewerZoom();
           fileViewerKind = null;
           fileViewerZoomElement.hidden = true;
-          fileViewerTitleElement.textContent = path;
-          fileViewerTitleElement.title = path;
+          setRemoteText(fileViewerTitleElement, path);
+          setRemoteAttribute(fileViewerTitleElement, "title", path);
           fileViewerCopyPathButton.hidden = true;
           fileViewerPath = path;
           // Back exists only for a file reached through the explorer; a terminal
@@ -2484,7 +2479,7 @@ import {
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
-          setFileViewerMessage("Loading file…");
+          setFileViewerMessage(t("Loading file…"));
           fileViewerFetch("/remote/v1/file-viewer/render", {
             method: "POST",
             leaseId: requestLeaseId,
@@ -2542,8 +2537,8 @@ import {
           resetFileViewerZoom();
           fileViewerKind = null;
           fileViewerZoomElement.hidden = true;
-          fileViewerTitleElement.textContent = title;
-          fileViewerTitleElement.title = tooltip;
+          setRemoteText(fileViewerTitleElement, title);
+          setRemoteAttribute(fileViewerTitleElement, "title", tooltip);
           fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDirectoryPath = null;
@@ -2566,9 +2561,9 @@ import {
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
           const requestRevision = showBlankFileViewerOverlay(
-            request.path || "Host files",
+            request.path || t("Host files"),
             request.path || "",
-            "Loading directory…",
+            t("Loading directory…"),
           );
           fileViewerFetch("/remote/v1/file-viewer/list", {
             method: "POST",
@@ -2605,7 +2600,7 @@ import {
 
         function renderDirectoryListing(payload) {
           if (!payload || typeof payload.path !== "string" || !Array.isArray(payload.entries)) {
-            throw new Error("Unsupported directory response");
+            throw remoteError(t("Unsupported directory response"));
           }
           hideFileViewerContent();
           fileViewerMessageElement.hidden = true;
@@ -2616,8 +2611,8 @@ import {
           fileViewerDirectoryPath = payload.path;
           fileViewerSection.hidden = false;
           renderFileViewerState();
-          fileViewerTitleElement.textContent = payload.path;
-          fileViewerTitleElement.title = payload.path;
+          setRemoteText(fileViewerTitleElement, payload.path);
+          setRemoteAttribute(fileViewerTitleElement, "title", payload.path);
           fileViewerCopyPathButton.hidden = false;
           // A new listing starts at its top; the previous directory's scroll
           // offset must not carry over into a shorter or unrelated list.
@@ -2634,12 +2629,12 @@ import {
           if (!entryRows) {
             const empty = document.createElement("div");
             empty.className = "file-viewer-directory-empty";
-            empty.textContent = "Empty directory";
+            setRemoteText(empty, t("Empty directory"));
             fileViewerDirectoryElement.appendChild(empty);
           }
           fileViewerDirectoryElement.hidden = false;
           if (payload.truncated) {
-            setFileViewerMessage("Listing truncated at the Remote entry limit.");
+            setFileViewerMessage(t("Listing truncated at the Remote entry limit."));
           }
         }
 
@@ -2654,13 +2649,13 @@ import {
           setRemoteIcon(icon, fileKindIconName(entry, isParent), { size: FILE_KIND_ICON_SIZE });
           const name = document.createElement("span");
           name.className = "file-viewer-directory-name";
-          name.textContent = entry.name;
+          setRemoteText(name, entry.name);
           row.appendChild(icon);
           row.appendChild(name);
           if (!entry.isDirectory && Number.isFinite(entry.size)) {
             const size = document.createElement("span");
             size.className = "file-viewer-directory-size";
-            size.textContent = formatFileViewerBytes(entry.size);
+            setRemoteText(size, formatFileViewerBytes(entry.size));
             row.appendChild(size);
           }
           if (isParent) row.classList.add("parent");
@@ -2715,7 +2710,7 @@ import {
             "image/bmp", "image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon",
           ];
           if (!browserViewableTypes.includes(mediaType)) {
-            throw new Error("This browser cannot open this file type. Use Download instead.");
+            throw remoteError(t("This browser cannot open this file type. Use Download instead."));
           }
           const url = URL.createObjectURL(new Blob([base64ToBytes(payload.base64)], { type: payload.mediaType || mediaType }));
           try {
@@ -2725,10 +2720,10 @@ import {
               // Host HTML/SVG must never execute with the Remote document's origin.
               const frame = tab.document.createElement("iframe");
               frame.setAttribute("sandbox", "");
-              frame.title = payload.name;
+              setRemoteAttribute(frame, "title", payload.name);
               frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0";
               frame.src = url;
-              tab.document.title = payload.name;
+              setRemoteAttribute(tab.document, "title", payload.name);
               tab.document.body.replaceChildren(frame);
             }
           } finally {
@@ -2747,18 +2742,18 @@ import {
               ? window.LaymuxNative
               : null;
           if (androidE2eMode && !nativeFileBridge) {
-            setFileViewerMessage(`This app version cannot ${openOnDevice ? "open" : "save"} files. Update the app.`, true);
+            setFileViewerMessage(tr`This app version cannot ${openOnDevice ? t("open") : t("save")} files. Update the app.`, true);
             return;
           }
           // Reserve the tab during the user gesture, before the authenticated fetch.
           const openedTab = openOnDevice && !androidE2eMode ? window.open("about:blank", "_blank") : null;
           if (openOnDevice && !androidE2eMode && !openedTab) {
-            setFileViewerMessage("Allow pop-ups to open this file in a new tab.", true);
+            setFileViewerMessage(t("Allow pop-ups to open this file in a new tab."), true);
             return;
           }
           if (openedTab) {
             openedTab.opener = null;
-            openedTab.document.body.textContent = "Loading file…";
+            setRemoteText(openedTab.document.body, t("Loading file…"));
           }
           const requestRevision = fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -2781,12 +2776,12 @@ import {
                 return;
               }
               if (!payload || typeof payload.base64 !== "string" || typeof payload.name !== "string") {
-                throw new Error("Download response was not usable");
+                throw remoteError(t("Download response was not usable"));
               }
               if (nativeFileBridge) {
                 // Preserve the injected receiver across the asynchronous file fetch.
                 nativeFileBridge[nativeMethod](payload.name, payload.mediaType || "", payload.base64);
-                setFileViewerMessage(openOnDevice ? `Opening ${payload.name}…` : `Saved ${payload.name} to Downloads.`);
+                setFileViewerMessage(openOnDevice ? tr`Opening ${payload.name}…` : tr`Saved ${payload.name} to Downloads.`);
                 return;
               }
               if (openedTab) {
@@ -2817,13 +2812,13 @@ import {
             fileViewerDownloadInFlight || !fileViewerPath || !leaseId || !fileViewerToken;
           fileViewerOpenButton.disabled = fileViewerDownloadButton.disabled;
           fileViewerOpenButton.hidden = fileViewerDownloadButton.hidden;
-          fileViewerOpenButton.title = fileViewerOpenButton.disabled
-            ? "Wait for the file transfer or reconnect."
-            : "Open on this device";
+          setRemoteAttribute(fileViewerOpenButton, "title", fileViewerOpenButton.disabled
+            ? t("Wait for the file transfer or reconnect.")
+            : t("Open on this device"));
           // The label, not the button: the icon beside it must survive.
-          fileViewerDownloadLabel.textContent = fileViewerDownloadInFlight
-            ? "Saving..."
-            : "Download";
+          setRemoteText(fileViewerDownloadLabel, fileViewerDownloadInFlight
+            ? t("Saving...")
+            : t("Download"));
         }
 
         function fileViewerPinchDistance(pointers) {
@@ -3512,10 +3507,10 @@ import {
         }
 
         function linkChipActionLabel(action, kind) {
-          if (action === "browser") return "Open in browser";
-          if (action === "explorer") return "Open explorer";
-          if (action === "viewer") return "Open viewer";
-          return kind === "url" ? "Copy URL" : "Copy path";
+          if (action === "browser") return t("Open in browser");
+          if (action === "explorer") return t("Open explorer");
+          if (action === "viewer") return t("Open viewer");
+          return kind === "url" ? t("Copy URL") : t("Copy path");
         }
 
         function ensureLinkChipElement() {
@@ -3587,7 +3582,7 @@ import {
               button.type = "button";
               button.className = "remote-link-chip-action";
               button.dataset.linkChipAction = action;
-              button.textContent = linkChipActionLabel(action, target.kind);
+              setRemoteText(button, linkChipActionLabel(action, target.kind));
               return button;
             })
           );
@@ -3620,7 +3615,7 @@ import {
           if (!target || !action) return;
           if (action === "copy") {
             writeClipboardText(target.value).catch((err) =>
-              setStatus(`Copy failed: ${err.message || err}`, true)
+              setStatus(tr`Copy failed: ${err.message || err}`, true)
             );
             return;
           }
@@ -4180,14 +4175,14 @@ import {
         }
 
         function buildComposerSuggestList(listEl, entries, activeIndex, onPick, longPress) {
-          listEl.textContent = "";
+          setRemoteText(listEl, "");
           entries.forEach((raw, index) => {
             const suggestion =
               typeof raw === "string" ? suggestionFromHistory(raw) : raw;
             const item = document.createElement("li");
             item.className = `composer-suggest-item${index === activeIndex ? " is-active" : ""}`;
             item.setAttribute("role", "none");
-            item.title = suggestion.value;
+            setRemoteAttribute(item, "title", suggestion.value);
 
             const pick = document.createElement("button");
             pick.type = "button";
@@ -4195,12 +4190,12 @@ import {
             pick.id = `${listEl.id}-option-${index}`;
             pick.setAttribute("role", "option");
             pick.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
-            pick.textContent = composerSuggestionDisplay(suggestion);
+            setRemoteText(pick, composerSuggestionDisplay(suggestion));
             if (suggestion.send) {
               const mark = document.createElement("span");
               mark.className = "composer-suggest-send";
               mark.setAttribute("aria-hidden", "true");
-              mark.textContent = "↵";
+              setRemoteText(mark, "↵");
               pick.append(mark);
             }
             if (longPress) {
@@ -4218,12 +4213,9 @@ import {
             const star = document.createElement("button");
             star.type = "button";
             star.className = "composer-suggest-star";
-            star.setAttribute(
-              "aria-label",
-              `${starred ? "Unstar" : "Star"}: ${suggestion.value}`
-            );
+            setRemoteAttribute(star, "aria-label", tr`${starred ? t("Unstar") : t("Star")}: ${suggestion.value}`);
             star.setAttribute("aria-pressed", starred ? "true" : "false");
-            star.title = starred ? "Unstar" : "Star";
+            setRemoteAttribute(star, "title", starred ? t("Unstar") : t("Star"));
             setRemoteIcon(star, "Star", { size: 13, fill: starred ? "currentColor" : "none" });
             keepInputSurfaceFocus(star);
             star.addEventListener("mousedown", (event) => {
@@ -4289,7 +4281,7 @@ import {
           composerStarEditorPreviousValue = null;
           if (composerStarEditorError) {
             composerStarEditorError.hidden = true;
-            composerStarEditorError.textContent = "";
+            setRemoteText(composerStarEditorError, "");
           }
           focusCurrentInputSurface();
         }
@@ -4310,7 +4302,7 @@ import {
           composerStarEditorSend.checked = entry.send;
           if (composerStarEditorError) {
             composerStarEditorError.hidden = true;
-            composerStarEditorError.textContent = "";
+            setRemoteText(composerStarEditorError, "");
           }
           composerStarEditorScrim.hidden = false;
           try {
@@ -4332,7 +4324,7 @@ import {
           } catch (error) {
             if (composerStarEditorError) {
               composerStarEditorError.hidden = false;
-              composerStarEditorError.textContent = error.message || String(error);
+              setRemoteText(composerStarEditorError, error.message || String(error));
             } else {
               setStatus(error.message || String(error), true);
             }
@@ -4381,7 +4373,7 @@ import {
               false
             );
           } else if (composerHistoryList.childElementCount) {
-            composerHistoryList.textContent = "";
+            setRemoteText(composerHistoryList, "");
           }
           composerHistoryList.hidden = !historyVisible;
 
@@ -4394,27 +4386,18 @@ import {
               true
             );
           } else if (composerAutocompleteList.childElementCount) {
-            composerAutocompleteList.textContent = "";
+            setRemoteText(composerAutocompleteList, "");
           }
           composerAutocompleteList.hidden = !autocompleteVisible;
 
           // Reflect the open list on the editor for assistive tech.
-          composerInput.setAttribute(
-            "aria-expanded",
-            historyVisible || autocompleteVisible ? "true" : "false"
-          );
+          composerInput.setAttribute("aria-expanded", historyVisible || autocompleteVisible ? "true" : "false");
           if (historyVisible) {
             composerInput.setAttribute("aria-controls", composerHistoryList.id);
-            composerInput.setAttribute(
-              "aria-activedescendant",
-              `${composerHistoryList.id}-option-${composerHistoryIndex}`
-            );
+            composerInput.setAttribute("aria-activedescendant", `${composerHistoryList.id}-option-${composerHistoryIndex}`);
           } else if (autocompleteVisible && activeAutocompleteIndex >= 0) {
             composerInput.setAttribute("aria-controls", composerAutocompleteList.id);
-            composerInput.setAttribute(
-              "aria-activedescendant",
-              `${composerAutocompleteList.id}-option-${activeAutocompleteIndex}`
-            );
+            composerInput.setAttribute("aria-activedescendant", `${composerAutocompleteList.id}-option-${activeAutocompleteIndex}`);
           } else {
             if (autocompleteVisible) {
               composerInput.setAttribute("aria-controls", composerAutocompleteList.id);
@@ -4474,10 +4457,7 @@ import {
             window.setTimeout(() => uploadSelectedAttachmentFiles(chooser), 0);
           }
           attachmentButton.classList.toggle("busy", attachmentUploadInFlight);
-          attachmentButton.setAttribute(
-            "aria-busy",
-            attachmentUploadInFlight ? "true" : "false",
-          );
+          attachmentButton.setAttribute("aria-busy", attachmentUploadInFlight ? "true" : "false");
           updateComposerOpacityState();
           syncInputActionVisibility();
           refreshSharedFilePrompt();
@@ -4605,10 +4585,10 @@ import {
           syncComposerOverlayGeometry();
           inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
           const inputModeActionLabel = composerMode
-            ? "Switch to Direct input"
-            : "Switch to Composer input";
-          inputModeToggleButton.title = inputModeActionLabel;
-          inputModeToggleButton.setAttribute("aria-label", inputModeActionLabel);
+            ? t("Switch to Direct input")
+            : t("Switch to Composer input");
+          setRemoteAttribute(inputModeToggleButton, "title", inputModeActionLabel);
+          setRemoteAttribute(inputModeToggleButton, "aria-label", inputModeActionLabel);
           setRemoteIcon(inputModeIcon, composerMode ? "Pencil" : "Keyboard");
 
           composerEditor.setDraft(draft);
@@ -4699,7 +4679,7 @@ import {
         function setConnected(connected) {
           if (!connected) workspaceCloseToasts.sync([]);
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
-          if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
+          if (connected) setConnectionHint(t("Connect first to load workspaces and control the active terminal."), false);
           workspaceSection.classList.toggle("locked", !connected);
           hiddenWorkspaceSection.classList.toggle("locked", !connected);
           newWorkspaceButton.disabled = !connected;
@@ -4738,7 +4718,7 @@ import {
         }
 
         function setConnectionHint(message, attention = false) {
-          if (connectionHint) connectionHint.textContent = message;
+          if (connectionHint) setRemoteText(connectionHint, message);
           if (connectionPanel) connectionPanel.classList.toggle("attention", attention);
         }
 
@@ -5029,86 +5009,28 @@ import {
           }
         }
 
-        // Relay-scoped i18n (ko/en). The Remote page has no shared i18n yet;
-        // this covers only the strings this feature adds. Language follows the
-        // phone locale with the same ko*→ko rule the desktop uses, since the
-        // relay UI is shown on the phone.
-        const OAUTH_RELAY_LANG = (navigator.language || "en")
-          .toLowerCase()
-          .startsWith("ko")
-          ? "ko"
-          : "en";
-        const OAUTH_RELAY_STRINGS = {
-          en: {
-            title: "Sign-in relay",
-            hintNative:
-              "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. Start sign-in in the browser and the result returns to the PC automatically.",
-            hintBrowser:
-              "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.",
-            registering: "Registering the sign-in relay with the PC...",
-            waitingNative:
-              "Finish signing in with the browser that just opened, then return to this app — the result is delivered to the PC here.",
-            waitingSignin: "Waiting for the sign-in to finish...",
-            startedBrowser:
-              "Sign in with the tab that just opened. It ends on an unreachable localhost page — copy that page's full address and paste it below.",
-            waitingPaste: "Waiting for the pasted callback address...",
-            pasteInvalid:
-              "The pasted address must start with http://localhost:{port}",
-            forwardingPaste: "Forwarding the callback to the PC...",
-            forwarding: "Forwarding the sign-in result to the PC...",
-            successAnswered:
-              "Signed in — the PC tool answered {status}. You can close this.",
-            successDelivered:
-              "Signed in — the sign-in was delivered to the PC. You can close this.",
-            inactive: "The sign-in relay is no longer active. You can close this.",
-            couldNotConfirm:
-              "Could not confirm delivery — check whether the PC signed in.",
-            btnStart: "Start sign-in",
-            btnForward: "Forward to PC",
-            btnClose: "Close",
-            ariaCallback: "Callback address from the browser",
-          },
-          ko: {
-            title: "로그인 중계",
-            hintNative:
-              "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 브라우저에서 로그인하면 결과가 PC로 자동 전달됩니다.",
-            hintBrowser:
-              "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 로그인 후 브라우저는 열리지 않는 localhost 페이지에서 끝나므로, 그 주소 전체를 복사해 아래에 붙여넣으세요.",
-            registering: "PC에 로그인 중계를 등록하는 중...",
-            waitingNative:
-              "방금 열린 브라우저에서 로그인을 마친 뒤 이 앱으로 돌아오세요. 결과는 여기서 PC로 전달됩니다.",
-            waitingSignin: "로그인이 끝나기를 기다리는 중...",
-            startedBrowser:
-              "방금 열린 탭에서 로그인하세요. 열리지 않는 localhost 페이지에서 끝나면 그 주소 전체를 복사해 아래에 붙여넣으세요.",
-            waitingPaste: "붙여넣은 콜백 주소를 기다리는 중...",
-            pasteInvalid:
-              "붙여넣은 주소는 http://localhost:{port} 로 시작해야 합니다",
-            forwardingPaste: "콜백을 PC로 전달하는 중...",
-            forwarding: "로그인 결과를 PC로 전달하는 중...",
-            successAnswered:
-              "로그인 성공 — PC 도구가 {status}로 응답했습니다. 이 창을 닫아도 됩니다.",
-            successDelivered:
-              "로그인 성공 — PC로 전달됐습니다. 이 창을 닫아도 됩니다.",
-            inactive: "로그인 중계가 더 이상 활성 상태가 아닙니다. 이 창을 닫아도 됩니다.",
-            couldNotConfirm:
-              "전달을 확인하지 못했습니다 — PC에서 로그인됐는지 확인하세요.",
-            btnStart: "로그인 시작",
-            btnForward: "PC로 전달",
-            btnClose: "닫기",
-            ariaCallback: "브라우저에서 받은 콜백 주소",
-          },
-        };
-        function tRelay(key, params) {
-          const table =
-            OAUTH_RELAY_STRINGS[OAUTH_RELAY_LANG] || OAUTH_RELAY_STRINGS.en;
-          let text = table[key] ?? OAUTH_RELAY_STRINGS.en[key] ?? key;
-          if (params) {
-            for (const name of Object.keys(params)) {
-              text = text.split(`{${name}}`).join(params[name]);
-            }
-          }
-          return text;
-        }
+        const OAUTH_RELAY_KEYS = {
+  "title": "Sign-in relay",
+  "hintNative": "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. Start sign-in in the browser and the result returns to the PC automatically.",
+  "hintBrowser": "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.",
+  "registering": "Registering the sign-in relay with the PC...",
+  "waitingNative": "Finish signing in with the browser that just opened, then return to this app — the result is delivered to the PC here.",
+  "waitingSignin": "Waiting for the sign-in to finish...",
+  "startedBrowser": "Sign in with the tab that just opened. It ends on an unreachable localhost page — copy that page's full address and paste it below.",
+  "waitingPaste": "Waiting for the pasted callback address...",
+  "pasteInvalid": "The pasted address must start with http://localhost:{port}",
+  "forwardingPaste": "Forwarding the callback to the PC...",
+  "forwarding": "Forwarding the sign-in result to the PC...",
+  "successAnswered": "Signed in — the PC tool answered {status}. You can close this.",
+  "successDelivered": "Signed in — the sign-in was delivered to the PC. You can close this.",
+  "inactive": "The sign-in relay is no longer active. You can close this.",
+  "couldNotConfirm": "Could not confirm delivery — check whether the PC signed in.",
+  "btnStart": "Start sign-in",
+  "btnForward": "Forward to PC",
+  "btnClose": "Close",
+  "ariaCallback": "Callback address from the browser"
+};
+        function tRelay(key, params) { return t(OAUTH_RELAY_KEYS[key] ?? key, params); }
 
         // kind: "error" | "success" | "" (neutral). Success is styled distinctly
         // so a completed sign-in reads as a clear win, not just another line.
@@ -5118,9 +5040,11 @@ import {
             const icon = document.createElement("span");
             icon.className = "oauth-relay-status-icon";
             setRemoteIcon(icon, "Check", { size: 12 });
-            oauthRelayStatus.append(icon, document.createTextNode(message));
+            const text = document.createElement("span");
+            setRemoteText(text, message);
+            oauthRelayStatus.append(icon, text);
           } else {
-            oauthRelayStatus.textContent = message;
+            setRemoteText(oauthRelayStatus, message);
           }
           oauthRelayStatus.classList.toggle("error", kind === "error");
           oauthRelayStatus.classList.toggle("success", kind === "success");
@@ -5129,11 +5053,11 @@ import {
         // Static labels the modal ships in English — localized once here.
         (function localizeOauthRelayChrome() {
           const title = document.getElementById("oauthRelayTitle");
-          if (title) title.textContent = tRelay("title");
-          oauthRelayStartButton.textContent = tRelay("btnStart");
-          oauthRelayForwardButton.textContent = tRelay("btnForward");
-          oauthRelayCloseButton.textContent = tRelay("btnClose");
-          oauthRelayCallbackInput.setAttribute("aria-label", tRelay("ariaCallback"));
+          if (title) setRemoteText(title, tRelay("title"));
+          setRemoteText(oauthRelayStartButton, tRelay("btnStart"));
+          setRemoteText(oauthRelayForwardButton, tRelay("btnForward"));
+          setRemoteText(oauthRelayCloseButton, tRelay("btnClose"));
+          setRemoteAttribute(oauthRelayCallbackInput, "aria-label", tRelay("ariaCallback"));
         })();
 
         function closeOauthRelayModal() {
@@ -5168,10 +5092,10 @@ import {
           oauthRelayScrim.hidden = false;
           oauthRelayManualRow.hidden = true;
           oauthRelayStartButton.hidden = false;
-          oauthRelayHint.textContent = tRelay(
+          setRemoteText(oauthRelayHint, tRelay(
             nativeOauthRelayAvailable() ? "hintNative" : "hintBrowser",
             { host: url.hostname, port: redirect.port },
-          );
+          ));
           setOauthRelayStatus("");
         }
 
@@ -5225,7 +5149,7 @@ import {
             // Native binds the phone's loopback port, opens the OS browser,
             // and parks the redirect until this app is foreground again —
             // then window.laymuxOauthRelay.onCallback forwards it.
-            oauthRelayHint.textContent = tRelay("waitingNative");
+            setRemoteText(oauthRelayHint, tRelay("waitingNative"));
             setOauthRelayStatus(tRelay("waitingSignin"));
             window.LaymuxNative.beginOauthRelay(
               session.sessionId,
@@ -5238,7 +5162,7 @@ import {
           // Plain browser: nothing can listen on this device's localhost.
           // The redirect still lands in the address bar — the user copies it
           // back here and the desktop replays it.
-          oauthRelayHint.textContent = tRelay("startedBrowser");
+          setRemoteText(oauthRelayHint, tRelay("startedBrowser"));
           oauthRelayManualRow.hidden = false;
           setOauthRelayStatus(tRelay("waitingPaste"));
           if (popup) {
@@ -5391,7 +5315,7 @@ import {
           },
           onError(message) {
             if (oauthRelayScrim.hidden) return;
-            setOauthRelayStatus(String(message), "error");
+            setOauthRelayStatus(message, "error");
           },
         };
 
@@ -5687,7 +5611,7 @@ import {
           }
           if (fallbackCopyText(text)) return;
           if (clipboardError) throw clipboardError;
-          throw new Error("Clipboard API unavailable");
+          throw remoteError(t("Clipboard API unavailable"));
         }
 
         async function copySelectionToClipboard() {
@@ -5705,7 +5629,7 @@ import {
             await writeClipboardText(text);
             lastCopiedSelection = text;
           } catch (err) {
-            setStatus(`Copy failed: ${err.message || err}`, true);
+            setStatus(tr`Copy failed: ${err.message || err}`, true);
           }
         }
 
@@ -6757,7 +6681,7 @@ import {
             const cells = compositionCellClusters(text).map((cluster) => {
               const cell = document.createElement("span");
               cell.className = "remote-composition-cell";
-              cell.textContent = cluster.segment;
+              setRemoteText(cell, cluster.segment);
               cell.style.width = `${Math.max(0, cluster.width) * cellWidth}px`;
               return cell;
             });
@@ -6777,7 +6701,7 @@ import {
           const WebLinksAddonCtor =
             window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon;
           if (!TerminalCtor || !FitAddonCtor) {
-            throw new Error("xterm assets failed to load");
+            throw remoteError(t("xterm assets failed to load"));
           }
           applyTerminalSurfaceBackground(appearance);
           adoptTouchScrollSensitivity(appearance);
@@ -6839,7 +6763,7 @@ import {
               loadSnapshot: () => remoteFetch("/remote/v1/navigation"),
               installSnapshot: (data) => installNavigationSnapshot(data),
               select: (target) => selectTerminal(target.terminalId, { focusHost: true, refreshNavigation: true }),
-              onError: (error) => setStatus(`Pane navigation failed: ${error.message || error}`, true),
+              onError: (error) => setStatus(tr`Pane navigation failed: ${error.message || error}`, true),
             });
             terminal.registerLinkProvider(createPaneLinkProvider(terminal, paneLinks));
             paneLinkUnderlines = installPaneLinkUnderlines(terminal, paneLinks);
@@ -6862,7 +6786,7 @@ import {
                 return { commands: data.agentCommands, isShell: info?.activity?.type === "shell" && !info.commandRunning };
               },
               submit: (context, command) => writeTerminalInput(context.terminalId, context.leaseId, command, true),
-              onError: (error) => setStatus(`Resume failed: ${error.message || error}`, true),
+              onError: (error) => setStatus(tr`Resume failed: ${error.message || error}`, true),
             }));
             // Touch has no hover to reveal a provider link (ADR-0316).
             installAgentResumeUnderlines(terminal, "remote-resume-link-decoration");
@@ -7143,7 +7067,7 @@ import {
             }
             clearTransientConnectionNotice(
               "heartbeat",
-              activeTerminalId ? `Connected to ${activeTerminalId}` : "Connected."
+              activeTerminalId ? tr`Connected to ${activeTerminalId}` : t("Connected.")
             );
             void loadComposerStars(heartbeatLeaseId).catch((error) =>
               console.warn("Failed to refresh Composer stars", error)
@@ -7192,7 +7116,7 @@ import {
           // Ownership-wise this is the heartbeat 409 case, not a 401/403 answer:
           // the lease is gone, but who holds it now is what the next claim asks,
           // so stay armed instead of disarming the reclaim (ADR-0027, ADR-0037).
-          loseRemoteControl("Control was lost while this tab was away.", {
+          loseRemoteControl(t("Control was lost while this tab was away."), {
             hostTookOver: false,
           });
           return true;
@@ -7249,7 +7173,7 @@ import {
             // same way a host takeover does. Only `401`/`403` (bad token, remote
             // access off) are answers on their own; ownership is what the next claim
             // asks, and its reply decides whether to keep trying (issue #561).
-            loseRemoteControl(`Control returned to the host. ${err.message}`, {
+            loseRemoteControl(tr`Control returned to the host. ${err.message}`, {
               hostTookOver: err && (err.status === 401 || err.status === 403),
             });
             return;
@@ -7289,9 +7213,9 @@ import {
         }
 
         function activityLabel(activity, commandRunning) {
-          if (activity && activity.type === "interactiveApp") return activity.name || "Interactive";
-          if (activity && activity.type === "running") return "Running";
-          if (commandRunning) return "Running";
+          if (activity && activity.type === "interactiveApp") return activity.name || t("Interactive");
+          if (activity && activity.type === "running") return t("Running");
+          if (commandRunning) return t("Running");
           return "";
         }
 
@@ -7327,7 +7251,7 @@ import {
 
         function fillCountBadge(element, count) {
           const text = countBadgeText(count);
-          element.textContent = text;
+          setRemoteText(element, text);
           element.style.setProperty("--count-badge-scale", countBadgeScale(text));
         }
 
@@ -7504,7 +7428,7 @@ import {
           if (!ctx) return "";
           if (!ctx.workspace) return ctx.info.title || activeTerminalId || "";
           return ctx.paneNumber
-            ? `${ctx.workspace.name} · Pane ${ctx.paneNumber}`
+            ? tr`${ctx.workspace.name} · Pane ${ctx.paneNumber}`
             : ctx.workspace.name;
         }
 
@@ -7550,10 +7474,10 @@ import {
           const excluded = Boolean(pane && spatialExcludedPaneIds.has(pane.id));
           spatialExclusionButton.setAttribute("aria-pressed", String(excluded));
           const label = excluded
-            ? "Include this pane in pane navigation"
-            : "Exclude this pane from pane navigation";
-          spatialExclusionButton.setAttribute("aria-label", label);
-          spatialExclusionButton.title = label;
+            ? t("Include this pane in pane navigation")
+            : t("Exclude this pane from pane navigation");
+          setRemoteAttribute(spatialExclusionButton, "aria-label", label);
+          setRemoteAttribute(spatialExclusionButton, "title", label);
         }
 
         function setDockPanelOpen(open) {
@@ -7573,7 +7497,7 @@ import {
         }
 
         function notificationSource(notification) {
-          return notification.terminalLabel || notification.title || notification.workspaceName || notification.workspaceId || "Notification";
+          return notification.terminalLabel || notification.title || notification.workspaceName || notification.workspaceId || t("Notification");
         }
 
         function notificationLevelClass(level) {
@@ -7585,15 +7509,15 @@ import {
           const hasUnread = badgeCount > 0;
           drawerNotificationsButton.classList.toggle("status-indicator", hasUnread);
           const notificationLabel = hasUnread
-            ? `Open notifications (${badgeCount} unread)`
-            : "Open notifications";
-          drawerNotificationsButton.setAttribute("aria-label", notificationLabel);
-          drawerNotificationsButton.title = hasUnread
-            ? `Notifications (${badgeCount} unread)`
-            : "Notifications";
-          notificationListEl.innerHTML = "";
+            ? tr`Open notifications (${badgeCount} unread)`
+            : t("Open notifications");
+          setRemoteAttribute(drawerNotificationsButton, "aria-label", notificationLabel);
+          setRemoteAttribute(drawerNotificationsButton, "title", hasUnread
+            ? tr`Notifications (${badgeCount} unread)`
+            : t("Notifications"));
+          setRemoteHtml(notificationListEl, "");
           if (!notifications.length) {
-            emptyNav(notificationListEl, "No notifications.");
+            emptyNav(notificationListEl, t("No notifications."));
             updateNotificationActions();
             return;
           }
@@ -7610,7 +7534,7 @@ import {
             const first = groupNotifications[0] || {};
             const title = document.createElement("div");
             title.className = "notification-group-title";
-            title.textContent = first.workspaceName || first.workspaceId || "Notifications";
+            setRemoteText(title, first.workspaceName || first.workspaceId || t("Notifications"));
             notificationListEl.append(title);
             groupNotifications.forEach((notification) => {
               notificationListEl.append(renderNotificationItem(notification));
@@ -7631,17 +7555,17 @@ import {
 
           const source = document.createElement("span");
           source.className = "notification-source";
-          source.textContent = notificationSource(notification);
+          setRemoteText(source, notificationSource(notification));
           item.append(source);
 
           const message = document.createElement("span");
           message.className = `notification-message ${notificationLevelClass(notification.level)}`;
-          message.textContent = notification.message || "";
+          setRemoteText(message, notification.message || "");
           item.append(message);
 
           const time = document.createElement("span");
           time.className = "notification-time";
-          time.textContent = formatNotificationTime(notification.createdAt);
+          setRemoteText(time, formatNotificationTime(notification.createdAt));
           item.append(time);
 
           return item;
@@ -7696,10 +7620,10 @@ import {
         }
 
         function emptyNav(container, text) {
-          container.innerHTML = "";
+          setRemoteHtml(container, "");
           const item = document.createElement("div");
           item.className = "nav-empty";
-          item.textContent = text;
+          setRemoteText(item, text);
           container.append(item);
         }
 
@@ -7709,7 +7633,7 @@ import {
           }
           navigationPanel.inert = !open;
           navToggleButton.setAttribute("aria-expanded", String(open));
-          navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+          setRemoteAttribute(navToggleButton, "aria-label", open ? t("Close navigation") : t("Open navigation"));
         }
 
         function setNavigationOpen(open) {
@@ -7759,18 +7683,17 @@ import {
           drawerCreateView.hidden = nextView !== "create";
           drawerConnectionView.hidden = nextView !== "connection";
           drawerSettingsView.hidden = nextView !== "settings";
-          drawerTitle.textContent =
-            nextView === "connection"
-              ? "Connection"
+          setRemoteText(drawerTitle, nextView === "connection"
+              ? t("Connection")
               : nextView === "hidden"
-                ? "Hidden workspaces"
+                ? t("Hidden workspaces")
                 : nextView === "notifications"
-                  ? "Notifications"
+                  ? t("Notifications")
                   : nextView === "create"
-                    ? "New workspace"
+                    ? t("New workspace")
                     : nextView === "settings"
-                      ? "Settings"
-                      : "Remote";
+                      ? t("Settings")
+                      : t("Remote"));
           drawerBackButton.hidden = nextView === "workspace";
           newWorkspaceButton.hidden = nextView !== "workspace";
           hiddenWorkspaceToggle.hidden =
@@ -7938,7 +7861,7 @@ import {
 
           const label = document.createElement("span");
           label.className = "widget-muted";
-          label.textContent = item.label || "";
+          setRemoteText(label, item.label || "");
           node.append(label);
 
           // Unusable numbers are replaced, never papered over with the last good
@@ -7946,7 +7869,7 @@ import {
           if (item.unavailable) {
             const unavailable = document.createElement("span");
             unavailable.className = "widget-muted";
-            unavailable.textContent = WIDGET_UNAVAILABLE_TEXT;
+            setRemoteText(unavailable, WIDGET_UNAVAILABLE_TEXT);
             node.append(unavailable);
             return node;
           }
@@ -7955,7 +7878,7 @@ import {
           if (rows.length === 0) {
             const empty = document.createElement("span");
             empty.className = "widget-muted";
-            empty.textContent = WIDGET_UNAVAILABLE_TEXT;
+            setRemoteText(empty, WIDGET_UNAVAILABLE_TEXT);
             node.append(empty);
             return node;
           }
@@ -7980,7 +7903,7 @@ import {
             rowNode.className = "widget-usage-row";
             if (display !== "bar") {
               const text = document.createElement("span");
-              text.textContent = row.text || WIDGET_UNAVAILABLE_TEXT;
+              setRemoteText(text, row.text || WIDGET_UNAVAILABLE_TEXT);
               rowNode.append(text);
             }
             if (display !== "number") {
@@ -8010,10 +7933,10 @@ import {
             fill: "currentColor",
           });
           const count = document.createElement("span");
-          count.textContent = String(busy);
+          setRemoteText(count, String(busy));
           const total = document.createElement("span");
           total.className = "widget-muted";
-          total.textContent = ` / ${Number(item.total) || 0}`;
+          setRemoteText(total, ` / ${Number(item.total) || 0}`);
           node.append(dot, count, total);
           return node;
         }
@@ -8030,7 +7953,7 @@ import {
           setRemoteIcon(icon, "Bell", { size: 13 });
           const count = document.createElement("span");
           count.className = unread > 0 ? "widget-accent" : "widget-muted";
-          count.textContent = String(unread);
+          setRemoteText(count, String(unread));
           node.append(icon, count);
           keepInputSurfaceFocus(node);
           node.addEventListener("click", () => {
@@ -8043,7 +7966,7 @@ import {
         function buildTextWidget(item) {
           const text = document.createElement("span");
           text.className = "widget-cwd";
-          text.textContent = item.text || "";
+          setRemoteText(text, item.text || "");
           const copyText = typeof item.copyText === "string" ? item.copyText : null;
           if (!copyText) {
             const node = document.createElement("span");
@@ -8058,8 +7981,8 @@ import {
           keepInputSurfaceFocus(node);
           node.addEventListener("click", () => {
             writeClipboardText(copyText)
-              .then(() => setStatus("Copied the working directory."))
-              .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+              .then(() => setStatus(t("Copied the working directory.")))
+              .catch((err) => setStatus(tr`Copy failed: ${err.message || err}`, true));
           });
           return node;
         }
@@ -8079,7 +8002,7 @@ import {
                   : item.kind === "text"
                     ? buildTextWidget(item)
                     : null;
-          if (node && typeof item.title === "string" && item.title) node.title = item.title;
+          if (node && typeof item.title === "string" && item.title) setRemoteAttribute(node, "title", item.title);
           return node;
         }
 
@@ -8128,8 +8051,8 @@ import {
           widgetStripRightEl.replaceChildren();
           const node = document.createElement("span");
           node.className = "widget-item widget-muted";
-          node.textContent = WIDGET_UNAVAILABLE_TEXT;
-          node.title = message || "Widget values are unavailable.";
+          setRemoteText(node, WIDGET_UNAVAILABLE_TEXT);
+          setRemoteAttribute(node, "title", message || t("Widget values are unavailable."));
           widgetStripLeftEl.append(node);
         }
 
@@ -8247,7 +8170,7 @@ import {
         }
 
         function renderDockList(docks) {
-          dockListEl.innerHTML = "";
+          setRemoteHtml(dockListEl, "");
           const visibleDocks = docks.filter((dock) => dock.visible !== false);
           const terminalRows = visibleDocks.flatMap((dock) =>
             (dock.panes || [])
@@ -8256,10 +8179,10 @@ import {
           );
           dockBadge.hidden = terminalRows.length <= 0;
           if (terminalRows.length > 0) {
-            dockBadge.textContent = String(terminalRows.length);
+            setRemoteText(dockBadge, String(terminalRows.length));
           }
           if (!terminalRows.length) {
-            emptyNav(dockListEl, "No dock terminals.");
+            emptyNav(dockListEl, t("No dock terminals."));
             return;
           }
 
@@ -8272,7 +8195,7 @@ import {
 
             const title = document.createElement("div");
             title.className = "dock-group-title";
-            title.textContent = dock.position || "dock";
+            setRemoteText(title, dock.position || "dock");
             dockListEl.append(title);
 
             terminalPanes.forEach(({ pane }) => {
@@ -8300,7 +8223,7 @@ import {
 
           const position = document.createElement("span");
           position.className = "dock-position-badge";
-          position.textContent = shortLabel(dock.position || "dock");
+          setRemoteText(position, shortLabel(dock.position || "dock"));
           row.append(position);
 
           const main = document.createElement("div");
@@ -8309,27 +8232,27 @@ import {
 
           const env = document.createElement("span");
           env.className = "pane-env";
-          env.textContent = shortLabel(pane.profile || pane.title || "TerminalView");
+          setRemoteText(env, shortLabel(pane.profile || pane.title || "TerminalView"));
           main.append(env);
 
           const activity = activityLabel(pane.activity, pane.commandRunning);
           if (activity) {
             const activityEl = document.createElement("span");
             activityEl.className = `pane-activity ${activityClass(pane.activity)}`;
-            activityEl.textContent = activity;
+            setRemoteText(activityEl, activity);
             main.append(activityEl);
           }
 
           if (pane.branch) {
             const branch = document.createElement("span");
             branch.className = "pane-branch";
-            branch.textContent = pane.branch;
+            setRemoteText(branch, pane.branch);
             main.append(branch);
           }
 
           const path = document.createElement("span");
           path.className = "pane-path";
-          path.textContent = pane.cwd || pane.title || pane.terminalId;
+          setRemoteText(path, pane.cwd || pane.title || pane.terminalId);
           if (pathEllipsisMode() === "start") {
             path.style.direction = "rtl";
             path.style.textAlign = "left";
@@ -8351,7 +8274,7 @@ import {
         }
 
         function renderHiddenWorkspaceShelf(workspaces) {
-          hiddenWorkspaceShelf.innerHTML = "";
+          setRemoteHtml(hiddenWorkspaceShelf, "");
           hiddenWorkspaceCount = workspaces.length;
           hiddenWorkspaceToggle.hidden =
             drawerView !== "workspace" || hiddenWorkspaceCount === 0;
@@ -8359,11 +8282,11 @@ import {
             "status-indicator",
             hiddenWorkspaceCount > 0,
           );
-          const label = `Open hidden workspaces (${hiddenWorkspaceCount})`;
-          hiddenWorkspaceToggle.setAttribute("aria-label", label);
-          hiddenWorkspaceToggle.title = label;
+          const label = tr`Open hidden workspaces (${hiddenWorkspaceCount})`;
+          setRemoteAttribute(hiddenWorkspaceToggle, "aria-label", label);
+          setRemoteAttribute(hiddenWorkspaceToggle, "title", label);
           if (hiddenWorkspaceCount === 0) {
-            emptyNav(hiddenWorkspaceShelf, "No hidden workspaces.");
+            emptyNav(hiddenWorkspaceShelf, t("No hidden workspaces."));
             if (drawerView === "hidden") setDrawerView("workspace");
             return;
           }
@@ -8376,12 +8299,9 @@ import {
             const primary = document.createElement("button");
             primary.type = "button";
             primary.className = "hidden-workspace-primary";
-            primary.textContent = workspace.name || workspace.id || "Workspace";
+            setRemoteText(primary, workspace.name || workspace.id || t("Workspace"));
             primary.disabled = !leaseId;
-            primary.setAttribute(
-              "aria-label",
-              `Show and open ${workspace.name || workspace.id || "workspace"}`,
-            );
+            setRemoteAttribute(primary, "aria-label", tr`Show and open ${workspace.name || workspace.id || "workspace"}`);
             primary.addEventListener("click", async () => {
               primary.disabled = true;
               try {
@@ -8401,11 +8321,8 @@ import {
             restore.dataset.hiddenWorkspaceRestore = workspace.id;
             setVisibilityIcon(restore, false, 12);
             restore.disabled = !leaseId;
-            restore.setAttribute(
-              "aria-label",
-              `Show ${workspace.name || workspace.id || "workspace"}`,
-            );
-            restore.title = "Show in workspace list";
+            setRemoteAttribute(restore, "aria-label", tr`Show ${workspace.name || workspace.id || "workspace"}`);
+            setRemoteAttribute(restore, "title", t("Show in workspace list"));
             keepInputSurfaceFocus(restore);
             restore.addEventListener("click", async (event) => {
               event.stopPropagation();
@@ -8449,7 +8366,7 @@ import {
 
         function renderWorkspaceList(workspaces) {
           workspaceManager.sync(workspaces);
-          workspaceListEl.innerHTML = "";
+          setRemoteHtml(workspaceListEl, "");
           const hiddenWorkspaces = workspaces.filter(
             (workspace) => workspace.hidden === true,
           );
@@ -8458,7 +8375,7 @@ import {
           );
           renderHiddenWorkspaceShelf(hiddenWorkspaces);
           if (!visibleWorkspaces.length) {
-            emptyNav(workspaceListEl, "No workspaces.");
+            emptyNav(workspaceListEl, t("No workspaces."));
             return;
           }
           for (let index = 0; index < visibleWorkspaces.length; index += 1) {
@@ -8502,19 +8419,19 @@ import {
 
           const indexEl = document.createElement("span");
           indexEl.className = "workspace-index";
-          indexEl.textContent = index < 9 ? String(index + 1) : "";
+          setRemoteText(indexEl, index < 9 ? String(index + 1) : "");
           left.append(indexEl);
 
           const nameEl = document.createElement("span");
           nameEl.className = "workspace-name";
-          nameEl.textContent = workspace.name || workspace.id || "Workspace";
+          setRemoteText(nameEl, workspace.name || workspace.id || t("Workspace"));
           left.append(nameEl);
 
           const selectorSummary = workspace.selectorSummary || {};
           if ((selectorSummary.terminalCount || 0) > 0) {
             const count = document.createElement("span");
             count.className = "workspace-terminal-count";
-            count.textContent = String(selectorSummary.terminalCount);
+            setRemoteText(count, String(selectorSummary.terminalCount));
             left.append(count);
           }
 
@@ -8558,8 +8475,8 @@ import {
           manage.setAttribute("aria-haspopup", "dialog");
           manage.setAttribute("aria-controls", "workspaceManager");
           manage.setAttribute("aria-expanded", String(workspaceManager.isOpenFor(workspace.id)));
-          manage.setAttribute("aria-label", `Manage ${workspace.name || "workspace"}`);
-          manage.title = "Manage workspace";
+          setRemoteAttribute(manage, "aria-label", tr`Manage ${workspace.name || "workspace"}`);
+          setRemoteAttribute(manage, "title", t("Manage workspace"));
           manage.addEventListener("click", (event) => {
             event.stopPropagation();
             workspaceManager.open(workspace, canHideWorkspace, manage, { canClose: (navigationState.workspaces || []).filter((item) => !item.hidden).length > 1 });
@@ -8591,14 +8508,14 @@ import {
               const inputLine = document.createElement("div");
               inputLine.className = "workspace-last-input";
               inputLine.dataset.workspaceLastInput = workspace.id;
-              inputLine.textContent = latestInput ? latestInput.text : "\u00a0";
-              inputLine.title = latestInput ? latestInput.text : "";
+              setRemoteText(inputLine, latestInput ? latestInput.text : "\u00a0");
+              setRemoteAttribute(inputLine, "title", latestInput ? latestInput.text : "");
               paneList.append(inputLine);
             }
           } else {
             const summary = document.createElement("div");
             summary.className = "workspace-summary-line";
-            summary.textContent = metaText([selectorSummary.branch, selectorSummary.cwd]);
+            setRemoteText(summary, metaText([selectorSummary.branch, selectorSummary.cwd]));
             content.append(summary);
           }
 
@@ -8609,10 +8526,10 @@ import {
           const excluded = spatialExcludedWorkspaceIds.has(workspaceId);
           button.setAttribute("aria-pressed", String(excluded));
           const label = excluded
-            ? "Include this workspace in pane navigation"
-            : "Exclude this workspace from pane navigation";
-          button.setAttribute("aria-label", label);
-          button.title = label;
+            ? t("Include this workspace in pane navigation")
+            : t("Exclude this workspace from pane navigation");
+          setRemoteAttribute(button, "aria-label", label);
+          setRemoteAttribute(button, "title", label);
         }
 
         function renderWorkspaceSkipButton(workspace) {
@@ -8642,11 +8559,11 @@ import {
             applyWorkspaceSkipState(button, workspace.id);
             updateHeaderPaneIdentity();
             if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
-            const wsLabel = workspace.name || workspace.id || "Workspace";
+            const wsLabel = workspace.name || workspace.id || t("Workspace");
             setStatus(
               next.willExclude
-                ? `${wsLabel} excluded from pane navigation.`
-                : `${wsLabel} included in pane navigation.`
+                ? tr`${wsLabel} excluded from pane navigation.`
+                : tr`${wsLabel} included in pane navigation.`
             );
           });
           return button;
@@ -8661,10 +8578,10 @@ import {
           const excluded = spatialExcludedPaneIds.has(pane.id);
           button.setAttribute("aria-pressed", String(excluded));
           const label = excluded
-            ? "Include this pane in pane navigation"
-            : "Exclude this pane from pane navigation";
-          button.setAttribute("aria-label", label);
-          button.title = label;
+            ? t("Include this pane in pane navigation")
+            : t("Exclude this pane from pane navigation");
+          setRemoteAttribute(button, "aria-label", label);
+          setRemoteAttribute(button, "title", label);
           keepInputSurfaceFocus(button);
           button.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -8687,10 +8604,10 @@ import {
           saveSpatialExcludedWorkspaceIds();
           updateHeaderPaneIdentity();
           if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
-          const paneLabel = pane.title || pane.profile || "This pane";
+          const paneLabel = pane.title || pane.profile || t("This pane");
           setStatus(next.willExclude
-            ? `${paneLabel} excluded from pane navigation.`
-            : `${paneLabel} included in pane navigation.`);
+            ? tr`${paneLabel} excluded from pane navigation.`
+            : tr`${paneLabel} included in pane navigation.`);
         }
 
         function renderPaneRow(pane, panes, workspace) {
@@ -8722,10 +8639,7 @@ import {
             const paneNumber = pane.paneNumber || panes.findIndex((item) => item.id === pane.id) + 1;
             const viewLabel =
               pane.profile || pane.selectorDisplay?.environment || pane.title || "TerminalView";
-            row.setAttribute(
-              "aria-label",
-              `Open ${workspace.name || workspace.id || "Workspace"}, pane ${paneNumber}, ${viewLabel}`,
-            );
+            setRemoteAttribute(row, "aria-label", tr`Open ${workspace.name || workspace.id || t("Workspace")}, pane ${paneNumber}, ${viewLabel}`);
             row.addEventListener("click", (event) => {
               event.stopPropagation();
               selectTerminal(pane.terminalId, {
@@ -8754,8 +8668,8 @@ import {
           if (layerCount > 1) {
             const badge = document.createElement("span");
             badge.className = "pane-stack-badge";
-            badge.textContent = `${(Number(pane.layerIndex) || 0) + 1}/${layerCount}`;
-            badge.title = pane.activeLayer === false ? "Stacked layer (hidden)" : "Stacked layer (shown)";
+            setRemoteText(badge, `${(Number(pane.layerIndex) || 0) + 1}/${layerCount}`);
+            setRemoteAttribute(badge, "title", pane.activeLayer === false ? t("Stacked layer (hidden)") : t("Stacked layer (shown)"));
             primary.append(badge);
           }
 
@@ -8764,19 +8678,19 @@ import {
             if (display.environment) {
               const env = document.createElement("span");
               env.className = "pane-env";
-              env.textContent =
-                selectorDisplay.environment || shortLabel(pane.profile || pane.title || "TerminalView");
+              setRemoteText(env, selectorDisplay.environment || shortLabel(pane.profile || pane.title || "TerminalView"));
               primary.append(env);
             }
 
             const computedActivity = selectorDisplay.activity || null;
             const activity = computedActivity
-              ? computedActivity.label
+              ? pane.activity?.type !== "interactiveApp" && (pane.activity?.type === "running" || pane.commandRunning)
+                ? t("Running") : computedActivity.label
               : activityLabel(pane.activity, pane.commandRunning);
             if (display.activity && activity) {
               const activityEl = document.createElement("span");
               activityEl.className = `pane-activity ${activityClass(pane.activity)}`;
-              activityEl.textContent = activity;
+              setRemoteText(activityEl, activity);
               if (computedActivity && computedActivity.color) {
                 activityEl.style.color = computedActivity.color;
               }
@@ -8786,14 +8700,14 @@ import {
             if (display.path && pane.branch) {
               const branch = document.createElement("span");
               branch.className = "pane-branch";
-              branch.textContent = pane.branch;
+              setRemoteText(branch, pane.branch);
               primary.append(branch);
             }
 
             if (display.path && pane.cwd) {
               const path = document.createElement("span");
               path.className = "pane-path";
-              path.textContent = selectorDisplay.cwd || pane.cwd;
+              setRemoteText(path, selectorDisplay.cwd || pane.cwd);
               if (pathEllipsisMode() === "start") {
                 path.style.direction = "rtl";
                 path.style.textAlign = "left";
@@ -8808,12 +8722,12 @@ import {
               setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
               status.setAttribute("role", "img");
-              status.setAttribute("aria-label", pane.selectorStatus.label || COMMAND_STATUS_LABELS[statusIconName]);
+              setRemoteAttribute(status, "aria-label", COMMAND_STATUS_LABELS[statusIconName] || pane.selectorStatus.label);
               primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
               unread.className = "pane-notification-dot";
-              unread.setAttribute("aria-label", "Unread notification");
+              setRemoteAttribute(unread, "aria-label", t("Unread notification"));
               primary.append(unread);
             }
 
@@ -8821,14 +8735,14 @@ import {
               const lastInput = document.createElement("div");
               lastInput.className = "pane-last-input";
               lastInput.dataset.paneLastInput = pane.id;
-              lastInput.textContent = selectorDisplay.lastInput || pane.lastCommand || "\u00a0";
-              lastInput.title = selectorDisplay.lastInput || pane.lastCommand || "";
+              setRemoteText(lastInput, selectorDisplay.lastInput || pane.lastCommand || "\u00a0");
+              setRemoteAttribute(lastInput, "title", selectorDisplay.lastInput || pane.lastCommand || "");
               main.append(lastInput);
             }
           } else {
             const label = document.createElement("span");
             label.className = "pane-view-label";
-            label.textContent = shortLabel(pane.viewType);
+            setRemoteText(label, shortLabel(pane.viewType));
             primary.append(label);
           }
 
@@ -8839,7 +8753,7 @@ import {
           manage.className = "workspace-manage-button";
           manage.dataset.paneManage = pane.id;
           manage.disabled = !leaseId;
-          manage.setAttribute("aria-label", `Manage pane ${pane.paneNumber || ""}`);
+          setRemoteAttribute(manage, "aria-label", tr`Manage pane ${pane.paneNumber || ""}`);
           manage.setAttribute("aria-haspopup", "dialog");
           manage.setAttribute("aria-controls", "paneManager");
           manage.setAttribute("aria-expanded", String(paneManager.isOpenFor(pane.id)));
@@ -9133,7 +9047,7 @@ import {
           if (render) {
             renderNavigation(data);
             if (activeTerminalId) {
-              terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
+              setRemoteText(terminalMetaEl, terminalMetaLabel(data, activeTerminalId));
             }
           }
           syncNavigationViewPolling();
@@ -9213,7 +9127,7 @@ import {
           renderNavigation(data);
           setConnected(Boolean(leaseId));
           if (activeTerminalId) {
-            terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
+            setRemoteText(terminalMetaEl, terminalMetaLabel(data, activeTerminalId));
             if (options.openOutput !== false) {
               // Establish the draft owner before xterm exists, but construct it
               // inside this awaited navigation transaction so constructor/asset
@@ -9229,8 +9143,8 @@ import {
             // Only reachable when the active workspace and every visible dock
             // own no terminal pane at all — a queued pane is opened on entry
             // instead of being reported as missing (issue #779).
-            terminalMetaEl.textContent = "No terminal panes to open.";
-            setStatus("No terminal panes to open.", true);
+            setRemoteText(terminalMetaEl, t("No terminal panes to open."));
+            setStatus(t("No terminal panes to open."), true);
             stopSocket();
           }
         }
@@ -9244,12 +9158,12 @@ import {
         }
 
         function renderWorkspaceLayouts() {
-          newWorkspacePanel.innerHTML = "";
+          setRemoteHtml(newWorkspacePanel, "");
           workspaceLayouts.forEach((layout) => {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "new-workspace-layout";
-            button.textContent = layout.name || layout.id;
+            setRemoteText(button, layout.name || layout.id);
             button.disabled = !leaseId;
             button.addEventListener("click", () => {
               createWorkspace(layout.id).catch((err) => setStatus(err.message || String(err), true));
@@ -9268,7 +9182,7 @@ import {
           if (!leaseId || !layoutId) return;
           const selectedLeaseId = leaseId;
           newWorkspaceButton.disabled = true;
-          setBusyStatus("Creating workspace…");
+          setBusyStatus(t("Creating workspace…"));
           try {
             await remoteFetch("/remote/v1/workspaces", {
               method: "POST",
@@ -9278,7 +9192,7 @@ import {
             await loadNavigation(activeTerminalId, { openOutput: false });
             // Land back on the workspace list, where the new workspace is.
             if (drawerView === "create") returnToWorkspaceView();
-            setStatus("Workspace created.");
+            setStatus(t("Workspace created."));
           } finally {
             newWorkspaceButton.disabled = !leaseId;
           }
@@ -9307,7 +9221,7 @@ import {
           await loadNavigation(activeTerminalId, {
             openOutput: movesActiveWorkspace,
           });
-          setStatus(hidden ? "Workspace hidden." : "Workspace shown.");
+          setStatus(hidden ? t("Workspace hidden.") : t("Workspace shown."));
         }
 
         async function setPaneVisibility(paneId, hidden, selectedLeaseId = leaseId) {
@@ -9327,14 +9241,14 @@ import {
           await loadNavigation(activeTerminalId, { openOutput: false });
           setStatus(
             hidden
-              ? "Pane hidden from workspace list."
-              : "Pane shown in workspace list.",
+              ? t("Pane hidden from workspace list.")
+              : t("Pane shown in workspace list."),
           );
         }
 
         async function switchWorkspace(workspaceId) {
           if (!leaseId || !workspaceId) return;
-          setBusyStatus("Switching workspace…");
+          setBusyStatus(t("Switching workspace…"));
           await activateWorkspace(workspaceId);
           // Prefer the pane the user last stayed on in this workspace (issue
           // #508). preferredTerminal only restores it when the remembered
@@ -9353,11 +9267,11 @@ import {
           notification: "/remote/v1/navigation/notification",
         };
         const NAV_STEP_REASON_MESSAGES = {
-          no_terminal_panes: "No terminal panes to navigate.",
-          no_included_panes: "Every pane is excluded from pane navigation.",
-          no_other_target: "No other pane to move to.",
-          no_focused_pane: "Focus a workspace terminal pane first.",
-          no_unread_notifications: "No unread notifications.",
+          no_terminal_panes: t("No terminal panes to navigate."),
+          no_included_panes: t("Every pane is excluded from pane navigation."),
+          no_other_target: t("No other pane to move to."),
+          no_focused_pane: t("Focus a workspace terminal pane first."),
+          no_unread_notifications: t("No unread notifications."),
         };
         let navStepChain = Promise.resolve();
         let navStepPending = 0;
@@ -9385,7 +9299,7 @@ import {
           });
           if (!data || data.moved !== true || !data.target) {
             const reason = data && data.reason;
-            setStatus(NAV_STEP_REASON_MESSAGES[reason] || "Nowhere to navigate.");
+            setStatus(NAV_STEP_REASON_MESSAGES[reason] || t("Nowhere to navigate."));
             return;
           }
           // Follow the landing: refresh navigation state and attach the
@@ -9423,7 +9337,7 @@ import {
           }
           navStepChain = navStepChain
             .then(task)
-            .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
+            .catch((err) => setStatus(tr`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
               updateKeyBarControls();
@@ -9455,7 +9369,7 @@ import {
         const REMOTE_SHORTCUT_ACTIONS = [
           {
             id: "pane.focus",
-            label: "Move to pane in direction",
+            label: t("Move to pane in direction"),
             needsLease: true,
             run: (event) => {
               const direction = ARROW_KEY_DIRECTIONS[event.key];
@@ -9466,7 +9380,7 @@ import {
           },
           {
             id: "pane.clearTerminal",
-            label: "Clear this terminal",
+            label: t("Clear this terminal"),
             needsLease: true,
             run: () => {
               enqueueRemoteNavigation(() => runRemoteClear("pane"), null, { move: false });
@@ -9475,7 +9389,7 @@ import {
           },
           {
             id: "workspace.clearTerminals",
-            label: "Clear workspace terminals",
+            label: t("Clear workspace terminals"),
             needsLease: true,
             run: () => {
               enqueueRemoteNavigation(() => runRemoteClear("workspace"), null, { move: false });
@@ -9484,31 +9398,31 @@ import {
           },
           ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
             id: `workspace.${n}`,
-            label: `Workspace ${n}`,
+            label: tr`Workspace ${n}`,
             needsLease: true,
             run: () => switchRemoteWorkspaceTo(({ visible }) => visible[n - 1]),
           })),
           {
             id: "workspace.last",
-            label: "Last workspace",
+            label: t("Last workspace"),
             needsLease: true,
             run: () => switchRemoteWorkspaceTo(({ visible }) => visible[visible.length - 1]),
           },
           {
             id: "workspace.next",
-            label: "Next workspace",
+            label: t("Next workspace"),
             needsLease: true,
             run: () => cycleRemoteWorkspace(1),
           },
           {
             id: "workspace.prev",
-            label: "Previous workspace",
+            label: t("Previous workspace"),
             needsLease: true,
             run: () => cycleRemoteWorkspace(-1),
           },
           {
             id: "notifications.recent",
-            label: "Most recent unread alert",
+            label: t("Most recent unread alert"),
             needsLease: true,
             run: () => {
               enqueueNavStep(null, "notification", "recent");
@@ -9517,7 +9431,7 @@ import {
           },
           {
             id: "notifications.oldest",
-            label: "Oldest unread alert",
+            label: t("Oldest unread alert"),
             needsLease: true,
             run: () => {
               enqueueNavStep(null, "notification", "oldest");
@@ -9526,7 +9440,7 @@ import {
           },
           {
             id: "fileViewer.open",
-            label: "Open Files",
+            label: t("Open Files"),
             needsLease: true,
             run: () => {
               openCurrentFileExplorer();
@@ -9535,7 +9449,7 @@ import {
           },
           {
             id: "terminal.toggleInputMode",
-            label: "Toggle Direct / Composer",
+            label: t("Toggle Direct / Composer"),
             run: () => {
               setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
               return true;
@@ -9543,12 +9457,12 @@ import {
           },
           {
             id: "pane.copyIdentifier",
-            label: "Copy pane ID",
+            label: t("Copy pane ID"),
             run: () => copyActivePaneIdentifier(),
           },
           {
             id: "sidebar.toggle",
-            label: "Toggle menu",
+            label: t("Toggle menu"),
             run: () => {
               setNavigationOpen(navToggleButton.getAttribute("aria-expanded") !== "true");
               return true;
@@ -9556,7 +9470,7 @@ import {
           },
           {
             id: "notifications.toggle",
-            label: "Toggle alerts",
+            label: t("Toggle alerts"),
             run: () => {
               toggleRemoteNotificationsView();
               return true;
@@ -9564,25 +9478,25 @@ import {
           },
           {
             id: "terminal.zoomIn",
-            label: "Larger terminal text",
+            label: t("Larger terminal text"),
             run: () => stepRemoteTerminalFontSize(1),
           },
           {
             id: "terminal.zoomOut",
-            label: "Smaller terminal text",
+            label: t("Smaller terminal text"),
             run: () => stepRemoteTerminalFontSize(-1),
           },
           {
             id: "terminal.zoomReset",
-            label: "Reset terminal text size",
+            label: t("Reset terminal text size"),
             run: () => stepRemoteTerminalFontSize(0),
           },
         ];
         // Composer keys are handled by the Composer's own keydown (ADR-0269);
         // listed here only so the Settings reference shows them.
         const REMOTE_COMPOSER_SHORTCUTS = [
-          { id: "composer.remote.send", label: "Send Composer" },
-          { id: "composer.remote.newline", label: "Composer newline" },
+          { id: "composer.remote.send", label: t("Send Composer") },
+          { id: "composer.remote.newline", label: t("Composer newline") },
         ];
 
         function hostKeybindingOverrides() {
@@ -9685,26 +9599,28 @@ import {
           const count = (key) => (Array.isArray(data?.[key]) ? data[key].length : 0);
           const failed = Array.isArray(data?.failed) ? data.failed : [];
           if (failed.length > 0) {
-            return { message: `Clear failed: ${failed[0]?.error || "write rejected"}`, error: true };
+            return { message: tr`Clear failed: ${failed[0]?.error || "write rejected"}`, error: true };
           }
           if (scope === "workspace") {
             const cleared = count("cleared");
             return {
-              message: cleared > 0 ? `Cleared ${cleared} terminal${cleared === 1 ? "" : "s"}.` : "Nothing to clear.",
+              message: cleared > 0
+                ? cleared === 1 ? tr`Cleared ${cleared} terminal.` : tr`Cleared ${cleared} terminals.`
+                : t("Nothing to clear."),
               error: false,
             };
           }
-          if (count("restarted") > 0) return { message: "Terminal restarted.", error: false };
-          if (count("interrupted") > 0) return { message: "Interrupted and cleared.", error: false };
-          if (count("cleared") > 0) return { message: "Cleared.", error: false };
+          if (count("restarted") > 0) return { message: t("Terminal restarted."), error: false };
+          if (count("interrupted") > 0) return { message: t("Interrupted and cleared."), error: false };
+          if (count("cleared") > 0) return { message: t("Cleared."), error: false };
           const reason = data?.skipped?.[0]?.reason;
           const reasons = {
-            busy: "Clear skipped: the terminal is busy.",
-            stateUnknown: "Clear skipped: the agent's state is not known yet.",
-            unsupportedApp: "Clear skipped: this app has no clear command.",
-            notReady: "Clear skipped: the terminal is not ready.",
+            busy: t("Clear skipped: the terminal is busy."),
+            stateUnknown: t("Clear skipped: the agent's state is not known yet."),
+            unsupportedApp: t("Clear skipped: this app has no clear command."),
+            notReady: t("Clear skipped: the terminal is not ready."),
           };
-          return { message: reasons[reason] || "Nothing to clear.", error: false };
+          return { message: reasons[reason] || t("Nothing to clear."), error: false };
         }
 
         // pane.clearTerminal / workspace.clearTerminals: the PC owns what a
@@ -9718,13 +9634,13 @@ import {
               ? workspaceId && `/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/clear`
               : activeTerminalId && `/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/clear`;
           if (!leaseId || !path) return;
-          setBusyStatus("Clearing…");
+          setBusyStatus(t("Clearing…"));
           await remoteFetch(path, { method: "POST", body: JSON.stringify({ leaseId }) })
             .then((data) => {
               const { message, error } = summarizeRemoteClear(scope, data);
               setStatus(message, error);
             })
-            .catch((err) => setStatus(`Clear failed: ${err.message || err}`, true));
+            .catch((err) => setStatus(tr`Clear failed: ${err.message || err}`, true));
         }
 
         // The pane the open terminal belongs to, as the pane manager sees it:
@@ -9750,15 +9666,15 @@ import {
           const selectedLeaseId = leaseId;
           if (action === "close") {
             const pane = activePaneTarget();
-            setBusyStatus("Closing pane…");
+            setBusyStatus(t("Closing pane…"));
             await closeRemotePane(pane.id, selectedLeaseId)
-              .then(() => setStatus("Pane closed."))
-              .catch((err) => setStatus(`Close failed: ${err.message || err}`, true));
+              .then(() => setStatus(t("Pane closed.")))
+              .catch((err) => setStatus(tr`Close failed: ${err.message || err}`, true));
             return;
           }
           if (action === "stack") {
             const pane = activeWorkspacePane();
-            setBusyStatus("Stacking…");
+            setBusyStatus(t("Stacking…"));
             await remoteFetch(`/remote/v1/panes/${encodeURIComponent(pane.id)}/stack`, {
               method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
             })
@@ -9770,9 +9686,9 @@ import {
                   // Older hosts return only a layer id.
                   await loadNavigation(activeTerminalId, { openOutput: false });
                 }
-                setStatus("Stacked a new layer.");
+                setStatus(t("Stacked a new layer."));
               })
-              .catch((err) => setStatus(`Stack failed: ${err.message || err}`, true));
+              .catch((err) => setStatus(tr`Stack failed: ${err.message || err}`, true));
           }
         }
 
@@ -9780,8 +9696,8 @@ import {
           const identifier = activePaneIdentifier();
           if (!identifier) return false;
           writeClipboardText(identifier)
-            .then(() => setStatus(`Copied ${identifier}`))
-            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+            .then(() => setStatus(tr`Copied ${identifier}`))
+            .catch((err) => setStatus(tr`Copy failed: ${err.message || err}`, true));
           return true;
         }
 
@@ -9810,8 +9726,8 @@ import {
           applyRemoteDisplaySettings(normalized);
           setStatus(
             persisted
-              ? `Terminal text ${normalized.terminalFontSize}px`
-              : "Could not save on this device.",
+              ? tr`Terminal text ${normalized.terminalFontSize}px`
+              : t("Could not save on this device."),
             !persisted,
           );
           return true;
@@ -9822,20 +9738,24 @@ import {
           for (const action of [...REMOTE_SHORTCUT_ACTIONS, ...REMOTE_COMPOSER_SHORTCUTS]) {
             const keys = resolveRemoteKeybinding(action.id);
             const name = document.createElement("dt");
-            name.textContent = action.label;
+            const actionName = document.createElement("span");
+            setRemoteText(actionName, action.label);
+            name.append(actionName);
             const combo = document.createElement("dd");
             const overridden = isRemoteShortcutOverridden(keys, remoteKeyboardSettings);
-            const keyText = keys && keys.trim() ? keys.replace(/Arrow$/, "Arrows") : "Unassigned";
+            const keyText = keys && keys.trim()
+              ? keys.endsWith("Arrow") ? tr`${keys.slice(0, -5)}${t("Arrows")}` : keys
+              : t("Unassigned");
             if (overridden) {
               const note = document.createElement("span");
               note.className = "keyboard-shortcut-note";
-              note.textContent = "PC shortcut overridden by Remote Nav";
+              setRemoteText(note, t("PC shortcut overridden by Remote Nav"));
               name.append(note);
               const inactive = document.createElement("s");
-              inactive.textContent = keyText;
+              setRemoteText(inactive, keyText);
               combo.append(inactive);
             } else {
-              combo.textContent = keyText;
+              setRemoteText(combo, keyText);
             }
             keyboardShortcutListEl.append(name, combo);
           }
@@ -9851,29 +9771,29 @@ import {
 
         async function markAllNotificationsRead() {
           if (!leaseId) return;
-          setBusyStatus("Marking notifications read…");
+          setBusyStatus(t("Marking notifications read…"));
           await remoteFetch("/remote/v1/notifications/mark-all-read", {
             method: "POST",
             body: JSON.stringify({ leaseId }),
           });
           await loadNavigation(activeTerminalId, { openOutput: false });
-          setStatus("Notifications marked read.");
+          setStatus(t("Notifications marked read."));
         }
 
         async function clearNotifications() {
           if (!leaseId) return;
-          setBusyStatus("Clearing notifications…");
+          setBusyStatus(t("Clearing notifications…"));
           await remoteFetch("/remote/v1/notifications", {
             method: "DELETE",
             body: JSON.stringify({ leaseId }),
           });
           await loadNavigation(activeTerminalId, { openOutput: false });
-          setStatus("Notifications cleared.");
+          setStatus(t("Notifications cleared."));
         }
 
         async function openNotification(notification) {
           if (!leaseId || !notification) return;
-          setBusyStatus("Opening notification…");
+          setBusyStatus(t("Opening notification…"));
           if (notification.terminalId) {
             try {
               await focusTerminalOnHost(notification.terminalId);
@@ -9955,13 +9875,13 @@ import {
             return true;
           }
           const selectionRevision = terminalSelectionRevision;
-          setBusyStatus("Opening the pane on the desktop…");
+          setBusyStatus(t("Opening the pane on the desktop…"));
           const opened = await openTerminalOnHost(terminalId, selectionRevision);
           if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
           if (!opened) {
             terminalOpenFailedId = terminalId;
             renderTerminalTransition();
-            setStatus("The desktop has not opened this pane yet.", true);
+            setStatus(t("The desktop has not opened this pane yet."), true);
             return false;
           }
           openOutput(terminalId, options);
@@ -9973,7 +9893,7 @@ import {
           const selectionRevision = ++terminalSelectionRevision;
           const selectedLeaseId = leaseId;
           setActiveTerminal(terminalId);
-          terminalMetaEl.textContent = terminalMetaLabel(navigationState, terminalId);
+          setRemoteText(terminalMetaEl, terminalMetaLabel(navigationState, terminalId));
           setConnected(Boolean(leaseId));
           // Output attach begins immediately; host focus/navigation refreshes
           // are independent and must not leave the old socket active meanwhile.
@@ -9985,7 +9905,7 @@ import {
           const canFocusHost =
             live && options.focusHost !== false && (options.focusDockHost === true || !isDockTerminalId(terminalId));
           if (canFocusHost) {
-            await focusTerminalOnHost(terminalId).catch((err) => setStatus(`Focus failed: ${err.message}`, true));
+            await focusTerminalOnHost(terminalId).catch((err) => setStatus(tr`Focus failed: ${err.message}`, true));
           }
           if (
             selectionRevision !== terminalSelectionRevision ||
@@ -9995,7 +9915,7 @@ import {
           // The attach path already re-reads navigation while it waits for a
           // queued pane, so only a live selection needs its own refresh.
           if (live && options.refreshNavigation) {
-            await loadNavigation(terminalId, { openOutput: false, selectionRevision }).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
+            await loadNavigation(terminalId, { openOutput: false, selectionRevision }).catch((err) => setStatus(tr`Refresh failed: ${err.message}`, true));
           } else if (live && navigationState) {
             renderNavigation(navigationState);
           }
@@ -10067,7 +9987,7 @@ import {
           outputHistoryKib = request.previousKib;
           // Only the expansion's own busy line may be cleared. A failure that
           // closed the socket has already put its message on the status bar.
-          if (statusTextEl.textContent === HISTORY_EXPANSION_BUSY_STATUS) {
+          if (statusTextEl.textContent === String(HISTORY_EXPANSION_BUSY_STATUS)) {
             restoreStatusAfterHistoryExpansion();
           }
         }
@@ -10090,7 +10010,7 @@ import {
             return;
           }
           outputHistoryExhausted = true;
-          reportHistoryExpansionLimit("No earlier output is available.");
+          reportHistoryExpansionLimit(t("No earlier output is available."));
         }
 
         // A transport interruption notice outranks anything this feature has to
@@ -10104,7 +10024,7 @@ import {
           if (historyExpansionLimitNoticeTimer) clearTimeout(historyExpansionLimitNoticeTimer);
           historyExpansionLimitNoticeTimer = setTimeout(() => {
             historyExpansionLimitNoticeTimer = null;
-            if (statusTextEl.textContent === message) {
+            if (statusTextEl.textContent === String(message)) {
               restoreStatusAfterHistoryExpansion();
             }
           }, HISTORY_EXPANSION_LIMIT_NOTICE_MS);
@@ -10115,7 +10035,7 @@ import {
           // say, and its own recovery message replaces it. A notice that is only
           // scheduled has printed nothing yet, so the busy line must still go.
           if (transientConnectionNoticeVisible) return;
-          setStatus(activeTerminalTitle() || "Connected.");
+          setStatus(activeTerminalTitle() || t("Connected."));
         }
 
         // Scrolling above the attached screen asks the desktop for a deeper
@@ -10149,8 +10069,8 @@ import {
             outputHistoryExhausted = true;
             reportHistoryExpansionLimit(
               atCeiling
-                ? "Earlier output is beyond what Remote can load."
-                : "No earlier output is available."
+                ? t("Earlier output is beyond what Remote can load.")
+                : t("No earlier output is available.")
             );
             return;
           }
@@ -10241,7 +10161,7 @@ import {
           const outputLeaseId = leaseId;
           if (!outputLeaseId) {
             cancelHistoryExpansion();
-            setStatus("Remote control is not active.", true);
+            setStatus(t("Remote control is not active."), true);
             return;
           }
           // A history attach whose request was cancelled while it waited above
@@ -10302,12 +10222,12 @@ import {
             ) {
               outputAttachGeometryGeneration = null;
               if (err.status === 404) {
-                setBusyStatus("Terminal session ended. Refreshing navigation…", true);
+                setBusyStatus(t("Terminal session ended. Refreshing navigation…"), true);
                 loadNavigation(null, { focusInput: false }).catch((loadError) =>
-                  setStatus(`Refresh failed: ${loadError.message}`, true)
+                  setStatus(tr`Refresh failed: ${loadError.message}`, true)
                 );
               } else {
-                setStatus(`Resize before output attach failed: ${err.message}`, true);
+                setStatus(tr`Resize before output attach failed: ${err.message}`, true);
                 scheduleOutputReconnect(terminalId, outputLeaseId);
               }
             }
@@ -10342,7 +10262,7 @@ import {
           // complete until this attach's first screen has actually landed.
           const attachTitle =
             (terminalId === activeTerminalId && activeTerminalTitle()) ||
-            `Connected to ${terminalId}`;
+            tr`Connected to ${terminalId}`;
           const settleOutputAttach = () => {
             if (
               outputProtocolFailed ||
@@ -10376,7 +10296,7 @@ import {
             composerReady = false;
             updateComposerControls();
             pendingOutputHeader = null;
-            setStatus(`Output protocol error: ${message}`, true);
+            setStatus(tr`Output protocol error: ${message}`, true);
             outputSocket.close();
           };
 
@@ -10495,7 +10415,7 @@ import {
                 releaseOwnHistoryExpansion();
                 outputHistoryExhausted = true;
                 if (askedForHistory) {
-                  reportHistoryExpansionLimit("No earlier output is available.");
+                  reportHistoryExpansionLimit(t("No earlier output is available."));
                 }
                 settleOutputAttach();
               }
@@ -10696,7 +10616,7 @@ import {
             const payload = String(event.data);
             if (payload === "terminal session not found") {
               outputTerminalMissing = true;
-              setBusyStatus("Terminal session ended. Refreshing navigation…", true);
+              setBusyStatus(t("Terminal session ended. Refreshing navigation…"), true);
               outputSocket.close();
               return;
             }
@@ -10730,7 +10650,7 @@ import {
               updateComposerControls();
               if (outputTerminalMissing) {
                 loadNavigation(null, { focusInput: false }).catch((err) =>
-                  setStatus(`Refresh failed: ${err.message}`, true)
+                  setStatus(tr`Refresh failed: ${err.message}`, true)
                 );
                 return;
               }
@@ -10767,25 +10687,25 @@ import {
                 err.claimReservationId.length > 0;
               if (!retryable) throw err;
               if (claimReservationId && claimReservationId !== err.claimReservationId) {
-                throw new Error("Remote control claim reservation changed unexpectedly.");
+                throw remoteError(t("Remote control claim reservation changed unexpectedly."));
               }
               claimReservationId = err.claimReservationId;
               const now = Date.now();
               const ttlMs = Number(err.reservationTtlMs);
               const retryAfterMs = Math.max(10, Number(err.retryAfterMs) || 25);
               if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-                throw new Error("Remote control claim reservation expired.");
+                throw remoteError(t("Remote control claim reservation expired."));
               }
               const reportedExpiry = now + ttlMs;
               reservationExpiresAt = reportedExpiry;
               if (now + retryAfterMs >= reservationExpiresAt) {
-                throw new Error("Remote control claim reservation expired.");
+                throw remoteError(t("Remote control claim reservation expired."));
               }
-              setBusyStatus("Waiting for input…");
+              setBusyStatus(t("Waiting for input…"));
               await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
             }
           }
-          throw new Error("Remote control claim was cancelled.");
+          throw remoteError(t("Remote control claim was cancelled."));
         }
 
         // Reconnecting after a long background (issue #561). Leaving the page
@@ -10853,7 +10773,7 @@ import {
           try {
             const status = await remoteFetch("/remote/v1/session/status");
             if (status && status.active && !resumeToken) {
-              setStatus("Another client has control.");
+              setStatus(t("Another client has control."));
               return;
             }
           } catch (err) {
@@ -10890,7 +10810,7 @@ import {
         // instead of raising.
         async function connect({ auto = false, focusInput = !auto } = {}) {
           if (!androidE2eMode && !token()) {
-            setStatus("Remote token is required.", true);
+            setStatus(t("Remote token is required."), true);
             return;
           }
           // One claim at a time. The automatic reconnect and a user tapping Connect
@@ -10899,7 +10819,7 @@ import {
           // winner as stale — so both failed and the page waited for a backoff retry.
           // Whoever is already trying will report the outcome (issue #561).
           if (claimInFlight) {
-            if (!auto) setBusyStatus("Claiming remote control…");
+            if (!auto) setBusyStatus(t("Claiming remote control…"));
             return;
           }
           claimInFlight = true;
@@ -10907,7 +10827,7 @@ import {
           connectButton.disabled = true;
           if (!androidE2eMode) localStorage.setItem(tokenKey, token());
           setBusyStatus(
-            auto ? "Reconnecting…" : "Claiming remote control…",
+            auto ? t("Reconnecting…") : t("Claiming remote control…"),
             false,
             auto,
           );
@@ -10929,7 +10849,7 @@ import {
             // Star suggestions are optional enhancement data. A transient read
             // failure must not hold the controller claim or terminal attach.
             void loadComposerStars(leaseId).catch((error) =>
-              console.warn("Failed to load Composer stars", error)
+              console.warn(t("Failed to load Composer stars"), error)
             );
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
@@ -10971,7 +10891,7 @@ import {
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.
-              setBusyStatus(`Reconnecting… ${err.message}`, false, true);
+              setBusyStatus(tr`Reconnecting… ${err.message}`, false, true);
               return;
             }
             setStatus(err.message, true);
@@ -11015,8 +10935,8 @@ import {
           const wasHidden = sharedFilesScrim.hidden;
           sharedFilesScrim.hidden = !visible;
           if (!visible) return;
-          $("sharedFilesCount").textContent = `공유받은 파일 ${sharedFileOffer.count}개`;
-          $("sharedFilesTarget").textContent = `첨부 대상: 현재 PC · ${activeTerminalTitle() || activeTerminalId}`;
+          setRemoteText($("sharedFilesCount"), tr`공유받은 파일 ${sharedFileOffer.count}개`);
+          setRemoteText($("sharedFilesTarget"), tr`첨부 대상: 현재 PC · ${activeTerminalTitle() || activeTerminalId}`);
           if (wasHidden) sharedFilesAttach.focus({ preventScroll: true });
         }
 
@@ -11179,12 +11099,12 @@ import {
           return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onerror = () =>
-              reject(reader.error || new Error("Attachment could not be read."));
+              reject(reader.error || remoteError(t("Attachment could not be read.")));
             reader.onload = () => {
               const result = String(reader.result || "");
               const separator = result.indexOf(",");
               if (separator < 0) {
-                reject(new Error("Attachment encoding failed."));
+                reject(remoteError(t("Attachment encoding failed.")));
                 return;
               }
               resolve(result.slice(separator + 1));
@@ -11232,8 +11152,8 @@ import {
           updateComposerControls();
           setBusyStatus(
             files.length === 1
-              ? `Attaching ${files[0].name}…`
-              : `Attaching ${files.length} files…`,
+              ? tr`Attaching ${files[0].name}…`
+              : tr`Attaching ${files.length} files…`,
           );
           try {
             const paths = [];
@@ -11255,7 +11175,7 @@ import {
               snapshot.terminalId !== activeTerminalId ||
               snapshot.leaseId !== leaseId
             ) {
-              throw new Error("Terminal changed while the attachment was uploading.");
+              throw remoteError(t("Terminal changed while the attachment was uploading."));
             }
             const insertion = paths.join(" ");
             if (snapshot.mode === "composer") {
@@ -11272,8 +11192,8 @@ import {
             }
             setStatus(
               files.length === 1
-                ? `Attached ${files[0].name}.`
-                : `Attached ${files.length} files.`,
+                ? tr`Attached ${files[0].name}.`
+                : tr`Attached ${files.length} files.`,
             );
             return true;
           } catch (error) {
@@ -11302,7 +11222,7 @@ import {
                   if (attachmentUploadAttempt?.token !== attempt.token) return false;
                 }
                 setStatus(
-                  `Attachment conversion failed; pasted the original text. ${error.message || error}`,
+                  tr`Attachment conversion failed; pasted the original text. ${error.message || error}`,
                   false,
                   true,
                 );
@@ -11314,11 +11234,11 @@ import {
                 ) {
                   return false;
                 }
-                setStatus(`Paste failed: ${fallbackError.message || fallbackError}`, true);
+                setStatus(tr`Paste failed: ${fallbackError.message || fallbackError}`, true);
                 return false;
               }
             }
-            setStatus(`Attachment failed: ${error.message || error}`, true);
+            setStatus(tr`Attachment failed: ${error.message || error}`, true);
             return false;
           } finally {
             if (attachmentUploadAttempt?.token === attempt.token) {
@@ -11373,7 +11293,7 @@ import {
           // A pane/workspace move is still landing (ADR-0269): the draft belongs
           // to the pane being left, so sending now would hit the wrong terminal.
           if (navMovePending > 0) {
-            setStatus("Moving to another pane — send again once it opens.");
+            setStatus(t("Moving to another pane — send again once it opens."));
             return;
           }
           const terminalId = activeTerminalId;
@@ -11422,7 +11342,7 @@ import {
               if (draft.inFlight !== submission) return;
               draft.inFlight = null;
               if (activeTerminalId === terminalId) renderInputSurface();
-              setStatus(`Input failed: ${err.message || err}`, true);
+              setStatus(tr`Input failed: ${err.message || err}`, true);
             });
         }
 
@@ -11431,7 +11351,7 @@ import {
           event.preventDefault();
           event.stopImmediatePropagation();
           if (!leaseId || !activeTerminalId || !composerReady) {
-            setStatus("Terminal input is not ready.", false, true);
+            setStatus(t("Terminal input is not ready."), false, true);
             return;
           }
           const text = event.clipboardData?.getData("text/plain") || "";
@@ -11440,12 +11360,12 @@ import {
           const activeLeaseId = leaseId;
           if (shouldConvertLongTextToAttachment(text)) {
             if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
-              setStatus(remoteAttachmentTooLargeMessage("Pasted text"), true);
+              setStatus(remoteAttachmentTooLargeMessage(t("Pasted text")), true);
               return;
             }
             if (attachmentUploadInFlight) {
               setStatus(
-                "A long paste was rejected because an attachment upload is already in progress.",
+                t("A long paste was rejected because an attachment upload is already in progress."),
                 false,
                 true,
               );
@@ -11466,7 +11386,7 @@ import {
             return;
           }
           writeTerminalInput(terminalId, activeLeaseId, text, false).catch((err) =>
-            setStatus(`Paste failed: ${err.message || err}`, true)
+            setStatus(tr`Paste failed: ${err.message || err}`, true)
           );
         }
 
@@ -11560,10 +11480,10 @@ import {
           // `nav: [kind, direction]` feeds enqueueNavStep; navPad is a 4-way
           // flick (up/down = pane spatial step, left/right = alert step).
           navPad: { label: "P↕N↔", navFlick: true, navBadge: true },
-          navPrev: { label: "P↑", nav: ["spatial", "prev"], hint: "Previous pane (spatial order)" },
-          navNext: { label: "P↓", nav: ["spatial", "next"], hint: "Next pane (spatial order)" },
-          notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: "Most recent unread alert" },
-          notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: "Oldest unread alert" },
+          navPrev: { label: "P↑", nav: ["spatial", "prev"], hint: t("Previous pane (spatial order)") },
+          navNext: { label: "P↓", nav: ["spatial", "next"], hint: t("Next pane (spatial order)") },
+          notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: t("Most recent unread alert") },
+          notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: t("Oldest unread alert") },
           q: { label: "Q", seq: "q" },
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
@@ -11581,16 +11501,16 @@ import {
           del: { label: "Del", seq: "\x1b[3~" },
           pgup: { label: "PgUp", seq: "\x1b[5~" },
           pgdn: { label: "PgDn", seq: "\x1b[6~" },
-          "c-c": { label: "^C", seq: "\x03", hint: "Ctrl+C (interrupt)" },
-          "c-j": { label: "^J", seq: "\n", hint: "Ctrl+J (line feed)" },
-          "c-u": { label: "^U", seq: "\x15", hint: "Ctrl+U (kill line)" },
-          "c-t": { label: "^T", seq: "\x14", hint: "Ctrl+T (transpose)" },
-          "c-l": { label: "^L", seq: "\x0c", hint: "Ctrl+L (clear screen)" },
+          "c-c": { label: "^C", seq: "\x03", hint: t("Ctrl+C (interrupt)") },
+          "c-j": { label: "^J", seq: "\n", hint: t("Ctrl+J (line feed)") },
+          "c-u": { label: "^U", seq: "\x15", hint: t("Ctrl+U (kill line)") },
+          "c-t": { label: "^T", seq: "\x14", hint: t("Ctrl+T (transpose)") },
+          "c-l": { label: "^L", seq: "\x0c", hint: t("Ctrl+L (clear screen)") },
           // Pane actions run the PC pane control-bar actions, not key bytes
           // (ADR-0277, ADR-0327). The bar shows the PC icon; the label names it.
-          clearPane: { label: "Clear pane", icon: "BrushCleaning", paneAction: "clear" },
-          closePane: { label: "Close pane", icon: "X", paneAction: "close" },
-          stackPane: { label: "Stack", icon: "Layers", paneAction: "stack" },
+          clearPane: { label: t("Clear pane"), icon: "BrushCleaning", paneAction: "clear" },
+          closePane: { label: t("Close pane"), icon: "X", paneAction: "close" },
+          stackPane: { label: t("Stack"), icon: "Layers", paneAction: "stack" },
           f1: { label: "F1", seq: "\x1bOP" },
           f2: { label: "F2", seq: "\x1bOQ" },
           f3: { label: "F3", seq: "\x1bOR" },
@@ -11617,12 +11537,12 @@ import {
         // placement is the single activation signal, so there is nothing to
         // enable before a key can be used.
         const KEY_CATEGORIES = [
-          { id: "step", name: "Pane/Alert nav", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
-          { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
-          { id: "edit", name: "Editing", keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
-          { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
-          { id: "pane", name: "Pane actions", keys: ["clearPane", "closePane", "stackPane"] },
-          { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
+          { id: "step", name: t("Pane/Alert nav"), keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
+          { id: "nav", name: t("Navigation"), keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
+          { id: "edit", name: t("Editing"), keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
+          { id: "ctrl", name: t("Ctrl keys"), keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
+          { id: "pane", name: t("Pane actions"), keys: ["clearPane", "closePane", "stackPane"] },
+          { id: "fn", name: t("Function"), keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         // Every input action lives in one of the two visible rows, inside one of
         // three alignment segments, or nowhere at all (hidden). Segments are
@@ -11630,8 +11550,8 @@ import {
         // the left edge, those hug the right".
         const INPUT_ACTION_ROWS = ["main", "expanded"];
         const INPUT_ACTION_SEGMENTS = ["left", "center", "right"];
-        const INPUT_ROW_LABELS = { main: "Main row", expanded: "Keys row" };
-        const INPUT_SEGMENT_LABELS = { left: "Left", center: "Center", right: "Right" };
+        const INPUT_ROW_LABELS = { main: t("Main row"), expanded: t("Keys row") };
+        const INPUT_SEGMENT_LABELS = { left: t("Left"), center: t("Center"), right: t("Right") };
         const FIXED_INPUT_ACTION_IDS = [
           "keyboard",
           "keys",
@@ -11645,12 +11565,12 @@ import {
           skip: "spatialExclusion",
         };
         const INPUT_ACTION_LABELS = {
-          keyboard: "Keyboard",
-          keys: "Keys",
-          send: "Send",
-          composer: "Composer",
-          attachment: "Attach file",
-          menu: "Menu", copyPane: "Copy pane ID", viewer: "Viewer", skip: "Skip pane",
+          keyboard: t("Keyboard"),
+          keys: t("Keys"),
+          send: t("Send"),
+          composer: t("Composer"),
+          attachment: t("Attach file"),
+          menu: t("Menu"), copyPane: t("Copy pane ID"), viewer: t("Viewer"), skip: t("Skip pane"),
         };
         // Icon an Add keys chip shows beside the action's name (ADR-0327).
         // The bar itself shows the action's own button content.
@@ -11986,14 +11906,14 @@ import {
         // Returns an error message, or "" when the key was registered.
         function addUserKey(label, seq, submit = false) {
           if (keyBarConfig.userKeys.length >= USER_KEY_MAX) {
-            return `At most ${USER_KEY_MAX} custom keys.`;
+            return tr`At most ${USER_KEY_MAX} custom keys.`;
           }
           const trimmed = typeof label === "string" ? label.trim() : "";
           if (!trimmed || trimmed.length > USER_KEY_LABEL_MAX) {
-            return `Label must be 1-${USER_KEY_LABEL_MAX} characters.`;
+            return tr`Label must be 1-${USER_KEY_LABEL_MAX} characters.`;
           }
           if (typeof seq !== "string" || !seq || seq.length > USER_KEY_SEQ_MAX) {
-            return `Sequence must be 1-${USER_KEY_SEQ_MAX} characters.`;
+            return tr`Sequence must be 1-${USER_KEY_SEQ_MAX} characters.`;
           }
           const id = createUserKeyId();
           keyBarConfig.userKeys.push({ id, label: trimmed, seq, submit });
@@ -12049,10 +11969,10 @@ import {
               continue;
             }
             const next = text[index + 1];
-            if (next === undefined) return { error: "Sequence ends with a lone \\." };
+            if (next === undefined) return { error: t("Sequence ends with a lone \\.") };
             if (next === "x") {
               const hex = text.slice(index + 2, index + 4);
-              if (!/^[0-9a-fA-F]{2}$/.test(hex)) return { error: "\\x needs two hex digits." };
+              if (!/^[0-9a-fA-F]{2}$/.test(hex)) return { error: t("\\x needs two hex digits.") };
               seq += String.fromCharCode(parseInt(hex, 16));
               index += 3;
               continue;
@@ -12060,7 +11980,7 @@ import {
             const mapped = Object.prototype.hasOwnProperty.call(KEY_SEQUENCE_ESCAPES, next)
               ? KEY_SEQUENCE_ESCAPES[next]
               : undefined;
-            if (mapped === undefined) return { error: `Unknown escape \\${next}.` };
+            if (mapped === undefined) return { error: tr`Unknown escape \\${next}.` };
             seq += mapped;
             index += 1;
           }
@@ -12119,7 +12039,7 @@ import {
             // Like a Composer send, a submitting key never lands on the pane a
             // move is leaving (ADR-0269).
             if (navMovePending > 0) {
-              setStatus("Moving to another pane — send again once it opens.");
+              setStatus(t("Moving to another pane — send again once it opens."));
               return;
             }
             flushPendingInput();
@@ -12154,7 +12074,7 @@ import {
           // resting thumb can never fire ^C, Enter or a user key twice.
           if (keyDef(id)?.cursor) {
             button.classList.add("key-repeat-btn");
-            button.title = `${button.title} — hold to repeat`;
+            setRemoteAttribute(button, "title", tr`${button.title} — hold to repeat`);
             installKeyRepeat(button, () => sendKey(id, button));
             return;
           }
@@ -12470,26 +12390,23 @@ import {
           btn.className = "key-btn";
           btn.dataset.key = id;
           btn.dataset.inputAction = softInputActionId(id);
-          btn.textContent = def.label;
+          setRemoteText(btn, def.label);
           if (def.icon) {
             setRemoteIcon(btn, def.icon);
-            btn.setAttribute("aria-label", def.hint || def.label);
+            setRemoteAttribute(btn, "aria-label", def.hint || def.label);
           }
           if (def.navFlick) setRemoteIcon(btn, "GamepadDirectional");
           if (def.flick) setRemoteIcon(btn, "Move");
-          btn.title = def.hint || def.label;
+          setRemoteAttribute(btn, "title", def.hint || def.label);
           if (def.flick) {
             btn.classList.add("key-flick-btn");
-            btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
-            btn.title = "Flick up, right, down, or left — hold to repeat";
+            setRemoteAttribute(btn, "aria-label", t("Flick for arrow key: up, right, down, or left"));
+            setRemoteAttribute(btn, "title", t("Flick up, right, down, or left — hold to repeat"));
             installDirectionalFlick(btn, (direction) => sendKey(direction), true, floating);
           } else if (def.navFlick) {
             btn.classList.add("key-flick-btn");
-            btn.setAttribute(
-              "aria-label",
-              "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert",
-            );
-            btn.title = "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert";
+            setRemoteAttribute(btn, "aria-label", t("Flick to navigate: up/down previous/next pane, left/right recent/oldest alert"));
+            setRemoteAttribute(btn, "title", t("Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert"));
             installDirectionalFlick(btn, (direction) => {
               const target = NAV_FLICK_TARGETS[direction];
               if (target) enqueueNavStep(btn, target[0], target[1]);
@@ -12551,12 +12468,12 @@ import {
             button.disabled = source.disabled ||
               (Boolean(ownProperty(HEADER_INPUT_ACTIONS, actionId)) && source.hidden) ||
               (actionId === "send" && currentInputMode() !== "composer");
-            button.title = source.title || inputActionHint(actionId);
-            button.setAttribute("aria-label", source.getAttribute("aria-label") || inputActionHint(actionId));
+            setRemoteAttribute(button, "title", remoteAttributeMessage(source, "title") || inputActionHint(actionId));
+            setRemoteAttribute(button, "aria-label", remoteAttributeMessage(source, "aria-label") || inputActionHint(actionId));
             for (const attr of ["aria-pressed", "aria-expanded", "aria-controls"]) {
               const value = source.getAttribute(attr);
               if (value === null) button.removeAttribute(attr);
-              else button.setAttribute(attr, value);
+              else setRemoteAttribute(button, attr, value);
             }
             button.classList.toggle("active", source.classList.contains("active"));
           }
@@ -12672,7 +12589,7 @@ import {
             layer = document.createElement("div");
             layer.id = "floatingControls";
             layer.setAttribute("role", "group");
-            layer.setAttribute("aria-label", "Floating controls");
+            setRemoteAttribute(layer, "aria-label", t("Floating controls"));
             document.querySelector(".app").append(layer);
           }
           layer.replaceChildren();
@@ -12684,7 +12601,7 @@ import {
             element.dataset.floatingId = id;
             const keyId = softKeyIdFromAction(actionId);
             const button = keyId ? createSoftKeyButton(keyId, !pad, pad ? item : null) : createActionProxy(actionId);
-            if (pad) button.title += "; hold center to move";
+            if (pad) button.title += t("; hold center to move");
             else installFloatingDrag(element, element, item);
             element.append(button);
             layer.append(element);
@@ -12715,24 +12632,24 @@ import {
           });
           const visibilityName = document.createElement("span");
           visibilityName.className = "nav-toggle-name";
-          visibilityName.textContent = "Show floating controls";
+          setRemoteText(visibilityName, t("Show floating controls"));
           visibilityLabel.append(visibility, visibilityName);
           editor.append(visibilityLabel);
           for (const { item, id, actionId, pad } of floatingEntries()) {
-            const name = pad ? (id === "dpad" ? "Arrow pad" : "Pane / alert pad") : inputActionLabel(actionId);
+            const name = pad ? (id === "dpad" ? t("Arrow pad") : t("Pane / alert pad")) : inputActionLabel(actionId);
             const group = document.createElement("fieldset");
             group.className = "floating-setting";
             const legend = document.createElement("legend");
-            legend.textContent = name;
+            setRemoteText(legend, name);
             group.append(legend);
             for (const [field, label, min, max] of [
               ["enabled", "enabled", 0, 1], ["size", "size", 44, 128], ["opacity", "opacity", 0, 100],
             ]) {
               const wrapper = document.createElement("label");
-              wrapper.textContent = label === "size" ? "Size (px)" : label === "opacity" ? "Opacity (%)" : "Enabled";
+              setRemoteText(wrapper, label === "size" ? t("Size (px)") : label === "opacity" ? t("Opacity (%)") : t("Enabled"));
               const input = document.createElement("input");
               input.type = field === "enabled" ? "checkbox" : "number";
-              input.setAttribute("aria-label", `${name} ${label}`);
+              setRemoteAttribute(input, "aria-label", `${name} ${label}`);
               const factor = field === "opacity" ? 100 : 1;
               if (field === "enabled") input.checked = item.enabled;
               else {
@@ -12755,8 +12672,8 @@ import {
             if (!pad) {
               const remove = document.createElement("button");
               remove.type = "button";
-              remove.textContent = "Remove";
-              remove.setAttribute("aria-label", "Remove floating button");
+              setRemoteText(remove, t("Remove"));
+              setRemoteAttribute(remove, "aria-label", t("Remove floating button"));
               remove.addEventListener("click", () => {
                 keyBarConfig.floating.buttons = keyBarConfig.floating.buttons.filter((entry) => entry.id !== id);
                 update();
@@ -12767,14 +12684,14 @@ import {
             editor.append(group);
           }
           const picker = document.createElement("select");
-          picker.setAttribute("aria-label", "Floating button action");
+          setRemoteAttribute(picker, "aria-label", t("Floating button action"));
           for (const actionId of knownActionIdSet(keyBarConfig.userKeys)) {
             if (["soft:dpad", "soft:navPad"].includes(actionId)) continue;
             picker.add(new Option(inputActionHint(actionId), actionId));
           }
           const add = document.createElement("button");
           add.type = "button";
-          add.textContent = "Add floating button";
+          setRemoteText(add, t("Add floating button"));
           add.addEventListener("click", () => {
             const actionId = picker.value;
             let id = `f-${Date.now().toString(36)}`;
@@ -12809,7 +12726,7 @@ import {
           if (current) return;
           const empty = document.createElement("div");
           empty.className = "key-row-empty";
-          empty.textContent = "No actions in the Keys row. Open Remote Settings to restore them.";
+          setRemoteText(empty, t("No actions in the Keys row. Open Remote Settings to restore them."));
           keyRowEl.append(empty);
         }
 
@@ -13063,15 +12980,15 @@ import {
             setRemoteIcon(glyph, icon, { size: 13 });
             const name = document.createElement("span");
             name.className = "layout-chip-name";
-            name.textContent = inputActionLabel(actionId);
+            setRemoteText(name, inputActionLabel(actionId));
             chip.classList.add("with-icon");
             chip.append(glyph, name);
           } else {
-            chip.textContent = inputActionLabel(actionId);
+            setRemoteText(chip, inputActionLabel(actionId));
           }
           const hint = inputActionHint(actionId);
-          chip.title = `${hint} — hold and drag to move`;
-          chip.setAttribute("aria-label", hint);
+          setRemoteAttribute(chip, "title", tr`${hint} — hold and drag to move`);
+          setRemoteAttribute(chip, "aria-label", hint);
           const selected = selectedInputActionId === actionId;
           chip.setAttribute("aria-pressed", selected ? "true" : "false");
           chip.classList.toggle("selected", selected);
@@ -13088,30 +13005,30 @@ import {
           const hint = inputActionHint(actionId);
           const actions = document.createElement("div");
           actions.className = "key-order-actions";
-          actions.setAttribute("aria-label", "Selected action controls");
+          setRemoteAttribute(actions, "aria-label", t("Selected action controls"));
 
           const selected = document.createElement("span");
           selected.className = "key-order-selected";
-          selected.textContent = placement
-            ? `${label} · ${INPUT_ROW_LABELS[placement.row]} ${INPUT_SEGMENT_LABELS[placement.segment]}`
-            : `${label} · Hidden`;
+          setRemoteText(selected, placement
+            ? tr`${label} · ${INPUT_ROW_LABELS[placement.row]} ${INPUT_SEGMENT_LABELS[placement.segment]}`
+            : tr`${label} · Hidden`);
           actions.append(selected);
 
           const select = document.createElement("select");
           select.className = "input-layout-zone";
-          select.setAttribute("aria-label", `Place ${hint}`);
+          setRemoteAttribute(select, "aria-label", tr`Place ${hint}`);
           for (const row of INPUT_ACTION_ROWS) {
             if (!canPlaceInputAction(actionId, row)) continue;
             for (const segment of INPUT_ACTION_SEGMENTS) {
               const option = document.createElement("option");
               option.value = `${row}:${segment}`;
-              option.textContent = `${INPUT_ROW_LABELS[row]} · ${INPUT_SEGMENT_LABELS[segment]}`;
+              setRemoteText(option, tr`${INPUT_ROW_LABELS[row]} · ${INPUT_SEGMENT_LABELS[segment]}`);
               select.append(option);
             }
           }
           const hiddenOption = document.createElement("option");
           hiddenOption.value = "hidden";
-          hiddenOption.textContent = "Hidden";
+          setRemoteText(hiddenOption, t("Hidden"));
           select.append(hiddenOption);
           select.value = placement ? `${placement.row}:${placement.segment}` : "hidden";
           select.addEventListener("click", (event) => event.stopPropagation());
@@ -13126,18 +13043,18 @@ import {
             const atStart = placement.index === 0;
             const atEnd = placement.index === list.length - 1;
             const actionDefs = [
-              ["First", null, `Move ${hint} to start`, atStart, () => moveInputActionToEdge(actionId, true)],
-              [null, "ArrowLeft", `Move ${hint} left`, atStart, () => moveInputActionBy(actionId, -1)],
-              [null, "ArrowRight", `Move ${hint} right`, atEnd, () => moveInputActionBy(actionId, 1)],
-              ["Last", null, `Move ${hint} to end`, atEnd, () => moveInputActionToEdge(actionId, false)],
+              [t("First"), null, tr`Move ${hint} to start`, atStart, () => moveInputActionToEdge(actionId, true)],
+              [null, "ArrowLeft", tr`Move ${hint} left`, atStart, () => moveInputActionBy(actionId, -1)],
+              [null, "ArrowRight", tr`Move ${hint} right`, atEnd, () => moveInputActionBy(actionId, 1)],
+              [t("Last"), null, tr`Move ${hint} to end`, atEnd, () => moveInputActionToEdge(actionId, false)],
             ];
             for (const [text, iconName, ariaLabel, disabled, action] of actionDefs) {
               const button = document.createElement("button");
               button.type = "button";
               button.className = "key-order-action";
               if (iconName) setRemoteIcon(button, iconName, { size: 12 });
-              else button.textContent = text;
-              button.setAttribute("aria-label", ariaLabel);
+              else setRemoteText(button, text);
+              setRemoteAttribute(button, "aria-label", ariaLabel);
               button.disabled = disabled;
               button.addEventListener("click", (event) => {
                 event.stopPropagation();
@@ -13152,8 +13069,8 @@ import {
             const remove = document.createElement("button");
             remove.type = "button";
             remove.className = "key-order-action key-order-danger";
-            remove.textContent = "Delete";
-            remove.setAttribute("aria-label", `Delete custom key ${label}`);
+            setRemoteText(remove, t("Delete"));
+            setRemoteAttribute(remove, "aria-label", tr`Delete custom key ${label}`);
             remove.addEventListener("click", (event) => {
               event.stopPropagation();
               removeUserKey(keyId);
@@ -13170,12 +13087,12 @@ import {
           heading.className = "input-layout-heading";
           const help = document.createElement("div");
           help.className = "key-order-zone-label";
-          help.textContent = "Your layout";
+          setRemoteText(help, t("Your layout"));
           const reset = document.createElement("button");
           reset.type = "button";
           reset.className = "key-order-reset";
-          reset.textContent = "Reset";
-          reset.setAttribute("aria-label", "Reset input action layout");
+          setRemoteText(reset, t("Reset"));
+          setRemoteAttribute(reset, "aria-label", t("Reset input action layout"));
           reset.addEventListener("click", (event) => {
             event.stopPropagation();
             resetInputActionLayout();
@@ -13192,11 +13109,11 @@ import {
           section.className = "layout-row-editor";
           const title = document.createElement("div");
           title.className = "key-order-zone-label";
-          title.textContent = INPUT_ROW_LABELS[row];
+          setRemoteText(title, INPUT_ROW_LABELS[row]);
           section.append(title);
           const description = document.createElement("span");
           description.className = "layout-row-description";
-          description.textContent = row === "main" ? "Always visible" : "Shown when Keys is open";
+          setRemoteText(description, row === "main" ? t("Always visible") : t("Shown when Keys is open"));
           section.append(description);
           for (const segment of INPUT_ACTION_SEGMENTS) {
             const group = document.createElement("div");
@@ -13204,7 +13121,7 @@ import {
             const label = document.createElement("span");
             label.className = "layout-segment-label";
             label.id = `layoutSegment-${row}-${segment}`;
-            label.textContent = INPUT_SEGMENT_LABELS[segment];
+            setRemoteText(label, INPUT_SEGMENT_LABELS[segment]);
             const slot = document.createElement("div");
             slot.className = "layout-segment-slot";
             slot.dataset.dropSegment = segment;
@@ -13227,7 +13144,7 @@ import {
           const available = new Set(unplaced);
           const groups = [
             {
-              name: "Actions",
+              name: t("Actions"),
               ids: FIXED_INPUT_ACTION_IDS.filter((actionId) => available.has(actionId)),
             },
           ];
@@ -13240,7 +13157,7 @@ import {
             });
           }
           groups.push({
-            name: "Custom keys",
+            name: t("Custom keys"),
             ids: keyBarConfig.userKeys
               .map((key) => softInputActionId(key.id))
               .filter((actionId) => available.has(actionId)),
@@ -13257,26 +13174,26 @@ import {
           section.className = "input-setup-disclosure";
           section.open = inputSetupOpen.has(id);
           const summary = document.createElement("summary");
-          summary.textContent = label;
+          setRemoteText(summary, label);
           section.append(summary);
           return section;
         }
 
         function renderHiddenSection() {
           const unplaced = unplacedInputActionIds();
-          const section = createInputSetupDisclosure("inputAvailableKeys", `Add keys · ${unplaced.length} available`);
+          const section = createInputSetupDisclosure("inputAvailableKeys", tr`Add keys · ${unplaced.length} available`);
           section.classList.add("layout-hidden");
           section.dataset.dropHidden = "true";
           const body = document.createElement("div");
           body.className = "input-setup-disclosure-body";
           const help = document.createElement("div");
           help.className = "key-order-help";
-          help.textContent = "Tap to add to the Keys row. To hide a key, move it here or choose Hidden in its position menu.";
+          setRemoteText(help, t("Tap to add to the Keys row. To hide a key, move it here or choose Hidden in its position menu."));
           body.append(help);
           for (const group of hiddenGroups(unplaced)) {
             const label = document.createElement("div");
             label.className = "layout-hidden-label";
-            label.textContent = group.name;
+            setRemoteText(label, group.name);
             body.append(label);
             const grid = document.createElement("div");
             grid.className = "key-chip-grid";
@@ -13286,7 +13203,7 @@ import {
           if (unplaced.length === 0) {
             const empty = document.createElement("div");
             empty.className = "key-order-help";
-            empty.textContent = "Every action is on the bar.";
+            setRemoteText(empty, t("Every action is on the bar."));
             body.append(empty);
           }
           if (selectedInputActionId && !inputActionPlacement(selectedInputActionId)) {
@@ -13339,7 +13256,7 @@ import {
           if (userKeyFormMode === "combo") {
             const seq = comboKeySequence(userKeyComboModifier, userKeyComboBase, userKeyComboShift);
             if (!seq) {
-              userKeyFormError = "That combination has no terminal sequence.";
+              userKeyFormError = t("That combination has no terminal sequence.");
               renderInputSettingsPreservingScroll();
               return;
             }
@@ -13377,27 +13294,27 @@ import {
         // built-in key shape, with optional structured submit through the
         // existing input path. No new Remote endpoint is needed.
         function renderUserKeySection() {
-          const section = createInputSetupDisclosure("inputCustomKey", "Create custom key");
+          const section = createInputSetupDisclosure("inputCustomKey", t("Create custom key"));
 
           const form = document.createElement("div");
           form.className = "user-key-form input-setup-disclosure-body";
           const description = document.createElement("p");
           description.className = "key-order-help";
-          description.textContent = "For a shortcut that isn't in Add keys. Choose a combination, or enter an advanced raw sequence.";
+          setRemoteText(description, t("For a shortcut that isn't in Add keys. Choose a combination, or enter an advanced raw sequence."));
           form.append(description);
 
           const modeRow = document.createElement("div");
           modeRow.className = "user-key-row";
           const modeLabel = document.createElement("span");
           modeLabel.className = "user-key-label";
-          modeLabel.textContent = "Kind";
+          setRemoteText(modeLabel, t("Kind"));
           const modeSelect = document.createElement("select");
           modeSelect.className = "input-layout-zone";
-          modeSelect.setAttribute("aria-label", "Custom key kind");
-          for (const [value, text] of [["combo", "Combination"], ["raw", "Raw sequence"]]) {
+          setRemoteAttribute(modeSelect, "aria-label", t("Custom key kind"));
+          for (const [value, text] of [["combo", t("Combination")], ["raw", t("Raw sequence")]]) {
             const option = document.createElement("option");
             option.value = value;
-            option.textContent = text;
+            setRemoteText(option, text);
             modeSelect.append(option);
           }
           modeSelect.value = userKeyFormMode;
@@ -13414,11 +13331,11 @@ import {
             comboRow.className = "user-key-row";
             const comboLabel = document.createElement("span");
             comboLabel.className = "user-key-label";
-            comboLabel.textContent = "Keys";
+            setRemoteText(comboLabel, t("Keys"));
 
             const modifierSelect = document.createElement("select");
             modifierSelect.className = "input-layout-zone";
-            modifierSelect.setAttribute("aria-label", "Custom key modifier");
+            setRemoteAttribute(modifierSelect, "aria-label", t("Custom key modifier"));
             for (const [value, text] of [
               ["ctrl", "Ctrl"],
               ["alt", "Alt"],
@@ -13426,7 +13343,7 @@ import {
             ]) {
               const option = document.createElement("option");
               option.value = value;
-              option.textContent = text;
+              setRemoteText(option, text);
               modifierSelect.append(option);
             }
             modifierSelect.value = userKeyComboModifier;
@@ -13441,11 +13358,11 @@ import {
 
             const baseSelect = document.createElement("select");
             baseSelect.className = "input-layout-zone";
-            baseSelect.setAttribute("aria-label", "Custom key base key");
+            setRemoteAttribute(baseSelect, "aria-label", t("Custom key base key"));
             for (const base of comboBaseChoices(userKeyComboModifier)) {
               const option = document.createElement("option");
               option.value = base;
-              option.textContent = base.toUpperCase();
+              setRemoteText(option, base.toUpperCase());
               baseSelect.append(option);
             }
             baseSelect.value = userKeyComboBase;
@@ -13463,14 +13380,14 @@ import {
             // Ctrl+Shift+X sends the same byte as Ctrl+X, so Shift is only
             // meaningful when Alt is in the combination.
             shiftBox.disabled = userKeyComboModifier === "ctrl";
-            shiftBox.setAttribute("aria-label", "Custom key uses Shift");
+            setRemoteAttribute(shiftBox, "aria-label", t("Custom key uses Shift"));
             shiftBox.addEventListener("change", () => {
               userKeyComboShift = shiftBox.checked;
               userKeyFormError = "";
               renderInputSettingsPreservingScroll();
             });
             const shiftText = document.createElement("span");
-            shiftText.textContent = "Shift";
+            setRemoteText(shiftText, "Shift");
             shiftWrap.append(shiftBox, shiftText);
 
             comboRow.append(comboLabel, modifierSelect, baseSelect, shiftWrap);
@@ -13479,23 +13396,23 @@ import {
             const seq = comboKeySequence(userKeyComboModifier, userKeyComboBase, userKeyComboShift);
             const preview = document.createElement("div");
             preview.className = "user-key-preview";
-            preview.textContent = seq
+            setRemoteText(preview, seq
               ? `${comboKeyLabel(userKeyComboModifier, userKeyComboBase, userKeyComboShift)} → ${describeKeySequence(seq)}`
-              : "No terminal sequence for this combination.";
+              : t("No terminal sequence for this combination."));
             form.append(preview);
           } else {
             const labelRow = document.createElement("div");
             labelRow.className = "user-key-row";
             const labelName = document.createElement("span");
             labelName.className = "user-key-label";
-            labelName.textContent = "Label";
+            setRemoteText(labelName, t("Label"));
             const labelInput = document.createElement("input");
             labelInput.type = "text";
             labelInput.className = "user-key-input";
             labelInput.maxLength = USER_KEY_LABEL_MAX;
-            labelInput.placeholder = "^G";
+            setRemoteAttribute(labelInput, "placeholder", "^G");
             labelInput.value = userKeyRawLabel;
-            labelInput.setAttribute("aria-label", "Custom key label");
+            setRemoteAttribute(labelInput, "aria-label", t("Custom key label"));
             labelInput.addEventListener("input", () => {
               userKeyRawLabel = labelInput.value;
             });
@@ -13506,13 +13423,13 @@ import {
             seqRow.className = "user-key-row";
             const seqName = document.createElement("span");
             seqName.className = "user-key-label";
-            seqName.textContent = "Sequence";
+            setRemoteText(seqName, t("Sequence"));
             const seqInput = document.createElement("input");
             seqInput.type = "text";
             seqInput.className = "user-key-input";
-            seqInput.placeholder = "\\e[1;5C";
+            setRemoteAttribute(seqInput, "placeholder", "\\e[1;5C");
             seqInput.value = userKeyRawSequence;
-            seqInput.setAttribute("aria-label", "Custom key sequence");
+            setRemoteAttribute(seqInput, "aria-label", t("Custom key sequence"));
             seqInput.addEventListener("input", () => {
               userKeyRawSequence = seqInput.value;
             });
@@ -13523,7 +13440,7 @@ import {
             escapeRow.className = "user-key-row";
             const escapeLabel = document.createElement("span");
             escapeLabel.className = "user-key-label";
-            escapeLabel.textContent = "Insert";
+            setRemoteText(escapeLabel, t("Insert"));
             const escapeButtons = document.createElement("div");
             escapeButtons.className = "user-key-escape-buttons";
             for (const [label, token] of [
@@ -13531,15 +13448,15 @@ import {
               ["Enter", "\\r"],
               ["Tab", "\\t"],
               ["LF", "\\n"],
-              ["Hex", "\\x"],
+              [t("Hex"), "\\x"],
               ["\\", "\\\\"],
             ]) {
               const button = document.createElement("button");
               button.type = "button";
               button.className = "key-order-action";
-              button.textContent = label;
-              button.title = token;
-              button.setAttribute("aria-label", `Insert ${label === "\\" ? "Backslash" : label} escape`);
+              setRemoteText(button, label);
+              setRemoteAttribute(button, "title", token);
+              setRemoteAttribute(button, "aria-label", tr`Insert ${label === "\\" ? t("Backslash") : label} escape`);
               keepInputSurfaceFocus(button);
               button.addEventListener("click", (event) => {
                 event.stopPropagation();
@@ -13562,16 +13479,16 @@ import {
             enterCheckbox.addEventListener("change", () => {
               userKeyRawSubmit = enterCheckbox.checked;
             });
-            enterRow.append(enterCheckbox, "Send Enter");
+            enterRow.append(enterCheckbox, t("Send Enter"));
             form.append(enterRow);
 
             const hint = document.createElement("div");
             hint.className = "user-key-preview";
-            hint.textContent = "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\";
+            setRemoteText(hint, t("Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\"));
             form.append(hint);
             const enterHint = document.createElement("div");
             enterHint.className = "user-key-preview";
-            enterHint.textContent = "Send Enter sends immediately, like Send. Leave off to insert plain text into Composer; Direct mode and control sequences send raw bytes.";
+            setRemoteText(enterHint, t("Send Enter sends immediately, like Send. Leave off to insert plain text into Composer; Direct mode and control sequences send raw bytes."));
             form.append(enterHint);
           }
 
@@ -13580,8 +13497,8 @@ import {
           const submit = document.createElement("button");
           submit.type = "button";
           submit.className = "key-order-action";
-          submit.textContent = "Add key";
-          submit.setAttribute("aria-label", "Add custom key");
+          setRemoteText(submit, t("Add key"));
+          setRemoteAttribute(submit, "aria-label", t("Add custom key"));
           submit.addEventListener("click", (event) => {
             event.stopPropagation();
             submitUserKeyForm();
@@ -13593,7 +13510,7 @@ import {
             const error = document.createElement("div");
             error.className = "user-key-error";
             error.setAttribute("role", "alert");
-            error.textContent = userKeyFormError;
+            setRemoteText(error, userKeyFormError);
             form.append(error);
           }
           section.append(form);
@@ -13621,7 +13538,7 @@ import {
             cb.type = "checkbox";
             cb.id = id;
             cb.checked = enabled;
-            cb.setAttribute("aria-label", labelText);
+            setRemoteAttribute(cb, "aria-label", labelText);
             cb.addEventListener("click", (event) => event.stopPropagation());
             cb.addEventListener("change", (event) => {
               event.stopPropagation();
@@ -13633,10 +13550,10 @@ import {
             });
             const name = document.createElement("span");
             name.className = "key-set-name";
-            name.textContent = labelText;
+            setRemoteText(name, labelText);
             const desc = document.createElement("span");
             desc.className = "key-set-desc";
-            desc.textContent = descText;
+            setRemoteText(desc, descText);
             row.append(cb, name, desc);
             composerSettingsBody.append(row);
           };
@@ -13646,19 +13563,19 @@ import {
           scopeRow.className = "key-set-row";
           const scopeName = document.createElement("span");
           scopeName.className = "key-set-name";
-          scopeName.textContent = "History sharing";
+          setRemoteText(scopeName, t("History sharing"));
           const scopeSelect = document.createElement("select");
           scopeSelect.className = "key-set-select";
           scopeSelect.id = "composerHistoryScopeSelect";
-          scopeSelect.setAttribute("aria-label", "Composer history sharing scope");
+          setRemoteAttribute(scopeSelect, "aria-label", t("Composer history sharing scope"));
           for (const [value, label] of [
-            ["global", "All workspaces"],
-            ["workspace", "This workspace"],
-            ["pane", "This pane only"],
+            ["global", t("All workspaces")],
+            ["workspace", t("This workspace")],
+            ["pane", t("This pane only")],
           ]) {
             const option = document.createElement("option");
             option.value = value;
-            option.textContent = label;
+            setRemoteText(option, label);
             scopeSelect.append(option);
           }
           scopeSelect.value = composerHistoryScope;
@@ -13680,8 +13597,8 @@ import {
 
           makeToggle(
             "composerHistoryPopupToggle",
-            "Tab history",
-            "Tab shows past input",
+            t("Tab history"),
+            t("Tab shows past input"),
             composerHistoryPopupEnabled,
             (checked) => {
               composerHistoryPopupEnabled = checked;
@@ -13692,8 +13609,8 @@ import {
           );
           makeToggle(
             "composerAutocompleteToggle",
-            "Autocomplete",
-            "Suggest as you type",
+            t("Autocomplete"),
+            t("Suggest as you type"),
             composerAutocompleteEnabled,
             (checked) => {
               composerAutocompleteEnabled = checked;
@@ -13703,8 +13620,8 @@ import {
           );
           makeToggle(
             "composerHideAgentInputToggle",
-            "Hide unused agent input",
-            "While using Composer",
+            t("Hide unused agent input"),
+            t("While using Composer"),
             composerHideAgentInputEnabled,
             (checked) => {
               composerHideAgentInputEnabled = checked;
@@ -13718,7 +13635,7 @@ import {
             row.className = "key-set-row";
             const name = document.createElement("span");
             name.className = "key-set-name";
-            name.textContent = `${agent} lines to hide`;
+            setRemoteText(name, tr`${agent} lines to hide`);
             const input = document.createElement("input");
             input.type = "number";
             input.className = "key-set-select";
@@ -13729,7 +13646,7 @@ import {
             input.inputMode = "numeric";
             input.value = String(lines);
             input.disabled = !composerHideAgentInputEnabled;
-            input.setAttribute("aria-label", `${agent} input lines to hide`);
+            setRemoteAttribute(input, "aria-label", tr`${agent} input lines to hide`);
             input.addEventListener("click", (event) => event.stopPropagation());
             input.addEventListener("change", (event) => {
               event.stopPropagation();
@@ -13749,8 +13666,8 @@ import {
             if (section.open) inputSetupOpen.add(section.id);
             else inputSetupOpen.delete(section.id);
           }
-          keyPopoverBody.textContent = "";
-          composerSettingsBody.textContent = "";
+          setRemoteText(keyPopoverBody, "");
+          setRemoteText(composerSettingsBody, "");
           renderInputLayoutEditor();
           renderComposerSettingsSection();
           renderFloatingSettings();
@@ -13842,15 +13759,15 @@ import {
             else $(key).checked = value;
           }
           $("remoteNavigationModifiers").disabled = !remoteKeyboardSettings.useRemoteNavigationKeys;
-          $("remoteNavigationShortcutNotice").textContent = remoteKeyboardSettings.useRemoteNavigationKeys
-            ? `Remote Nav: ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input settings.`
-            : "Remote Nav is off. The PC keybindings below apply.";
+          setRemoteText($("remoteNavigationShortcutNotice"), remoteKeyboardSettings.useRemoteNavigationKeys
+            ? tr`Remote Nav: ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input settings.`
+            : t("Remote Nav is off. The PC keybindings below apply."));
           renderKeyboardShortcutList();
-          $("physicalKeyboardStatus").textContent = physicalKeyboardConnected === null
+          setRemoteText($("physicalKeyboardStatus"), physicalKeyboardConnected === null
             ? androidE2eMode
-              ? "Automatic keyboard detection requires the updated Android app."
-              : "Automatic keyboard detection is not supported in this browser. Keyboard shortcuts still work."
-            : physicalKeyboardConnected ? "Physical keyboard connected." : "No physical keyboard connected.";
+              ? t("Automatic keyboard detection requires the updated Android app.")
+              : t("Automatic keyboard detection is not supported in this browser. Keyboard shortcuts still work.")
+            : physicalKeyboardConnected ? t("Physical keyboard connected.") : t("No physical keyboard connected."));
         }
 
         function applyRemoteKeyboardPreferences() {
@@ -13872,10 +13789,8 @@ import {
           // callbacks and foreground refreshes share this transition check.
           if (typeof previous !== "boolean" || typeof next !== "boolean") return;
           const toast = $("physicalKeyboardToast");
-          const strings = PHYSICAL_KEYBOARD_TOAST_STRINGS[PHYSICAL_KEYBOARD_TOAST_LANG];
           window.clearTimeout(physicalKeyboardToastTimer);
-          toast.lang = PHYSICAL_KEYBOARD_TOAST_LANG;
-          toast.textContent = next ? strings.connected : strings.disconnected;
+          setRemoteText(toast, next ? t("Physical keyboard connected.") : t("Physical keyboard disconnected."));
           toast.hidden = false;
           physicalKeyboardToastTimer = window.setTimeout(() => {
             toast.hidden = true;
@@ -14006,7 +13921,7 @@ import {
           try {
             fitAddon.fit();
           } catch (err) {
-            setStatus(`Fit failed: ${err.message}`, true);
+            setStatus(tr`Fit failed: ${err.message}`, true);
             return;
           }
           if (sendResize && terminal.cols > 0 && terminal.rows > 0) {
@@ -14098,7 +14013,7 @@ import {
                 }, 500);
                 return;
               }
-              setStatus(`Resize failed: ${err.message}`, true);
+              setStatus(tr`Resize failed: ${err.message}`, true);
             });
           }, 120);
         }
@@ -14140,8 +14055,8 @@ import {
             window.parent.postMessage({ type: "laymux:desktop-mode" }, "*");
             return;
           }
-          setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
-          setStatus("Exited remote control.");
+          setConnectionHint(t("Connect first to load workspaces and control the active terminal."), false);
+          setStatus(t("Exited remote control."));
         }
 
         async function releaseLease(id) {
@@ -14240,8 +14155,8 @@ import {
           setConnected(false);
           if (navigationState) renderNavigation(navigationState);
           if (clearStatus) {
-            setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
-            setStatus("Disconnected.");
+            setConnectionHint(t("Connect first to load workspaces and control the active terminal."), false);
+            setStatus(t("Disconnected."));
           }
         }
 
@@ -14273,23 +14188,23 @@ import {
             // before our next claim. A drain that outlives the server's bounded
             // wait now returns `transitioning: true` and keeps this intent armed,
             // but avoiding that round trip remains the fastest recovery path.
-            setConnectionHint("Reconnecting...", false);
-            setBusyStatus("Reconnecting…", false, true);
+            setConnectionHint(t("Reconnecting..."), false);
+            setBusyStatus(t("Reconnecting…"), false, true);
             // Leaves the navigation menu as the user had it: this is not a state that
             // needs their attention.
             maybeAutoConnect();
             return;
           }
-          terminalMetaEl.textContent = "Host has control.";
-          setConnectionHint("Host has control. Connect again to request control.", true);
+          setRemoteText(terminalMetaEl, t("Host has control."));
+          setConnectionHint(t("Host has control. Connect again to request control."), true);
           setStatus(message, true);
           setNavigationOpen(true);
           if (lostLeaseId) releaseLease(lostLeaseId).catch(() => {});
         }
 
-        emptyNav(workspaceListEl, "Not connected.");
-        emptyNav(dockListEl, "Not connected.");
-        emptyNav(notificationListEl, "Not connected.");
+        emptyNav(workspaceListEl, t("Not connected."));
+        emptyNav(dockListEl, t("Not connected."));
+        emptyNav(notificationListEl, t("Not connected."));
         setDockPanelOpen(false);
         // The drawer is the landing surface when the user has to connect by hand — it
         // holds Connect and the "Not connected." hints. With the reconnect intent
@@ -14305,7 +14220,7 @@ import {
         for (const [value, binding] of Object.entries(REMOTE_NAV_MODIFIERS)) {
           const option = document.createElement("option");
           option.value = value;
-            option.textContent = binding.label;
+            setRemoteText(option, binding.label);
           $("remoteNavigationModifiers").append(option);
         }
         renderRemoteKeyboardPreferences();
@@ -14316,9 +14231,9 @@ import {
             try {
               localStorage.setItem(storageKey, typeof remoteKeyboardSettings[key] === "boolean"
                 ? (remoteKeyboardSettings[key] ? "1" : "0") : remoteKeyboardSettings[key]);
-              $("remoteKeyboardSettingsStatus").textContent = "Saved on this device.";
+              setRemoteText($("remoteKeyboardSettingsStatus"), t("Saved on this device."));
             } catch {
-              $("remoteKeyboardSettingsStatus").textContent = "Applied for now; device storage is unavailable.";
+              setRemoteText($("remoteKeyboardSettingsStatus"), t("Applied for now; device storage is unavailable."));
             }
             applyRemoteKeyboardPreferences();
           });
@@ -14369,7 +14284,7 @@ import {
           });
           const name = document.createElement("span");
           name.className = "nav-toggle-name";
-          name.textContent = label;
+          setRemoteText(name, label);
           row.append(input, name);
           $("headerIconSettings").appendChild(row);
         }
@@ -14450,11 +14365,11 @@ import {
             if (linesChanged) writes.push([composerHiddenAgentInputLinesKey, JSON.stringify(hiddenLines)]);
             const skipsChanged = ["spatialExcludedPaneIds", "spatialExcludedWorkspaceIds"].some(key => Object.hasOwn(patch, key));
             if (skipsChanged) {
-              if (!navigationState) throw new Error("탐색 목록이 없습니다. 연결 후 다시 조회하세요.");
+              if (!navigationState) throw remoteError(t("탐색 목록이 없습니다. 연결 후 다시 조회하세요."));
               for (const workspace of navigationState.workspaces || []) {
                 const panes = workspaceTerminalPaneIds(workspace.id);
                 if (panes.length && candidate.spatialExcludedWorkspaceIds.includes(workspace.id) !== panes.every(id => candidate.spatialExcludedPaneIds.includes(id))) {
-                  throw new Error("워크스페이스 제외와 소속 터미널 pane 제외를 일치시켜 두 목록을 함께 변경하세요.");
+                  throw remoteError(t("워크스페이스 제외와 소속 터미널 pane 제외를 일치시켜 두 목록을 함께 변경하세요."));
                 }
               }
               writes.push([spatialExcludedPaneIdsKey, JSON.stringify(candidate.spatialExcludedPaneIds)], [spatialExcludedWorkspaceIdsKey, JSON.stringify(candidate.spatialExcludedWorkspaceIds)]);
@@ -14515,7 +14430,7 @@ import {
               renderWorkspaceList(navigationState.workspaces || []);
             }
             renderKeyPopover();
-            updateRemoteDisplaySettingsControls("Saved on this device by agent.");
+            updateRemoteDisplaySettingsControls(t("Saved on this device by agent."));
           },
           androidHttpDocumentId,
         );
@@ -14631,10 +14546,10 @@ import {
           setDockPanelOpen(!dockPanelOpen);
         });
         markAllNotificationsReadButton.addEventListener("click", () => {
-          markAllNotificationsRead().catch((err) => setStatus(`Mark read failed: ${err.message}`, true));
+          markAllNotificationsRead().catch((err) => setStatus(tr`Mark read failed: ${err.message}`, true));
         });
         clearNotificationsButton.addEventListener("click", () => {
-          clearNotifications().catch((err) => setStatus(`Clear failed: ${err.message}`, true));
+          clearNotifications().catch((err) => setStatus(tr`Clear failed: ${err.message}`, true));
         });
         navScrim.addEventListener("click", () => setNavigationOpen(false));
         installHorizontalFlickDismiss(
@@ -14650,7 +14565,7 @@ import {
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         exitButton.addEventListener("click", () => exitRemote());
         refreshButton.addEventListener("click", () => {
-          setBusyStatus("Refreshing…");
+          setBusyStatus(t("Refreshing…"));
           loadNavigation().catch((err) => setStatus(err.message, true));
         });
         fileViewerPathInput.addEventListener("input", () => {
@@ -14680,8 +14595,8 @@ import {
           const path = fileViewerPath || fileViewerDirectoryPath;
           if (!path) return;
           writeClipboardText(path)
-            .then(() => setStatus(`Copied ${path}`))
-            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+            .then(() => setStatus(tr`Copied ${path}`))
+            .catch((err) => setStatus(tr`Copy failed: ${err.message || err}`, true));
         });
         fileViewerDownloadButton.addEventListener("click", () => downloadCurrentFileViewerFile());
         fileViewerOpenButton.addEventListener("click", () => downloadCurrentFileViewerFile(true));
@@ -14950,7 +14865,7 @@ import {
           }
           if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
             setStatus(
-              `${remoteAttachmentTooLargeMessage("Pasted text")} The text was kept in the composer.`,
+              tr`${remoteAttachmentTooLargeMessage(t("Pasted text"))} The text was kept in the composer.`,
               false,
               true,
             );
@@ -14962,7 +14877,7 @@ import {
             event.preventDefault();
             event.stopImmediatePropagation();
             setStatus(
-              "A long paste was rejected because an attachment upload is already in progress.",
+              t("A long paste was rejected because an attachment upload is already in progress."),
               false,
               true,
             );

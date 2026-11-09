@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRemoteWorktrees } from "./remote-worktrees.js";
+import { initializeRemoteLanguage, setRemoteLanguage } from "./remote-i18n.js";
 
 const entry = { path: "/work/feature", branch: "feature", head: "abc", usage: [] };
 const result = {
@@ -31,6 +32,8 @@ describe("Remote Worktrees 요청 소유권", () => {
   const api = vi.fn();
   const focusUsage = vi.fn();
   beforeEach(() => {
+    localStorage.clear();
+    initializeRemoteLanguage({ locale: "ko" });
     document.body.innerHTML = `<div id="worktreesOverlay" hidden>
       <button id="worktreesAll"></button><button id="worktreesCandidates"></button>
       <button id="worktreesRefresh"></button><button id="worktreesClose"></button>
@@ -58,6 +61,22 @@ describe("Remote Worktrees 요청 소유권", () => {
   const click = (selector: string) => (document.querySelector(selector) as HTMLElement).click();
   const button = (label: string) =>
     Array.from(document.querySelectorAll("button")).find((item) => item.textContent === label)!;
+
+  it("열린 워크트리 상세의 언어만 바꾸고 선택과 검사 결과를 보존한다", async () => {
+    controller.open();
+    await vi.waitFor(() => expect(document.querySelector("[data-worktree-path]")).not.toBeNull());
+    click("[data-worktree-path]");
+    await vi.waitFor(() => expect(button("워크트리 제거")).toBeDefined());
+    const requests = api.mock.calls.length;
+    setRemoteLanguage("en");
+    expect(button("Remove worktree")).toBeDefined();
+    expect(document.getElementById("worktreesDetail")?.textContent).toContain(
+      "Changed 0 · Untracked 0 · Ignored 0",
+    );
+    expect(document.getElementById("worktreesDetail")?.textContent).toContain("/work/feature");
+    expect(document.getElementById("worktreesDetail")?.hidden).toBe(false);
+    expect(api).toHaveBeenCalledTimes(requests);
+  });
 
   it("terminal 변경 뒤 도착한 목록은 표시하거나 추가 검사하지 않는다", async () => {
     const old = deferred<typeof result>();

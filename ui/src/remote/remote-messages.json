@@ -1,0 +1,2814 @@
+{
+  "Focused": {
+    "ko": "포커스",
+    "en": "Focused"
+  },
+  "Active": {
+    "ko": "활성",
+    "en": "Active"
+  },
+  "Command succeeded": {
+    "ko": "명령 성공",
+    "en": "Command succeeded"
+  },
+  "Command failed": {
+    "ko": "명령 실패",
+    "en": "Command failed"
+  },
+  "Interrupted": {
+    "ko": "중단됨",
+    "en": "Interrupted"
+  },
+  "Task ended · result unobserved": {
+    "ko": "작업 종료 · 결과 미확인",
+    "en": "Task ended · result unobserved"
+  },
+  "Idle": {
+    "ko": "대기",
+    "en": "Idle"
+  },
+  "Task unconfirmed": {
+    "ko": "작업 미확인",
+    "en": "Task unconfirmed"
+  },
+  "Response or approval needed": {
+    "ko": "응답 또는 승인 필요",
+    "en": "Response or approval needed"
+  },
+  "Workspace renamed.": {
+    "ko": "워크스페이스 이름을 변경했습니다.",
+    "en": "Workspace renamed."
+  },
+  "Workspace template saved.": {
+    "ko": "워크스페이스 템플릿을 저장했습니다.",
+    "en": "Workspace template saved."
+  },
+  "Files": {
+    "ko": "파일",
+    "en": "Files"
+  },
+  "Worktrees": {
+    "ko": "워크트리",
+    "en": "Worktrees"
+  },
+  "Memo": {
+    "ko": "메모",
+    "en": "Memo"
+  },
+  "Pane navigation shortcut": {
+    "ko": "Pane 탐색 단축키",
+    "en": "Pane navigation shortcut"
+  },
+  "Physical keyboard connected.": {
+    "ko": "물리 키보드가 연결되었습니다.",
+    "en": "Physical keyboard connected."
+  },
+  "Physical keyboard disconnected.": {
+    "ko": "물리 키보드 연결이 해제되었습니다.",
+    "en": "Physical keyboard disconnected."
+  },
+  "Loading earlier output…": {
+    "ko": "이전 출력을 불러오는 중…",
+    "en": "Loading earlier output…"
+  },
+  "Connection interrupted. Reconnecting…": {
+    "ko": "연결이 끊겼습니다. 다시 연결하는 중…",
+    "en": "Connection interrupted. Reconnecting…"
+  },
+  "Connected.": {
+    "ko": "연결됨.",
+    "en": "Connected."
+  },
+  "The operation was aborted.": {
+    "ko": "작업이 취소되었습니다.",
+    "en": "The operation was aborted."
+  },
+  "Invalid Remote output path.": {
+    "ko": "잘못된 Remote 출력 경로입니다.",
+    "en": "Invalid Remote output path."
+  },
+  "Remote output identity is missing.": {
+    "ko": "Remote 출력 식별 정보가 없습니다.",
+    "en": "Remote output identity is missing."
+  },
+  "Secure binary output bridge is unavailable.": {
+    "ko": "보안 바이너리 출력 브리지를 사용할 수 없습니다.",
+    "en": "Secure binary output bridge is unavailable."
+  },
+  "Secure output bridge record is invalid.": {
+    "ko": "보안 출력 브리지 레코드가 잘못되었습니다.",
+    "en": "Secure output bridge record is invalid."
+  },
+  "Secure output record type is invalid.": {
+    "ko": "보안 출력 레코드 유형이 잘못되었습니다.",
+    "en": "Secure output record type is invalid."
+  },
+  "Secure Remote request failed.": {
+    "ko": "보안 Remote 요청에 실패했습니다.",
+    "en": "Secure Remote request failed."
+  },
+  "Secure Remote transport resumed after background.": {
+    "ko": "백그라운드에서 돌아온 뒤 보안 Remote 전송을 재개했습니다.",
+    "en": "Secure Remote transport resumed after background."
+  },
+  "Saved on this device.": {
+    "ko": "이 기기에 저장했습니다.",
+    "en": "Saved on this device."
+  },
+  "Unpin workspace menu": {
+    "ko": "워크스페이스 메뉴 고정 해제",
+    "en": "Unpin workspace menu"
+  },
+  "Pin workspace menu": {
+    "ko": "워크스페이스 메뉴 고정",
+    "en": "Pin workspace menu"
+  },
+  "Could not save on this device.": {
+    "ko": "이 기기에 저장할 수 없습니다.",
+    "en": "Could not save on this device."
+  },
+  " Following the beta channel.": {
+    "ko": " 베타 채널을 사용 중입니다.",
+    "en": " Following the beta channel."
+  },
+  "Update status unavailable.": {
+    "ko": "업데이트 상태를 확인할 수 없습니다.",
+    "en": "Update status unavailable."
+  },
+  "Checking GitHub Releases...": {
+    "ko": "GitHub Releases 확인 중...",
+    "en": "Checking GitHub Releases..."
+  },
+  "Installing update; the PC will restart...": {
+    "ko": "업데이트 설치 중; PC가 다시 시작됩니다...",
+    "en": "Installing update; the PC will restart..."
+  },
+  "Starting signed update...": {
+    "ko": "서명된 업데이트 시작 중...",
+    "en": "Starting signed update..."
+  },
+  "Close as completed": {
+    "ko": "완료로 닫기",
+    "en": "Close as completed"
+  },
+  "Close as not planned": {
+    "ko": "계획 없음으로 닫기",
+    "en": "Close as not planned"
+  },
+  "Merge (merge commit)": {
+    "ko": "병합 (병합 커밋)",
+    "en": "Merge (merge commit)"
+  },
+  "Squash and merge": {
+    "ko": "스쿼시 후 병합",
+    "en": "Squash and merge"
+  },
+  "Rebase and merge": {
+    "ko": "리베이스 후 병합",
+    "en": "Rebase and merge"
+  },
+  "Close": {
+    "ko": "닫기",
+    "en": "Close"
+  },
+  "No GitHub repository for this terminal's CWD": {
+    "ko": "이 터미널 CWD에 GitHub 저장소가 없습니다",
+    "en": "No GitHub repository for this terminal's CWD"
+  },
+  "`gh` not found on PATH": {
+    "ko": "PATH에서 `gh`를 찾을 수 없습니다",
+    "en": "`gh` not found on PATH"
+  },
+  "Run `gh auth login` to read issues and PRs": {
+    "ko": "이슈와 PR을 읽으려면 `gh auth login`을 실행하세요",
+    "en": "Run `gh auth login` to read issues and PRs"
+  },
+  "GitHub request failed": {
+    "ko": "GitHub 요청 실패",
+    "en": "GitHub request failed"
+  },
+  "just now": {
+    "ko": "방금",
+    "en": "just now"
+  },
+  "Loading GitHub items...": {
+    "ko": "GitHub 항목 불러오는 중...",
+    "en": "Loading GitHub items..."
+  },
+  "No open issues": {
+    "ko": "열린 이슈 없음",
+    "en": "No open issues"
+  },
+  "No open pull requests": {
+    "ko": "열린 PR 없음",
+    "en": "No open pull requests"
+  },
+  "Copy": {
+    "ko": "복사",
+    "en": "Copy"
+  },
+  "Copy link": {
+    "ko": "링크 복사",
+    "en": "Copy link"
+  },
+  "Copy branch": {
+    "ko": "브랜치 복사",
+    "en": "Copy branch"
+  },
+  "GitHub actions": {
+    "ko": "GitHub 작업",
+    "en": "GitHub actions"
+  },
+  "Working...": {
+    "ko": "작업 중...",
+    "en": "Working..."
+  },
+  "Confirm": {
+    "ko": "확인",
+    "en": "Confirm"
+  },
+  "Cancel": {
+    "ko": "취소",
+    "en": "Cancel"
+  },
+  "Enter a host file path.": {
+    "ko": "호스트 파일 경로를 입력하세요.",
+    "en": "Enter a host file path."
+  },
+  "Connect to open a host file.": {
+    "ko": "호스트 파일을 열려면 연결하세요.",
+    "en": "Connect to open a host file."
+  },
+  "Open the file shown on PC": {
+    "ko": "PC에 표시된 파일 열기",
+    "en": "Open the file shown on PC"
+  },
+  "Browse host files": {
+    "ko": "호스트 파일 탐색",
+    "en": "Browse host files"
+  },
+  "Loading file…": {
+    "ko": "파일 불러오는 중…",
+    "en": "Loading file…"
+  },
+  "Unknown size": {
+    "ko": "크기 알 수 없음",
+    "en": "Unknown size"
+  },
+  "Preview truncated at the Remote viewer limit.": {
+    "ko": "Remote 뷰어 제한으로 미리보기를 잘랐습니다.",
+    "en": "Preview truncated at the Remote viewer limit."
+  },
+  "PDF · open this file in the desktop viewer to read it.": {
+    "ko": "PDF · 읽으려면 데스크톱 뷰어에서 여세요.",
+    "en": "PDF · open this file in the desktop viewer to read it."
+  },
+  "Unsupported viewer response": {
+    "ko": "지원하지 않는 뷰어 응답",
+    "en": "Unsupported viewer response"
+  },
+  "Host files": {
+    "ko": "호스트 파일",
+    "en": "Host files"
+  },
+  "Loading directory…": {
+    "ko": "디렉터리 불러오는 중…",
+    "en": "Loading directory…"
+  },
+  "Unsupported directory response": {
+    "ko": "지원하지 않는 디렉터리 응답",
+    "en": "Unsupported directory response"
+  },
+  "Empty directory": {
+    "ko": "빈 디렉터리",
+    "en": "Empty directory"
+  },
+  "Listing truncated at the Remote entry limit.": {
+    "ko": "Remote 항목 제한으로 목록을 잘랐습니다.",
+    "en": "Listing truncated at the Remote entry limit."
+  },
+  "This browser cannot open this file type. Use Download instead.": {
+    "ko": "이 브라우저에서 열 수 없는 파일 형식입니다. 다운로드를 사용하세요.",
+    "en": "This browser cannot open this file type. Use Download instead."
+  },
+  "Allow pop-ups to open this file in a new tab.": {
+    "ko": "새 탭에서 파일을 열려면 팝업을 허용하세요.",
+    "en": "Allow pop-ups to open this file in a new tab."
+  },
+  "Download response was not usable": {
+    "ko": "다운로드 응답을 사용할 수 없습니다",
+    "en": "Download response was not usable"
+  },
+  "Wait for the file transfer or reconnect.": {
+    "ko": "파일 전송을 기다리거나 다시 연결하세요.",
+    "en": "Wait for the file transfer or reconnect."
+  },
+  "Open on this device": {
+    "ko": "이 기기에서 열기",
+    "en": "Open on this device"
+  },
+  "Saving...": {
+    "ko": "저장 중...",
+    "en": "Saving..."
+  },
+  "Download": {
+    "ko": "다운로드",
+    "en": "Download"
+  },
+  "Open in browser": {
+    "ko": "브라우저에서 열기",
+    "en": "Open in browser"
+  },
+  "Open explorer": {
+    "ko": "탐색기 열기",
+    "en": "Open explorer"
+  },
+  "Open viewer": {
+    "ko": "뷰어 열기",
+    "en": "Open viewer"
+  },
+  "Copy URL": {
+    "ko": "URL 복사",
+    "en": "Copy URL"
+  },
+  "Copy path": {
+    "ko": "경로 복사",
+    "en": "Copy path"
+  },
+  "Unstar": {
+    "ko": "즐겨찾기 해제",
+    "en": "Unstar"
+  },
+  "Star": {
+    "ko": "즐겨찾기",
+    "en": "Star"
+  },
+  "Switch to Direct input": {
+    "ko": "직접 입력으로 전환",
+    "en": "Switch to Direct input"
+  },
+  "Switch to Composer input": {
+    "ko": "Composer 입력으로 전환",
+    "en": "Switch to Composer input"
+  },
+  "Keyboard": {
+    "ko": "키보드",
+    "en": "Keyboard"
+  },
+  "Connect first to load workspaces and control the active terminal.": {
+    "ko": "워크스페이스를 불러오고 활성 터미널을 제어하려면 먼저 연결하세요.",
+    "en": "Connect first to load workspaces and control the active terminal."
+  },
+  "Sign-in relay": {
+    "ko": "로그인 중계",
+    "en": "Sign-in relay"
+  },
+  "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. Start sign-in in the browser and the result returns to the PC automatically.": {
+    "ko": "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 브라우저에서 로그인하면 결과가 PC로 자동 전달됩니다.",
+    "en": "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. Start sign-in in the browser and the result returns to the PC automatically."
+  },
+  "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.": {
+    "ko": "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 로그인 후 브라우저는 열리지 않는 localhost 페이지에서 끝나므로, 그 주소 전체를 복사해 아래에 붙여넣으세요.",
+    "en": "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here."
+  },
+  "Registering the sign-in relay with the PC...": {
+    "ko": "PC에 로그인 중계를 등록하는 중...",
+    "en": "Registering the sign-in relay with the PC..."
+  },
+  "Finish signing in with the browser that just opened, then return to this app — the result is delivered to the PC here.": {
+    "ko": "방금 열린 브라우저에서 로그인을 마친 뒤 이 앱으로 돌아오세요. 결과는 여기서 PC로 전달됩니다.",
+    "en": "Finish signing in with the browser that just opened, then return to this app — the result is delivered to the PC here."
+  },
+  "Waiting for the sign-in to finish...": {
+    "ko": "로그인이 끝나기를 기다리는 중...",
+    "en": "Waiting for the sign-in to finish..."
+  },
+  "Sign in with the tab that just opened. It ends on an unreachable localhost page — copy that page's full address and paste it below.": {
+    "ko": "방금 열린 탭에서 로그인하세요. 열리지 않는 localhost 페이지에서 끝나면 그 주소 전체를 복사해 아래에 붙여넣으세요.",
+    "en": "Sign in with the tab that just opened. It ends on an unreachable localhost page — copy that page's full address and paste it below."
+  },
+  "Waiting for the pasted callback address...": {
+    "ko": "붙여넣은 콜백 주소를 기다리는 중...",
+    "en": "Waiting for the pasted callback address..."
+  },
+  "The pasted address must start with http://localhost:{port}": {
+    "ko": "붙여넣은 주소는 http://localhost:{port} 로 시작해야 합니다",
+    "en": "The pasted address must start with http://localhost:{port}"
+  },
+  "Forwarding the callback to the PC...": {
+    "ko": "콜백을 PC로 전달하는 중...",
+    "en": "Forwarding the callback to the PC..."
+  },
+  "Forwarding the sign-in result to the PC...": {
+    "ko": "로그인 결과를 PC로 전달하는 중...",
+    "en": "Forwarding the sign-in result to the PC..."
+  },
+  "Signed in — the PC tool answered {status}. You can close this.": {
+    "ko": "로그인 성공 — PC 도구가 {status}로 응답했습니다. 이 창을 닫아도 됩니다.",
+    "en": "Signed in — the PC tool answered {status}. You can close this."
+  },
+  "Signed in — the sign-in was delivered to the PC. You can close this.": {
+    "ko": "로그인 성공 — PC로 전달됐습니다. 이 창을 닫아도 됩니다.",
+    "en": "Signed in — the sign-in was delivered to the PC. You can close this."
+  },
+  "The sign-in relay is no longer active. You can close this.": {
+    "ko": "로그인 중계가 더 이상 활성 상태가 아닙니다. 이 창을 닫아도 됩니다.",
+    "en": "The sign-in relay is no longer active. You can close this."
+  },
+  "Could not confirm delivery — check whether the PC signed in.": {
+    "ko": "전달을 확인하지 못했습니다 — PC에서 로그인됐는지 확인하세요.",
+    "en": "Could not confirm delivery — check whether the PC signed in."
+  },
+  "Start sign-in": {
+    "ko": "로그인 시작",
+    "en": "Start sign-in"
+  },
+  "Forward to PC": {
+    "ko": "PC로 전달",
+    "en": "Forward to PC"
+  },
+  "Callback address from the browser": {
+    "ko": "브라우저에서 받은 콜백 주소",
+    "en": "Callback address from the browser"
+  },
+  "Clipboard API unavailable": {
+    "ko": "클립보드 API를 사용할 수 없습니다",
+    "en": "Clipboard API unavailable"
+  },
+  "Control was lost while this tab was away.": {
+    "ko": "탭을 비운 사이에 제어권을 잃었습니다.",
+    "en": "Control was lost while this tab was away."
+  },
+  "Interactive": {
+    "ko": "대화형",
+    "en": "Interactive"
+  },
+  "Running": {
+    "ko": "실행 중",
+    "en": "Running"
+  },
+  "Include this pane in pane navigation": {
+    "ko": "이 Pane을 Pane 탐색에 포함",
+    "en": "Include this pane in pane navigation"
+  },
+  "Exclude this pane from pane navigation": {
+    "ko": "이 Pane을 Pane 탐색에서 제외",
+    "en": "Exclude this pane from pane navigation"
+  },
+  "Notification": {
+    "ko": "알림",
+    "en": "Notification"
+  },
+  "Open notifications": {
+    "ko": "알림 열기",
+    "en": "Open notifications"
+  },
+  "Notifications": {
+    "ko": "알림",
+    "en": "Notifications"
+  },
+  "No notifications.": {
+    "ko": "알림이 없습니다.",
+    "en": "No notifications."
+  },
+  "Close navigation": {
+    "ko": "탐색 닫기",
+    "en": "Close navigation"
+  },
+  "Open navigation": {
+    "ko": "탐색 열기",
+    "en": "Open navigation"
+  },
+  "Connection": {
+    "ko": "연결",
+    "en": "Connection"
+  },
+  "Hidden workspaces": {
+    "ko": "숨긴 워크스페이스",
+    "en": "Hidden workspaces"
+  },
+  "New workspace": {
+    "ko": "새 워크스페이스",
+    "en": "New workspace"
+  },
+  "Settings": {
+    "ko": "설정",
+    "en": "Settings"
+  },
+  "Remote": {
+    "ko": "Remote",
+    "en": "Remote"
+  },
+  "Copied the working directory.": {
+    "ko": "작업 디렉터리를 복사했습니다.",
+    "en": "Copied the working directory."
+  },
+  "Widget values are unavailable.": {
+    "ko": "위젯 값을 사용할 수 없습니다.",
+    "en": "Widget values are unavailable."
+  },
+  "No dock terminals.": {
+    "ko": "독 터미널이 없습니다.",
+    "en": "No dock terminals."
+  },
+  "No hidden workspaces.": {
+    "ko": "숨긴 워크스페이스가 없습니다.",
+    "en": "No hidden workspaces."
+  },
+  "Workspace": {
+    "ko": "워크스페이스",
+    "en": "Workspace"
+  },
+  "Show in workspace list": {
+    "ko": "워크스페이스 목록에 표시",
+    "en": "Show in workspace list"
+  },
+  "No workspaces.": {
+    "ko": "워크스페이스가 없습니다.",
+    "en": "No workspaces."
+  },
+  "Manage workspace": {
+    "ko": "워크스페이스 관리",
+    "en": "Manage workspace"
+  },
+  "Include this workspace in pane navigation": {
+    "ko": "이 워크스페이스를 Pane 탐색에 포함",
+    "en": "Include this workspace in pane navigation"
+  },
+  "Exclude this workspace from pane navigation": {
+    "ko": "이 워크스페이스를 Pane 탐색에서 제외",
+    "en": "Exclude this workspace from pane navigation"
+  },
+  "This pane": {
+    "ko": "이 Pane",
+    "en": "This pane"
+  },
+  "Stacked layer (hidden)": {
+    "ko": "쌓인 레이어 (숨김)",
+    "en": "Stacked layer (hidden)"
+  },
+  "Stacked layer (shown)": {
+    "ko": "쌓인 레이어 (표시)",
+    "en": "Stacked layer (shown)"
+  },
+  "Unread notification": {
+    "ko": "읽지 않은 알림",
+    "en": "Unread notification"
+  },
+  "No terminal panes to open.": {
+    "ko": "열 터미널 Pane이 없습니다.",
+    "en": "No terminal panes to open."
+  },
+  "Creating workspace…": {
+    "ko": "워크스페이스 생성 중…",
+    "en": "Creating workspace…"
+  },
+  "Workspace created.": {
+    "ko": "워크스페이스를 만들었습니다.",
+    "en": "Workspace created."
+  },
+  "Workspace hidden.": {
+    "ko": "워크스페이스를 숨겼습니다.",
+    "en": "Workspace hidden."
+  },
+  "Workspace shown.": {
+    "ko": "워크스페이스를 표시했습니다.",
+    "en": "Workspace shown."
+  },
+  "Pane hidden from workspace list.": {
+    "ko": "워크스페이스 목록에서 Pane을 숨겼습니다.",
+    "en": "Pane hidden from workspace list."
+  },
+  "Pane shown in workspace list.": {
+    "ko": "워크스페이스 목록에 Pane을 표시했습니다.",
+    "en": "Pane shown in workspace list."
+  },
+  "Switching workspace…": {
+    "ko": "워크스페이스 전환 중…",
+    "en": "Switching workspace…"
+  },
+  "No terminal panes to navigate.": {
+    "ko": "탐색할 터미널 Pane이 없습니다.",
+    "en": "No terminal panes to navigate."
+  },
+  "Every pane is excluded from pane navigation.": {
+    "ko": "모든 Pane이 Pane 탐색에서 제외되었습니다.",
+    "en": "Every pane is excluded from pane navigation."
+  },
+  "No other pane to move to.": {
+    "ko": "이동할 다른 Pane이 없습니다.",
+    "en": "No other pane to move to."
+  },
+  "Focus a workspace terminal pane first.": {
+    "ko": "먼저 워크스페이스 터미널 Pane에 포커스를 두세요.",
+    "en": "Focus a workspace terminal pane first."
+  },
+  "No unread notifications.": {
+    "ko": "읽지 않은 알림이 없습니다.",
+    "en": "No unread notifications."
+  },
+  "Nowhere to navigate.": {
+    "ko": "이동할 곳이 없습니다.",
+    "en": "Nowhere to navigate."
+  },
+  "Move to pane in direction": {
+    "ko": "해당 방향의 Pane으로 이동",
+    "en": "Move to pane in direction"
+  },
+  "Clear this terminal": {
+    "ko": "이 터미널 지우기",
+    "en": "Clear this terminal"
+  },
+  "Clear workspace terminals": {
+    "ko": "워크스페이스 터미널 지우기",
+    "en": "Clear workspace terminals"
+  },
+  "Last workspace": {
+    "ko": "마지막 워크스페이스",
+    "en": "Last workspace"
+  },
+  "Next workspace": {
+    "ko": "다음 워크스페이스",
+    "en": "Next workspace"
+  },
+  "Previous workspace": {
+    "ko": "이전 워크스페이스",
+    "en": "Previous workspace"
+  },
+  "Most recent unread alert": {
+    "ko": "가장 최근 읽지 않은 알림",
+    "en": "Most recent unread alert"
+  },
+  "Oldest unread alert": {
+    "ko": "가장 오래된 읽지 않은 알림",
+    "en": "Oldest unread alert"
+  },
+  "Open Files": {
+    "ko": "파일 열기",
+    "en": "Open Files"
+  },
+  "Toggle Direct / Composer": {
+    "ko": "직접 입력 / Composer 전환",
+    "en": "Toggle Direct / Composer"
+  },
+  "Copy pane ID": {
+    "ko": "Pane ID 복사",
+    "en": "Copy pane ID"
+  },
+  "Toggle menu": {
+    "ko": "메뉴 전환",
+    "en": "Toggle menu"
+  },
+  "Toggle alerts": {
+    "ko": "알림 전환",
+    "en": "Toggle alerts"
+  },
+  "Larger terminal text": {
+    "ko": "터미널 글자 확대",
+    "en": "Larger terminal text"
+  },
+  "Smaller terminal text": {
+    "ko": "터미널 글자 축소",
+    "en": "Smaller terminal text"
+  },
+  "Reset terminal text size": {
+    "ko": "터미널 글자 크기 초기화",
+    "en": "Reset terminal text size"
+  },
+  "Send Composer": {
+    "ko": "Composer 전송",
+    "en": "Send Composer"
+  },
+  "Composer newline": {
+    "ko": "Composer 줄바꿈",
+    "en": "Composer newline"
+  },
+  "Nothing to clear.": {
+    "ko": "지울 내용이 없습니다.",
+    "en": "Nothing to clear."
+  },
+  "Terminal restarted.": {
+    "ko": "터미널을 다시 시작했습니다.",
+    "en": "Terminal restarted."
+  },
+  "Interrupted and cleared.": {
+    "ko": "중단 후 지웠습니다.",
+    "en": "Interrupted and cleared."
+  },
+  "Cleared.": {
+    "ko": "지웠습니다.",
+    "en": "Cleared."
+  },
+  "Clear skipped: the terminal is busy.": {
+    "ko": "지우기 건너뜀: 터미널이 사용 중입니다.",
+    "en": "Clear skipped: the terminal is busy."
+  },
+  "Clear skipped: the agent's state is not known yet.": {
+    "ko": "지우기 건너뜀: 에이전트 상태를 아직 모릅니다.",
+    "en": "Clear skipped: the agent's state is not known yet."
+  },
+  "Clear skipped: this app has no clear command.": {
+    "ko": "지우기 건너뜀: 이 앱에는 지우기 명령이 없습니다.",
+    "en": "Clear skipped: this app has no clear command."
+  },
+  "Clear skipped: the terminal is not ready.": {
+    "ko": "지우기 건너뜀: 터미널이 준비되지 않았습니다.",
+    "en": "Clear skipped: the terminal is not ready."
+  },
+  "Clearing…": {
+    "ko": "지우는 중…",
+    "en": "Clearing…"
+  },
+  "Closing pane…": {
+    "ko": "Pane 닫는 중…",
+    "en": "Closing pane…"
+  },
+  "Pane closed.": {
+    "ko": "Pane을 닫았습니다.",
+    "en": "Pane closed."
+  },
+  "Stacking…": {
+    "ko": "레이어 쌓는 중…",
+    "en": "Stacking…"
+  },
+  "Stacked a new layer.": {
+    "ko": "새 레이어를 쌓았습니다.",
+    "en": "Stacked a new layer."
+  },
+  "Arrows": {
+    "ko": "방향키",
+    "en": "Arrows"
+  },
+  "Unassigned": {
+    "ko": "미할당",
+    "en": "Unassigned"
+  },
+  "Marking notifications read…": {
+    "ko": "알림 읽음 처리 중…",
+    "en": "Marking notifications read…"
+  },
+  "Notifications marked read.": {
+    "ko": "알림을 읽음 처리했습니다.",
+    "en": "Notifications marked read."
+  },
+  "Clearing notifications…": {
+    "ko": "알림 지우는 중…",
+    "en": "Clearing notifications…"
+  },
+  "Notifications cleared.": {
+    "ko": "알림을 지웠습니다.",
+    "en": "Notifications cleared."
+  },
+  "Opening notification…": {
+    "ko": "알림 여는 중…",
+    "en": "Opening notification…"
+  },
+  "Opening the pane on the desktop…": {
+    "ko": "데스크톱에서 Pane 여는 중…",
+    "en": "Opening the pane on the desktop…"
+  },
+  "The desktop has not opened this pane yet.": {
+    "ko": "데스크톱에서 이 Pane을 아직 열지 않았습니다.",
+    "en": "The desktop has not opened this pane yet."
+  },
+  "No earlier output is available.": {
+    "ko": "불러올 이전 출력이 없습니다.",
+    "en": "No earlier output is available."
+  },
+  "Earlier output is beyond what Remote can load.": {
+    "ko": "이전 출력이 Remote에서 불러올 수 있는 범위를 넘었습니다.",
+    "en": "Earlier output is beyond what Remote can load."
+  },
+  "Remote control is not active.": {
+    "ko": "Remote 제어가 활성화되지 않았습니다.",
+    "en": "Remote control is not active."
+  },
+  "Terminal session ended. Refreshing navigation…": {
+    "ko": "터미널 세션이 끝났습니다. 탐색을 갱신하는 중…",
+    "en": "Terminal session ended. Refreshing navigation…"
+  },
+  "Remote control claim reservation changed unexpectedly.": {
+    "ko": "Remote 제어 예약이 예기치 않게 바뀌었습니다.",
+    "en": "Remote control claim reservation changed unexpectedly."
+  },
+  "Remote control claim reservation expired.": {
+    "ko": "Remote 제어 예약이 만료되었습니다.",
+    "en": "Remote control claim reservation expired."
+  },
+  "Waiting for input…": {
+    "ko": "입력을 기다리는 중…",
+    "en": "Waiting for input…"
+  },
+  "Remote control claim was cancelled.": {
+    "ko": "Remote 제어 요청을 취소했습니다.",
+    "en": "Remote control claim was cancelled."
+  },
+  "Another client has control.": {
+    "ko": "다른 클라이언트가 제어 중입니다.",
+    "en": "Another client has control."
+  },
+  "Remote token is required.": {
+    "ko": "Remote 토큰이 필요합니다.",
+    "en": "Remote token is required."
+  },
+  "Claiming remote control…": {
+    "ko": "Remote 제어권 요청 중…",
+    "en": "Claiming remote control…"
+  },
+  "Reconnecting…": {
+    "ko": "다시 연결하는 중…",
+    "en": "Reconnecting…"
+  },
+  "Failed to load Composer stars": {
+    "ko": "Composer 즐겨찾기를 불러오지 못했습니다",
+    "en": "Failed to load Composer stars"
+  },
+  "Attachment could not be read.": {
+    "ko": "첨부를 읽을 수 없습니다.",
+    "en": "Attachment could not be read."
+  },
+  "Attachment encoding failed.": {
+    "ko": "첨부 인코딩에 실패했습니다.",
+    "en": "Attachment encoding failed."
+  },
+  "Terminal changed while the attachment was uploading.": {
+    "ko": "첨부를 업로드하는 중에 터미널이 바뀌었습니다.",
+    "en": "Terminal changed while the attachment was uploading."
+  },
+  "Moving to another pane — send again once it opens.": {
+    "ko": "다른 Pane으로 이동 중입니다. 열린 뒤 다시 전송하세요.",
+    "en": "Moving to another pane — send again once it opens."
+  },
+  "Terminal input is not ready.": {
+    "ko": "터미널 입력이 준비되지 않았습니다.",
+    "en": "Terminal input is not ready."
+  },
+  "Pasted text": {
+    "ko": "붙여넣은 텍스트",
+    "en": "Pasted text"
+  },
+  "A long paste was rejected because an attachment upload is already in progress.": {
+    "ko": "첨부 업로드가 진행 중이어서 긴 텍스트 붙여넣기를 거부했습니다.",
+    "en": "A long paste was rejected because an attachment upload is already in progress."
+  },
+  "Previous pane (spatial order)": {
+    "ko": "이전 Pane (공간 순서)",
+    "en": "Previous pane (spatial order)"
+  },
+  "Next pane (spatial order)": {
+    "ko": "다음 Pane (공간 순서)",
+    "en": "Next pane (spatial order)"
+  },
+  "Ctrl+C (interrupt)": {
+    "ko": "Ctrl+C (중단)",
+    "en": "Ctrl+C (interrupt)"
+  },
+  "Ctrl+J (line feed)": {
+    "ko": "Ctrl+J (줄바꿈)",
+    "en": "Ctrl+J (line feed)"
+  },
+  "Ctrl+U (kill line)": {
+    "ko": "Ctrl+U (줄 지우기)",
+    "en": "Ctrl+U (kill line)"
+  },
+  "Ctrl+T (transpose)": {
+    "ko": "Ctrl+T (문자 교환)",
+    "en": "Ctrl+T (transpose)"
+  },
+  "Ctrl+L (clear screen)": {
+    "ko": "Ctrl+L (화면 지우기)",
+    "en": "Ctrl+L (clear screen)"
+  },
+  "Clear pane": {
+    "ko": "Pane 지우기",
+    "en": "Clear pane"
+  },
+  "Close pane": {
+    "ko": "Pane 닫기",
+    "en": "Close pane"
+  },
+  "Stack": {
+    "ko": "쌓기",
+    "en": "Stack"
+  },
+  "Pane/Alert nav": {
+    "ko": "Pane/알림 탐색",
+    "en": "Pane/Alert nav"
+  },
+  "Navigation": {
+    "ko": "탐색",
+    "en": "Navigation"
+  },
+  "Editing": {
+    "ko": "편집",
+    "en": "Editing"
+  },
+  "Ctrl keys": {
+    "ko": "Ctrl 키",
+    "en": "Ctrl keys"
+  },
+  "Pane actions": {
+    "ko": "Pane 작업",
+    "en": "Pane actions"
+  },
+  "Function": {
+    "ko": "기능 키",
+    "en": "Function"
+  },
+  "Main row": {
+    "ko": "기본행",
+    "en": "Main row"
+  },
+  "Keys row": {
+    "ko": "확장행",
+    "en": "Keys row"
+  },
+  "Left": {
+    "ko": "왼쪽",
+    "en": "Left"
+  },
+  "Center": {
+    "ko": "가운데",
+    "en": "Center"
+  },
+  "Right": {
+    "ko": "오른쪽",
+    "en": "Right"
+  },
+  "Keys": {
+    "ko": "확장 키",
+    "en": "Keys"
+  },
+  "Send": {
+    "ko": "전송",
+    "en": "Send"
+  },
+  "Composer": {
+    "ko": "Composer",
+    "en": "Composer"
+  },
+  "Attach file": {
+    "ko": "파일 첨부",
+    "en": "Attach file"
+  },
+  "Menu": {
+    "ko": "메뉴",
+    "en": "Menu"
+  },
+  "Viewer": {
+    "ko": "뷰어",
+    "en": "Viewer"
+  },
+  "Skip pane": {
+    "ko": "Pane 건너뛰기",
+    "en": "Skip pane"
+  },
+  "Sequence ends with a lone \\.": {
+    "ko": "시퀀스가 단독 \\로 끝납니다.",
+    "en": "Sequence ends with a lone \\."
+  },
+  "\\x needs two hex digits.": {
+    "ko": "\\x에는 16진수 두 자리가 필요합니다.",
+    "en": "\\x needs two hex digits."
+  },
+  "Flick for arrow key: up, right, down, or left": {
+    "ko": "위·오른쪽·아래·왼쪽으로 플릭해 방향키 입력",
+    "en": "Flick for arrow key: up, right, down, or left"
+  },
+  "Flick up, right, down, or left — hold to repeat": {
+    "ko": "위·오른쪽·아래·왼쪽으로 플릭 — 길게 눌러 반복",
+    "en": "Flick up, right, down, or left — hold to repeat"
+  },
+  "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert": {
+    "ko": "플릭 탐색: 위/아래 이전/다음 Pane, 왼쪽/오른쪽 최근/오래된 알림",
+    "en": "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert"
+  },
+  "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert": {
+    "ko": "플릭: ↑ 이전 Pane · ↓ 다음 Pane · ← 최근 알림 · → 오래된 알림",
+    "en": "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert"
+  },
+  "Floating controls": {
+    "ko": "플로팅 컨트롤",
+    "en": "Floating controls"
+  },
+  "; hold center to move": {
+    "ko": "; 가운데를 길게 눌러 이동",
+    "en": "; hold center to move"
+  },
+  "Show floating controls": {
+    "ko": "플로팅 컨트롤 표시",
+    "en": "Show floating controls"
+  },
+  "Arrow pad": {
+    "ko": "방향 패드",
+    "en": "Arrow pad"
+  },
+  "Pane / alert pad": {
+    "ko": "Pane / 알림 패드",
+    "en": "Pane / alert pad"
+  },
+  "Size (px)": {
+    "ko": "크기 (px)",
+    "en": "Size (px)"
+  },
+  "Opacity (%)": {
+    "ko": "불투명도 (%)",
+    "en": "Opacity (%)"
+  },
+  "Enabled": {
+    "ko": "활성",
+    "en": "Enabled"
+  },
+  "Remove": {
+    "ko": "제거",
+    "en": "Remove"
+  },
+  "Remove floating button": {
+    "ko": "플로팅 버튼 제거",
+    "en": "Remove floating button"
+  },
+  "Floating button action": {
+    "ko": "플로팅 버튼 동작",
+    "en": "Floating button action"
+  },
+  "Add floating button": {
+    "ko": "플로팅 버튼 추가",
+    "en": "Add floating button"
+  },
+  "No actions in the Keys row. Open Remote Settings to restore them.": {
+    "ko": "확장행에 동작이 없습니다. Remote 설정에서 복원하세요.",
+    "en": "No actions in the Keys row. Open Remote Settings to restore them."
+  },
+  "Selected action controls": {
+    "ko": "선택한 동작 컨트롤",
+    "en": "Selected action controls"
+  },
+  "Hidden": {
+    "ko": "숨김",
+    "en": "Hidden"
+  },
+  "First": {
+    "ko": "맨 앞",
+    "en": "First"
+  },
+  "Last": {
+    "ko": "맨 뒤",
+    "en": "Last"
+  },
+  "Delete": {
+    "ko": "삭제",
+    "en": "Delete"
+  },
+  "Your layout": {
+    "ko": "내 배치",
+    "en": "Your layout"
+  },
+  "Reset": {
+    "ko": "초기화",
+    "en": "Reset"
+  },
+  "Reset input action layout": {
+    "ko": "입력 동작 배치 초기화",
+    "en": "Reset input action layout"
+  },
+  "Always visible": {
+    "ko": "항상 표시",
+    "en": "Always visible"
+  },
+  "Shown when Keys is open": {
+    "ko": "확장 키를 열 때 표시",
+    "en": "Shown when Keys is open"
+  },
+  "Actions": {
+    "ko": "동작",
+    "en": "Actions"
+  },
+  "Custom keys": {
+    "ko": "사용자 키",
+    "en": "Custom keys"
+  },
+  "Tap to add to the Keys row. To hide a key, move it here or choose Hidden in its position menu.": {
+    "ko": "눌러서 확장행에 추가하세요. 키를 숨기려면 여기로 옮기거나 위치 메뉴에서 숨김을 선택하세요.",
+    "en": "Tap to add to the Keys row. To hide a key, move it here or choose Hidden in its position menu."
+  },
+  "Every action is on the bar.": {
+    "ko": "모든 동작이 바에 있습니다.",
+    "en": "Every action is on the bar."
+  },
+  "That combination has no terminal sequence.": {
+    "ko": "이 조합에는 터미널 시퀀스가 없습니다.",
+    "en": "That combination has no terminal sequence."
+  },
+  "Create custom key": {
+    "ko": "사용자 키 만들기",
+    "en": "Create custom key"
+  },
+  "For a shortcut that isn't in Add keys. Choose a combination, or enter an advanced raw sequence.": {
+    "ko": "키 추가에 없는 단축키를 만듭니다. 조합을 선택하거나 고급 원시 시퀀스를 입력하세요.",
+    "en": "For a shortcut that isn't in Add keys. Choose a combination, or enter an advanced raw sequence."
+  },
+  "Kind": {
+    "ko": "종류",
+    "en": "Kind"
+  },
+  "Custom key kind": {
+    "ko": "사용자 키 종류",
+    "en": "Custom key kind"
+  },
+  "Combination": {
+    "ko": "조합",
+    "en": "Combination"
+  },
+  "Raw sequence": {
+    "ko": "원시 시퀀스",
+    "en": "Raw sequence"
+  },
+  "Custom key modifier": {
+    "ko": "사용자 키 보조키",
+    "en": "Custom key modifier"
+  },
+  "Custom key base key": {
+    "ko": "사용자 키 기본 키",
+    "en": "Custom key base key"
+  },
+  "Custom key uses Shift": {
+    "ko": "사용자 키에 Shift 사용",
+    "en": "Custom key uses Shift"
+  },
+  "No terminal sequence for this combination.": {
+    "ko": "이 조합에는 터미널 시퀀스가 없습니다.",
+    "en": "No terminal sequence for this combination."
+  },
+  "Label": {
+    "ko": "이름",
+    "en": "Label"
+  },
+  "Custom key label": {
+    "ko": "사용자 키 이름",
+    "en": "Custom key label"
+  },
+  "Sequence": {
+    "ko": "시퀀스",
+    "en": "Sequence"
+  },
+  "Custom key sequence": {
+    "ko": "사용자 키 시퀀스",
+    "en": "Custom key sequence"
+  },
+  "Insert": {
+    "ko": "삽입",
+    "en": "Insert"
+  },
+  "Hex": {
+    "ko": "16진수",
+    "en": "Hex"
+  },
+  "Backslash": {
+    "ko": "백슬래시",
+    "en": "Backslash"
+  },
+  "Send Enter": {
+    "ko": "Enter 전송",
+    "en": "Send Enter"
+  },
+  "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\": {
+    "ko": "이스케이프: \\e \\xNN \\r \\n \\t \\0 \\\\",
+    "en": "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\"
+  },
+  "Send Enter sends immediately, like Send. Leave off to insert plain text into Composer; Direct mode and control sequences send raw bytes.": {
+    "ko": "Enter 전송은 전송 버튼처럼 즉시 보냅니다. 끄면 일반 텍스트를 Composer에 넣습니다. 직접 입력과 제어 시퀀스는 원시 바이트를 보냅니다.",
+    "en": "Send Enter sends immediately, like Send. Leave off to insert plain text into Composer; Direct mode and control sequences send raw bytes."
+  },
+  "Add key": {
+    "ko": "키 추가",
+    "en": "Add key"
+  },
+  "Add custom key": {
+    "ko": "사용자 키 추가",
+    "en": "Add custom key"
+  },
+  "History sharing": {
+    "ko": "입력 기록 공유",
+    "en": "History sharing"
+  },
+  "Composer history sharing scope": {
+    "ko": "Composer 입력 기록 공유 범위",
+    "en": "Composer history sharing scope"
+  },
+  "All workspaces": {
+    "ko": "모든 워크스페이스",
+    "en": "All workspaces"
+  },
+  "This workspace": {
+    "ko": "이 워크스페이스",
+    "en": "This workspace"
+  },
+  "This pane only": {
+    "ko": "이 Pane만",
+    "en": "This pane only"
+  },
+  "Tab history": {
+    "ko": "Tab 입력 기록",
+    "en": "Tab history"
+  },
+  "Tab shows past input": {
+    "ko": "Tab으로 지난 입력 표시",
+    "en": "Tab shows past input"
+  },
+  "Autocomplete": {
+    "ko": "자동완성",
+    "en": "Autocomplete"
+  },
+  "Suggest as you type": {
+    "ko": "입력할 때 제안 표시",
+    "en": "Suggest as you type"
+  },
+  "Hide unused agent input": {
+    "ko": "사용하지 않는 에이전트 입력 숨기기",
+    "en": "Hide unused agent input"
+  },
+  "While using Composer": {
+    "ko": "Composer 사용 중",
+    "en": "While using Composer"
+  },
+  "Remote Nav is off. The PC keybindings above apply.": {
+    "ko": "Remote Nav가 꺼져 있습니다. 위의 PC 키바인딩을 사용합니다.",
+    "en": "Remote Nav is off. The PC keybindings above apply."
+  },
+  "Automatic keyboard detection requires the updated Android app.": {
+    "ko": "자동 키보드 감지에는 최신 Android 앱이 필요합니다.",
+    "en": "Automatic keyboard detection requires the updated Android app."
+  },
+  "No physical keyboard connected.": {
+    "ko": "연결된 물리 키보드가 없습니다.",
+    "en": "No physical keyboard connected."
+  },
+  "Exited remote control.": {
+    "ko": "Remote 제어를 종료했습니다.",
+    "en": "Exited remote control."
+  },
+  "Disconnected.": {
+    "ko": "연결 끊김.",
+    "en": "Disconnected."
+  },
+  "Reconnecting...": {
+    "ko": "다시 연결하는 중...",
+    "en": "Reconnecting..."
+  },
+  "Host has control.": {
+    "ko": "호스트가 제어 중입니다.",
+    "en": "Host has control."
+  },
+  "Host has control. Connect again to request control.": {
+    "ko": "호스트가 제어 중입니다. 제어를 요청하려면 다시 연결하세요.",
+    "en": "Host has control. Connect again to request control."
+  },
+  "Not connected.": {
+    "ko": "연결되지 않음.",
+    "en": "Not connected."
+  },
+  "Applied for now; device storage is unavailable.": {
+    "ko": "현재 화면에 적용했습니다. 기기 저장소를 사용할 수 없습니다.",
+    "en": "Applied for now; device storage is unavailable."
+  },
+  "탐색 목록이 없습니다. 연결 후 다시 조회하세요.": {
+    "ko": "탐색 목록이 없습니다. 연결 후 다시 조회하세요.",
+    "en": "Navigation is unavailable. Connect and try again."
+  },
+  "워크스페이스 제외와 소속 터미널 pane 제외를 일치시켜 두 목록을 함께 변경하세요.": {
+    "ko": "워크스페이스 제외와 소속 터미널 pane 제외를 일치시켜 두 목록을 함께 변경하세요.",
+    "en": "Update workspace and member terminal pane exclusions together so both lists match."
+  },
+  "Saved on this device by agent.": {
+    "ko": "에이전트가 이 기기에 저장했습니다.",
+    "en": "Saved on this device by agent."
+  },
+  "Refreshing…": {
+    "ko": "갱신 중…",
+    "en": "Refreshing…"
+  },
+  "Connect to read PC memos.": {
+    "ko": "PC 메모를 읽으려면 연결하세요.",
+    "en": "Connect to read PC memos."
+  },
+  "Connection changed. Reopen memos.": {
+    "ko": "연결이 바뀌었습니다. 메모를 다시 여세요.",
+    "en": "Connection changed. Reopen memos."
+  },
+  "Saving…": {
+    "ko": "저장 중…",
+    "en": "Saving…"
+  },
+  "Save": {
+    "ko": "저장",
+    "en": "Save"
+  },
+  "Connect before saving": {
+    "ko": "저장하려면 먼저 연결하세요",
+    "en": "Connect before saving"
+  },
+  "Saving to PC": {
+    "ko": "PC에 저장 중",
+    "en": "Saving to PC"
+  },
+  "No unsaved changes": {
+    "ko": "저장하지 않은 변경 없음",
+    "en": "No unsaved changes"
+  },
+  "Save to PC": {
+    "ko": "PC에 저장",
+    "en": "Save to PC"
+  },
+  "Connect before reloading": {
+    "ko": "다시 불러오려면 먼저 연결하세요",
+    "en": "Connect before reloading"
+  },
+  "Wait for the save to finish": {
+    "ko": "저장이 끝날 때까지 기다리세요",
+    "en": "Wait for the save to finish"
+  },
+  "Reload from PC": {
+    "ko": "PC에서 다시 불러오기",
+    "en": "Reload from PC"
+  },
+  "No PC memos. Add a Memo view on the PC first.": {
+    "ko": "PC 메모가 없습니다. PC에서 먼저 메모 뷰를 추가하세요.",
+    "en": "No PC memos. Add a Memo view on the PC first."
+  },
+  "Loading…": {
+    "ko": "불러오는 중…",
+    "en": "Loading…"
+  },
+  "Unsaved changes · shared with PC": {
+    "ko": "저장하지 않은 변경 · PC와 공유됨",
+    "en": "Unsaved changes · shared with PC"
+  },
+  "Saved on PC": {
+    "ko": "PC에 저장됨",
+    "en": "Saved on PC"
+  },
+  "Reconnect before saving your draft.": {
+    "ko": "초안을 저장하려면 다시 연결하세요.",
+    "en": "Reconnect before saving your draft."
+  },
+  "Loading PC memos…": {
+    "ko": "PC 메모 불러오는 중…",
+    "en": "Loading PC memos…"
+  },
+  "Discard your draft and reload the PC memo?": {
+    "ko": "초안을 버리고 PC 메모를 다시 불러올까요?",
+    "en": "Discard your draft and reload the PC memo?"
+  },
+  "Click again to close pane": {
+    "ko": "한 번 더 눌러 Pane 닫기",
+    "en": "Click again to close pane"
+  },
+  "Show pane in workspace list": {
+    "ko": "워크스페이스 목록에 Pane 표시",
+    "en": "Show pane in workspace list"
+  },
+  "Hide pane from workspace list": {
+    "ko": "워크스페이스 목록에서 Pane 숨기기",
+    "en": "Hide pane from workspace list"
+  },
+  "Show pane": {
+    "ko": "Pane 표시",
+    "en": "Show pane"
+  },
+  "Hide pane": {
+    "ko": "Pane 숨기기",
+    "en": "Hide pane"
+  },
+  "Connected PC update": {
+    "ko": "연결된 PC 업데이트",
+    "en": "Connected PC update"
+  },
+  "Update complete": {
+    "ko": "업데이트 완료",
+    "en": "Update complete"
+  },
+  "Waiting for Laymux to restart": {
+    "ko": "Laymux 재시작을 기다리는 중",
+    "en": "Waiting for Laymux to restart"
+  },
+  "Reconnected and verified the new version.": {
+    "ko": "다시 연결하고 새 버전을 확인했습니다.",
+    "en": "Reconnected and verified the new version."
+  },
+  "The app on your PC is restarting. Reconnecting automatically…": {
+    "ko": "PC 앱이 다시 시작 중입니다. 자동으로 다시 연결합니다…",
+    "en": "The app on your PC is restarting. Reconnecting automatically…"
+  },
+  "Connection interrupted. Checking the PC's update status…": {
+    "ko": "연결이 끊겼습니다. PC 업데이트 상태 확인 중…",
+    "en": "Connection interrupted. Checking the PC's update status…"
+  },
+  "The PC has not reconnected yet. Check that Laymux is running.": {
+    "ko": "PC가 아직 다시 연결되지 않았습니다. Laymux가 실행 중인지 확인하세요.",
+    "en": "The PC has not reconnected yet. Check that Laymux is running."
+  },
+  "Retry connection": {
+    "ko": "다시 연결",
+    "en": "Retry connection"
+  },
+  "Take control of the PC to install an update.": {
+    "ko": "업데이트를 설치하려면 PC 제어권을 얻으세요.",
+    "en": "Take control of the PC to install an update."
+  },
+  "Restore": {
+    "ko": "복원",
+    "en": "Restore"
+  },
+  "Close workspace": {
+    "ko": "워크스페이스 닫기",
+    "en": "Close workspace"
+  },
+  "The last visible workspace cannot be closed": {
+    "ko": "마지막으로 보이는 워크스페이스는 닫을 수 없습니다",
+    "en": "The last visible workspace cannot be closed"
+  },
+  "Hide workspace": {
+    "ko": "워크스페이스 숨기기",
+    "en": "Hide workspace"
+  },
+  "The last visible workspace cannot be hidden": {
+    "ko": "마지막으로 보이는 워크스페이스는 숨길 수 없습니다",
+    "en": "The last visible workspace cannot be hidden"
+  },
+  "Workspace name": {
+    "ko": "워크스페이스 이름",
+    "en": "Workspace name"
+  },
+  "Template name": {
+    "ko": "템플릿 이름",
+    "en": "Template name"
+  },
+  "Enter a template name.": {
+    "ko": "템플릿 이름을 입력하세요.",
+    "en": "Enter a template name."
+  },
+  "Enter a workspace name.": {
+    "ko": "워크스페이스 이름을 입력하세요.",
+    "en": "Enter a workspace name."
+  },
+  "· 검사 중": {
+    "ko": "· 검사 중",
+    "en": "· Inspecting"
+  },
+  "워크트리 목록을 읽고 있습니다…": {
+    "ko": "워크트리 목록을 읽고 있습니다…",
+    "en": "Loading worktrees…"
+  },
+  " · 기본": {
+    "ko": " · 기본",
+    "en": " · Main"
+  },
+  "목록 갱신 실패": {
+    "ko": "목록 갱신 실패",
+    "en": "Could not refresh the list"
+  },
+  "검사가 끝난 정리 후보부터 표시합니다.": {
+    "ko": "검사가 끝난 정리 후보부터 표시합니다.",
+    "en": "Cleanup candidates appear as inspection completes."
+  },
+  "현재 정리 후보가 없습니다.": {
+    "ko": "현재 정리 후보가 없습니다.",
+    "en": "No cleanup candidates."
+  },
+  "상세 닫기": {
+    "ko": "상세 닫기",
+    "en": "Close details"
+  },
+  "경로 복사": {
+    "ko": "경로 복사",
+    "en": "Copy path"
+  },
+  "최신 상태를 검사하고 있습니다…": {
+    "ko": "최신 상태를 검사하고 있습니다…",
+    "en": "Inspecting the latest state…"
+  },
+  "추적 브랜치 없음": {
+    "ko": "추적 브랜치 없음",
+    "en": "No upstream branch"
+  },
+  "저장된 세션": {
+    "ko": "저장된 세션",
+    "en": "Saved session"
+  },
+  "연결 대기": {
+    "ko": "연결 대기",
+    "en": "Awaiting connection"
+  },
+  "실행 중": {
+    "ko": "실행 중",
+    "en": "Running"
+  },
+  "터미널": {
+    "ko": "터미널",
+    "en": "Terminal"
+  },
+  "이 터미널은 이동할 pane에 연결되어 있지 않습니다": {
+    "ko": "이 터미널은 이동할 pane에 연결되어 있지 않습니다",
+    "en": "This terminal has no pane to navigate to"
+  },
+  "미추적": {
+    "ko": "미추적",
+    "en": "Untracked"
+  },
+  "파일 뷰어에서 내용을 확인합니다": {
+    "ko": "파일 뷰어에서 내용을 확인합니다",
+    "en": "Inspect contents in the file viewer"
+  },
+  "파일 뷰어에 다시 연결해 주세요": {
+    "ko": "파일 뷰어에 다시 연결해 주세요",
+    "en": "Reconnect to the file viewer"
+  },
+  "정리 후보는 파일 변경과 laymux 사용 여부 기준입니다. 병합 여부와 로컬 커밋은 별도로 확인하세요.": {
+    "ko": "정리 후보는 파일 변경과 laymux 사용 여부 기준입니다. 병합 여부와 로컬 커밋은 별도로 확인하세요.",
+    "en": "Cleanup candidates are based on file changes and laymux usage. Check merges and local commits separately."
+  },
+  "제거 중…": {
+    "ko": "제거 중…",
+    "en": "Removing…"
+  },
+  "제거 확인": {
+    "ko": "제거 확인",
+    "en": "Confirm removal"
+  },
+  "워크트리 제거": {
+    "ko": "워크트리 제거",
+    "en": "Remove worktree"
+  },
+  "제거할 경로를 확인합니다": {
+    "ko": "제거할 경로를 확인합니다",
+    "en": "Review the path to remove"
+  },
+  "{0} MiB": {
+    "ko": "{0} MiB",
+    "en": "{0} MiB"
+  },
+  "{0} exceeds the {1} attachment limit.": {
+    "ko": "{0}이(가) 첨부 한도 {1}을(를) 초과합니다.",
+    "en": "{0} exceeds the {1} attachment limit."
+  },
+  "Workspace template saved. Reopen the template list to refresh it: {0}": {
+    "ko": "워크스페이스 템플릿을 저장했습니다. 템플릿 목록을 다시 열어 갱신하세요: {0}",
+    "en": "Workspace template saved. Reopen the template list to refresh it: {0}"
+  },
+  "{0} · Pane {1}": {
+    "ko": "{0} · Pane {1}",
+    "en": "{0} · Pane {1}"
+  },
+  "Remote request failed ({0})": {
+    "ko": "Remote 요청 실패 ({0})",
+    "en": "Remote request failed ({0})"
+  },
+  "Development build {0}; self-update is disabled.": {
+    "ko": "개발 빌드 {0}; 자체 업데이트가 비활성화되어 있습니다.",
+    "en": "Development build {0}; self-update is disabled."
+  },
+  "Downloading {0}{1}": {
+    "ko": "{0} 다운로드 중{1}",
+    "en": "Downloading {0}{1}"
+  },
+  "Laymux {0} is available (current {1}).{2}": {
+    "ko": "Laymux {0} 사용 가능 (현재 {1}).{2}",
+    "en": "Laymux {0} is available (current {1}).{2}"
+  },
+  "Laymux {0} is up to date.{1}": {
+    "ko": "최신 Laymux {0}입니다.{1}",
+    "en": "Laymux {0} is up to date.{1}"
+  },
+  "Copied #{0} link": {
+    "ko": "#{0} 링크를 복사했습니다",
+    "en": "Copied #{0} link"
+  },
+  "Copy failed: {0}": {
+    "ko": "복사 실패: {0}",
+    "en": "Copy failed: {0}"
+  },
+  "Copied {0}": {
+    "ko": "{0} 복사됨",
+    "en": "Copied {0}"
+  },
+  "Binary or unsupported file · {0}": {
+    "ko": "바이너리 또는 지원하지 않는 파일 · {0}",
+    "en": "Binary or unsupported file · {0}"
+  },
+  "Archive ({0}) · {1} {2} · open this file in the desktop viewer to browse it.": {
+    "ko": "압축 파일 ({0}) · {1} {2} · 탐색하려면 데스크톱 뷰어에서 여세요.",
+    "en": "Archive ({0}) · {1} {2} · open this file in the desktop viewer to browse it."
+  },
+  "This app version cannot {0} files. Update the app.": {
+    "ko": "이 앱 버전은 파일 {0}을(를) 지원하지 않습니다. 앱을 업데이트하세요.",
+    "en": "This app version cannot {0} files. Update the app."
+  },
+  "Opening {0}…": {
+    "ko": "{0} 여는 중…",
+    "en": "Opening {0}…"
+  },
+  "Saved {0} to Downloads.": {
+    "ko": "{0}을(를) 다운로드 폴더에 저장했습니다.",
+    "en": "Saved {0} to Downloads."
+  },
+  "Pane navigation failed: {0}": {
+    "ko": "Pane 탐색 실패: {0}",
+    "en": "Pane navigation failed: {0}"
+  },
+  "Resume failed: {0}": {
+    "ko": "재개 실패: {0}",
+    "en": "Resume failed: {0}"
+  },
+  "Connected to {0}": {
+    "ko": "{0}에 연결됨",
+    "en": "Connected to {0}"
+  },
+  "Control returned to the host. {0}": {
+    "ko": "제어권을 호스트에 돌려주었습니다. {0}",
+    "en": "Control returned to the host. {0}"
+  },
+  "Open notifications ({0} unread)": {
+    "ko": "알림 열기 (읽지 않음 {0}개)",
+    "en": "Open notifications ({0} unread)"
+  },
+  "Notifications ({0} unread)": {
+    "ko": "알림 (읽지 않음 {0}개)",
+    "en": "Notifications ({0} unread)"
+  },
+  "Open hidden workspaces ({0})": {
+    "ko": "숨긴 워크스페이스 열기 ({0})",
+    "en": "Open hidden workspaces ({0})"
+  },
+  "Show and open {0}": {
+    "ko": "{0} 표시 후 열기",
+    "en": "Show and open {0}"
+  },
+  "Show {0}": {
+    "ko": "{0} 표시",
+    "en": "Show {0}"
+  },
+  "Manage {0}": {
+    "ko": "{0} 관리",
+    "en": "Manage {0}"
+  },
+  "{0} excluded from pane navigation.": {
+    "ko": "{0}을(를) Pane 탐색에서 제외했습니다.",
+    "en": "{0} excluded from pane navigation."
+  },
+  "{0} included in pane navigation.": {
+    "ko": "{0}을(를) Pane 탐색에 포함했습니다.",
+    "en": "{0} included in pane navigation."
+  },
+  "Open {0}, pane {1}, {2}": {
+    "ko": "{0}, Pane {1}, {2} 열기",
+    "en": "Open {0}, pane {1}, {2}"
+  },
+  "Manage pane {0}": {
+    "ko": "Pane {0} 관리",
+    "en": "Manage pane {0}"
+  },
+  "Navigation failed: {0}": {
+    "ko": "탐색 실패: {0}",
+    "en": "Navigation failed: {0}"
+  },
+  "Workspace {0}": {
+    "ko": "워크스페이스 {0}",
+    "en": "Workspace {0}"
+  },
+  "Clear failed: {0}": {
+    "ko": "지우기 실패: {0}",
+    "en": "Clear failed: {0}"
+  },
+  "Close failed: {0}": {
+    "ko": "닫기 실패: {0}",
+    "en": "Close failed: {0}"
+  },
+  "Stack failed: {0}": {
+    "ko": "쌓기 실패: {0}",
+    "en": "Stack failed: {0}"
+  },
+  "Terminal text {0}px": {
+    "ko": "터미널 글자 {0}px",
+    "en": "Terminal text {0}px"
+  },
+  "Focus failed: {0}": {
+    "ko": "포커스 실패: {0}",
+    "en": "Focus failed: {0}"
+  },
+  "Refresh failed: {0}": {
+    "ko": "갱신 실패: {0}",
+    "en": "Refresh failed: {0}"
+  },
+  "Resize before output attach failed: {0}": {
+    "ko": "출력 연결 전 크기 조절 실패: {0}",
+    "en": "Resize before output attach failed: {0}"
+  },
+  "Output protocol error: {0}": {
+    "ko": "출력 프로토콜 오류: {0}",
+    "en": "Output protocol error: {0}"
+  },
+  "Reconnecting… {0}": {
+    "ko": "다시 연결하는 중… {0}",
+    "en": "Reconnecting… {0}"
+  },
+  "공유받은 파일 {0}개": {
+    "ko": "공유받은 파일 {0}개",
+    "en": "{0} shared files"
+  },
+  "첨부 대상: 현재 PC · {0}": {
+    "ko": "첨부 대상: 현재 PC · {0}",
+    "en": "Attach to: current PC · {0}"
+  },
+  "Attaching {0}…": {
+    "ko": "{0} 첨부 중…",
+    "en": "Attaching {0}…"
+  },
+  "Attaching {0} files…": {
+    "ko": "파일 {0}개 첨부 중…",
+    "en": "Attaching {0} files…"
+  },
+  "Attached {0}.": {
+    "ko": "{0}을(를) 첨부했습니다.",
+    "en": "Attached {0}."
+  },
+  "Attached {0} files.": {
+    "ko": "파일 {0}개를 첨부했습니다.",
+    "en": "Attached {0} files."
+  },
+  "Attachment conversion failed; pasted the original text. {0}": {
+    "ko": "첨부 변환 실패; 원문을 붙여넣었습니다. {0}",
+    "en": "Attachment conversion failed; pasted the original text. {0}"
+  },
+  "Paste failed: {0}": {
+    "ko": "붙여넣기 실패: {0}",
+    "en": "Paste failed: {0}"
+  },
+  "Attachment failed: {0}": {
+    "ko": "첨부 실패: {0}",
+    "en": "Attachment failed: {0}"
+  },
+  "Input failed: {0}": {
+    "ko": "입력 실패: {0}",
+    "en": "Input failed: {0}"
+  },
+  "At most {0} custom keys.": {
+    "ko": "사용자 키는 최대 {0}개입니다.",
+    "en": "At most {0} custom keys."
+  },
+  "Label must be 1-{0} characters.": {
+    "ko": "이름은 1~{0}자여야 합니다.",
+    "en": "Label must be 1-{0} characters."
+  },
+  "Sequence must be 1-{0} characters.": {
+    "ko": "시퀀스는 1~{0}자여야 합니다.",
+    "en": "Sequence must be 1-{0} characters."
+  },
+  "Unknown escape \\{0}.": {
+    "ko": "알 수 없는 이스케이프 \\{0}.",
+    "en": "Unknown escape \\{0}."
+  },
+  "{0} — hold to repeat": {
+    "ko": "{0} — 길게 눌러 반복",
+    "en": "{0} — hold to repeat"
+  },
+  "{0} — hold and drag to move": {
+    "ko": "{0} — 길게 누른 채 드래그하여 이동",
+    "en": "{0} — hold and drag to move"
+  },
+  "{0} · Hidden": {
+    "ko": "{0} · 숨김",
+    "en": "{0} · Hidden"
+  },
+  "Place {0}": {
+    "ko": "{0} 배치",
+    "en": "Place {0}"
+  },
+  "Move {0} to start": {
+    "ko": "{0} 맨 앞으로 이동",
+    "en": "Move {0} to start"
+  },
+  "Move {0} left": {
+    "ko": "{0} 왼쪽으로 이동",
+    "en": "Move {0} left"
+  },
+  "Move {0} right": {
+    "ko": "{0} 오른쪽으로 이동",
+    "en": "Move {0} right"
+  },
+  "Move {0} to end": {
+    "ko": "{0} 맨 뒤로 이동",
+    "en": "Move {0} to end"
+  },
+  "Delete custom key {0}": {
+    "ko": "사용자 키 {0} 삭제",
+    "en": "Delete custom key {0}"
+  },
+  "Add keys · {0} available": {
+    "ko": "키 추가 · {0}개 사용 가능",
+    "en": "Add keys · {0} available"
+  },
+  "Insert {0} escape": {
+    "ko": "{0} 이스케이프 삽입",
+    "en": "Insert {0} escape"
+  },
+  "{0} lines to hide": {
+    "ko": "{0} 숨길 줄 수",
+    "en": "{0} lines to hide"
+  },
+  "{0} input lines to hide": {
+    "ko": "{0} 숨길 입력 줄 수",
+    "en": "{0} input lines to hide"
+  },
+  "Remote Nav uses {0} + arrows. PC Alt / Ctrl+Alt arrows above are overridden. Change this in Input settings.": {
+    "ko": "Remote Nav는 {0} + 방향키를 사용합니다. 위의 PC Alt / Ctrl+Alt 방향키를 대체합니다. 입력 설정에서 바꾸세요.",
+    "en": "Remote Nav uses {0} + arrows. PC Alt / Ctrl+Alt arrows above are overridden. Change this in Input settings."
+  },
+  "Fit failed: {0}": {
+    "ko": "맞춤 실패: {0}",
+    "en": "Fit failed: {0}"
+  },
+  "Resize failed: {0}": {
+    "ko": "크기 조절 실패: {0}",
+    "en": "Resize failed: {0}"
+  },
+  "Mark read failed: {0}": {
+    "ko": "읽음 처리 실패: {0}",
+    "en": "Mark read failed: {0}"
+  },
+  "{0} The text was kept in the composer.": {
+    "ko": "{0} 텍스트는 Composer에 남겨 두었습니다.",
+    "en": "{0} The text was kept in the composer."
+  },
+  "Could not copy: {0}": {
+    "ko": "복사할 수 없음: {0}",
+    "en": "Could not copy: {0}"
+  },
+  "Closing {0}…": {
+    "ko": "{0} 닫는 중…",
+    "en": "Closing {0}…"
+  },
+  "변경 {0} · 미추적 {1} · 무시 {2}": {
+    "ko": "변경 {0} · 미추적 {1} · 무시 {2}",
+    "en": "Changed {0} · Untracked {1} · Ignored {2}"
+  },
+  "전체 {0}": {
+    "ko": "전체 {0}",
+    "en": "All {0}"
+  },
+  "정리 후보 {0}": {
+    "ko": "정리 후보 {0}",
+    "en": "Cleanup candidates {0}"
+  },
+  "내용 검사 중 · {0}/{1}": {
+    "ko": "내용 검사 중 · {0}/{1}",
+    "en": "Inspecting contents · {0}/{1}"
+  },
+  "검사 실패: {0}": {
+    "ko": "검사 실패: {0}",
+    "en": "Inspection failed: {0}"
+  },
+  "{0} · 앞섬 {1} / 뒤처짐 {2}": {
+    "ko": "{0} · 앞섬 {1} / 뒤처짐 {2}",
+    "en": "{0} · Ahead {1} / Behind {2}"
+  },
+  "보존: {0}": {
+    "ko": "보존: {0}",
+    "en": "Keep: {0}"
+  },
+  "변경 파일 목록 ({0}{1})": {
+    "ko": "변경 파일 목록 ({0}{1})",
+    "en": "Changed files ({0}{1})"
+  },
+  "{0} 폴더를 제거합니다. 브랜치는 유지됩니다.": {
+    "ko": "{0} 폴더를 제거합니다. 브랜치는 유지됩니다.",
+    "en": "Remove folder {0}. The branch will be kept."
+  },
+  "제거 완료: {0}": {
+    "ko": "제거 완료: {0}",
+    "en": "Removed: {0}"
+  },
+  "Laymux Remote": {
+    "ko": "Laymux 리모트",
+    "en": "Laymux Remote"
+  },
+  "Copy pane identifier (lx:pane:...)": {
+    "ko": "Pane 식별자 복사 (lx:pane:...)",
+    "en": "Copy pane identifier (lx:pane:...)"
+  },
+  "Copy pane identifier": {
+    "ko": "Pane 식별자 복사",
+    "en": "Copy pane identifier"
+  },
+  "Enter the remote token, then connect.": {
+    "ko": "원격 접속 토큰을 입력한 뒤 연결하세요.",
+    "en": "Enter the remote token, then connect."
+  },
+  "GitHub issues and pull requests": {
+    "ko": "GitHub 이슈와 풀 리퀘스트",
+    "en": "GitHub issues and pull requests"
+  },
+  "Open GitHub issues and pull requests": {
+    "ko": "GitHub 이슈와 풀 리퀘스트 열기",
+    "en": "Open GitHub issues and pull requests"
+  },
+  "Shared memos": {
+    "ko": "공유 메모",
+    "en": "Shared memos"
+  },
+  "Open shared memos": {
+    "ko": "공유 메모 열기",
+    "en": "Open shared memos"
+  },
+  "Open worktrees": {
+    "ko": "워크트리 열기",
+    "en": "Open worktrees"
+  },
+  "PC": {
+    "ko": "PC",
+    "en": "PC"
+  },
+  "Status widgets": {
+    "ko": "상태 위젯",
+    "en": "Status widgets"
+  },
+  "Remote navigation": {
+    "ko": "리모트 탐색",
+    "en": "Remote navigation"
+  },
+  "Open hidden workspaces (0)": {
+    "ko": "숨긴 워크스페이스 열기 (0)",
+    "en": "Open hidden workspaces (0)"
+  },
+  "Open settings": {
+    "ko": "설정 열기",
+    "en": "Open settings"
+  },
+  "Close and return to workspace navigation": {
+    "ko": "닫고 워크스페이스 탐색으로 돌아가기",
+    "en": "Close and return to workspace navigation"
+  },
+  "Dock terminals": {
+    "ko": "독 터미널",
+    "en": "Dock terminals"
+  },
+  "Mark read": {
+    "ko": "읽음으로 표시",
+    "en": "Mark read"
+  },
+  "Clear": {
+    "ko": "지우기",
+    "en": "Clear"
+  },
+  "Choose workspace layout": {
+    "ko": "워크스페이스 레이아웃 선택",
+    "en": "Choose workspace layout"
+  },
+  "Remote connection": {
+    "ko": "원격 연결",
+    "en": "Remote connection"
+  },
+  "Token": {
+    "ko": "토큰",
+    "en": "Token"
+  },
+  "Name": {
+    "ko": "이름",
+    "en": "Name"
+  },
+  "Connect": {
+    "ko": "연결",
+    "en": "Connect"
+  },
+  "Exit": {
+    "ko": "나가기",
+    "en": "Exit"
+  },
+  "Refresh": {
+    "ko": "새로고침",
+    "en": "Refresh"
+  },
+  "Customize this device.": {
+    "ko": "이 기기를 설정합니다.",
+    "en": "Customize this device."
+  },
+  "Changes are saved automatically.": {
+    "ko": "변경 사항은 자동으로 저장됩니다.",
+    "en": "Changes are saved automatically."
+  },
+  "Settings sections": {
+    "ko": "설정 분류",
+    "en": "Settings sections"
+  },
+  "Input": {
+    "ko": "입력",
+    "en": "Input"
+  },
+  "Floating": {
+    "ko": "플로팅",
+    "en": "Floating"
+  },
+  "Display": {
+    "ko": "화면",
+    "en": "Display"
+  },
+  "Panels": {
+    "ko": "패널",
+    "en": "Panels"
+  },
+  "App": {
+    "ko": "앱",
+    "en": "App"
+  },
+  "Physical keyboard": {
+    "ko": "물리 키보드",
+    "en": "Physical keyboard"
+  },
+  "Use Remote Nav shortcuts": {
+    "ko": "리모트 탐색 단축키 사용",
+    "en": "Use Remote Nav shortcuts"
+  },
+  "Nav shortcut": {
+    "ko": "탐색 보조키",
+    "en": "Nav shortcut"
+  },
+  "↑ / ↓: previous / next pane. ← / →: recent / oldest unread alert. Replaces PC Alt and Ctrl+Alt arrow shortcuts while enabled, regardless of keyboard detection.": {
+    "ko": "↑ / ↓: 이전 / 다음 Pane. ← / →: 최근 / 가장 오래된 읽지 않은 알림. 키보드 감지 여부와 관계없이 이 기능을 켜면 PC의 Alt 및 Ctrl+Alt 방향키 단축키를 대신합니다.",
+    "en": "↑ / ↓: previous / next pane. ← / →: recent / oldest unread alert. Replaces PC Alt and Ctrl+Alt arrow shortcuts while enabled, regardless of keyboard detection."
+  },
+  "Keyboard shortcuts": {
+    "ko": "키보드 단축키",
+    "en": "Keyboard shortcuts"
+  },
+  "For a physical keyboard. Rebind them in PC Settings → Keybindings.": {
+    "ko": "물리 키보드용입니다. 키 변경은 PC 설정 → 키 바인딩에서 합니다.",
+    "en": "For a physical keyboard. Rebind them in PC Settings → Keybindings."
+  },
+  "Input bar": {
+    "ko": "입력 바",
+    "en": "Input bar"
+  },
+  "Tap a key to change its position. Changes apply to this device.": {
+    "ko": "키를 눌러 위치를 변경합니다. 변경 사항은 이 기기에 적용됩니다.",
+    "en": "Tap a key to change its position. Changes apply to this device."
+  },
+  "Button sizes": {
+    "ko": "버튼 크기",
+    "en": "Button sizes"
+  },
+  "Main button size": {
+    "ko": "메인 버튼 크기",
+    "en": "Main button size"
+  },
+  "Decrease Main button size": {
+    "ko": "메인 버튼 크기 줄이기",
+    "en": "Decrease Main button size"
+  },
+  "Increase Main button size": {
+    "ko": "메인 버튼 크기 늘리기",
+    "en": "Increase Main button size"
+  },
+  "Keys button size": {
+    "ko": "확장 키 버튼 크기",
+    "en": "Keys button size"
+  },
+  "Decrease Keys button size": {
+    "ko": "확장 키 버튼 크기 줄이기",
+    "en": "Decrease Keys button size"
+  },
+  "Increase Keys button size": {
+    "ko": "확장 키 버튼 크기 늘리기",
+    "en": "Increase Keys button size"
+  },
+  "Reset button sizes": {
+    "ko": "버튼 크기 기본값 복원",
+    "en": "Reset button sizes"
+  },
+  "Hide floating controls with physical keyboard": {
+    "ko": "물리 키보드 연결 시 플로팅 컨트롤 숨기기",
+    "en": "Hide floating controls with physical keyboard"
+  },
+  "Hold the center of a pad, then drag to move. Drag other buttons to move.": {
+    "ko": "패드 중앙을 길게 누른 뒤 끌어 이동합니다. 다른 버튼은 바로 끌어 이동합니다.",
+    "en": "Hold the center of a pad, then drag to move. Drag other buttons to move."
+  },
+  "Appearance": {
+    "ko": "모양",
+    "en": "Appearance"
+  },
+  "Composer text": {
+    "ko": "Composer 글자",
+    "en": "Composer text"
+  },
+  "Input and suggestions": {
+    "ko": "입력과 추천 목록",
+    "en": "Input and suggestions"
+  },
+  "px": {
+    "ko": "px",
+    "en": "px"
+  },
+  "Composer opacity": {
+    "ko": "Composer 불투명도",
+    "en": "Composer opacity"
+  },
+  "Composer idle": {
+    "ko": "Composer 대기",
+    "en": "Composer idle"
+  },
+  "Visible without focus or activity": {
+    "ko": "포커스나 입력 동작이 없을 때",
+    "en": "Visible without focus or activity"
+  },
+  "Composer focused": {
+    "ko": "Composer 포커스",
+    "en": "Composer focused"
+  },
+  "Empty editor with keyboard focus": {
+    "ko": "빈 편집기에 키보드 포커스가 있을 때",
+    "en": "Empty editor with keyboard focus"
+  },
+  "Composer active": {
+    "ko": "Composer 사용 중",
+    "en": "Composer active"
+  },
+  "Draft, suggestion, IME, or send activity": {
+    "ko": "초안·추천·IME 조합·전송 동작이 있을 때",
+    "en": "Draft, suggestion, IME, or send activity"
+  },
+  "Behavior": {
+    "ko": "동작",
+    "en": "Behavior"
+  },
+  "Recall and agent-output options for this device.": {
+    "ko": "이 기기의 입력 기록과 에이전트 출력 옵션입니다.",
+    "en": "Recall and agent-output options for this device."
+  },
+  "Text, spacing and scrolling for this screen.": {
+    "ko": "이 화면의 글자·간격·스크롤을 조절합니다.",
+    "en": "Text, spacing and scrolling for this screen."
+  },
+  "Text size": {
+    "ko": "글자 크기",
+    "en": "Text size"
+  },
+  "Terminal text": {
+    "ko": "터미널 글자",
+    "en": "Terminal text"
+  },
+  "Remote screen cells": {
+    "ko": "리모트 터미널 화면",
+    "en": "Remote screen cells"
+  },
+  "Workspace menu": {
+    "ko": "워크스페이스 메뉴",
+    "en": "Workspace menu"
+  },
+  "Menu text": {
+    "ko": "메뉴 글자",
+    "en": "Menu text"
+  },
+  "This navigation drawer": {
+    "ko": "이 탐색 메뉴의 글자 크기",
+    "en": "This navigation drawer"
+  },
+  "Keep beside the terminal when wide enough": {
+    "ko": "화면이 충분히 넓으면 터미널 옆에 유지",
+    "en": "Keep beside the terminal when wide enough"
+  },
+  "Workspace menu width": {
+    "ko": "워크스페이스 메뉴 너비",
+    "en": "Workspace menu width"
+  },
+  "Pinned and floating menu": {
+    "ko": "고정·떠 있는 메뉴에 적용",
+    "en": "Pinned and floating menu"
+  },
+  "Pin width cutoff": {
+    "ko": "메뉴 고정 기준 너비",
+    "en": "Pin width cutoff"
+  },
+  "At or below this width, use the floating menu": {
+    "ko": "이 너비 이하에서는 떠 있는 메뉴 사용",
+    "en": "At or below this width, use the floating menu"
+  },
+  "History and scrolling": {
+    "ko": "기록과 스크롤",
+    "en": "History and scrolling"
+  },
+  "Initial history": {
+    "ko": "처음 불러올 출력 기록",
+    "en": "Initial history"
+  },
+  "Checkpoint budget per attach": {
+    "ko": "접속할 때 불러올 이전 출력 용량",
+    "en": "Checkpoint budget per attach"
+  },
+  "KiB": {
+    "ko": "KiB",
+    "en": "KiB"
+  },
+  "Wheel scroll": {
+    "ko": "휠 스크롤",
+    "en": "Wheel scroll"
+  },
+  "Pointer wheel speed": {
+    "ko": "마우스 휠 속도",
+    "en": "Pointer wheel speed"
+  },
+  "Fast wheel scroll": {
+    "ko": "빠른 휠 스크롤",
+    "en": "Fast wheel scroll"
+  },
+  "Alt + wheel speed": {
+    "ko": "Alt + 휠 속도",
+    "en": "Alt + wheel speed"
+  },
+  "One-finger scroll": {
+    "ko": "한 손가락 스크롤",
+    "en": "One-finger scroll"
+  },
+  "Drag scrollback speed": {
+    "ko": "출력 기록을 끌어 스크롤하는 속도",
+    "en": "Drag scrollback speed"
+  },
+  "Two-finger scroll": {
+    "ko": "두 손가락 스크롤",
+    "en": "Two-finger scroll"
+  },
+  "Faster two-finger swipe": {
+    "ko": "두 손가락 스와이프 속도",
+    "en": "Faster two-finger swipe"
+  },
+  "Selection and widgets": {
+    "ko": "선택과 위젯",
+    "en": "Selection and widgets"
+  },
+  "Selection handle": {
+    "ko": "선택 핸들",
+    "en": "Selection handle"
+  },
+  "Touch drag handle size": {
+    "ko": "터치로 선택 범위를 조절하는 핸들 크기",
+    "en": "Touch drag handle size"
+  },
+  "Widget bar": {
+    "ko": "위젯 바",
+    "en": "Widget bar"
+  },
+  "Row under the header": {
+    "ko": "헤더 아래 위젯 행",
+    "en": "Row under the header"
+  },
+  "Panels and header icons": {
+    "ko": "패널과 헤더 아이콘",
+    "en": "Panels and header icons"
+  },
+  "Choose your tools and how to open them.": {
+    "ko": "사용할 도구와 여는 방법을 선택합니다.",
+    "en": "Choose your tools and how to open them."
+  },
+  "Tool controls at bottom": {
+    "ko": "도구 컨트롤을 하단에 표시",
+    "en": "Tool controls at bottom"
+  },
+  "Memo, GitHub, Worktrees and Files · turn off for top controls": {
+    "ko": "메모·GitHub·워크트리·파일에 적용 · 끄면 상단에 표시",
+    "en": "Memo, GitHub, Worktrees and Files · turn off for top controls"
+  },
+  "Header icons": {
+    "ko": "헤더 아이콘",
+    "en": "Header icons"
+  },
+  "Saved on this device. Hidden tools are skipped when cycling; the selected edge shortcut still opens them.": {
+    "ko": "이 기기에 저장했습니다. 숨긴 도구는 순환에서 건너뛰지만 선택한 가장자리 단축 동작으로는 열 수 있습니다.",
+    "en": "Saved on this device. Hidden tools are skipped when cycling; the selected edge shortcut still opens them."
+  },
+  "Swipe gestures": {
+    "ko": "스와이프 동작",
+    "en": "Swipe gestures"
+  },
+  "Swipe to open": {
+    "ko": "스와이프로 열기",
+    "en": "Swipe to open"
+  },
+  "Left: workspaces · Right: selected panel": {
+    "ko": "왼쪽 가장자리: 워크스페이스 · 오른쪽 가장자리: 선택한 패널",
+    "en": "Left: workspaces · Right: selected panel"
+  },
+  "Right swipe opens": {
+    "ko": "오른쪽 가장자리 패널",
+    "en": "Right swipe opens"
+  },
+  "Choose the panel for the right edge": {
+    "ko": "오른쪽 가장자리에서 열 패널 선택",
+    "en": "Choose the panel for the right edge"
+  },
+  "GitHub": {
+    "ko": "GitHub",
+    "en": "GitHub"
+  },
+  "Swipe to close": {
+    "ko": "스와이프로 닫기",
+    "en": "Swipe to close"
+  },
+  "Workspaces ← · Tools → only in Close panel mode": {
+    "ko": "워크스페이스 ← · 도구 → (‘패널 닫기’ 모드에서만)",
+    "en": "Workspaces ← · Tools → only in Close panel mode"
+  },
+  "Inside tools: swipe right": {
+    "ko": "도구 안에서 오른쪽으로 스와이프",
+    "en": "Inside tools: swipe right"
+  },
+  "Left always cycles to the next visible tool": {
+    "ko": "왼쪽 스와이프는 항상 다음 표시 도구로 이동",
+    "en": "Left always cycles to the next visible tool"
+  },
+  "Issues, then close panel": {
+    "ko": "이슈로 이동한 뒤 패널 닫기",
+    "en": "Issues, then close panel"
+  },
+  "Previous tool": {
+    "ko": "이전 도구",
+    "en": "Previous tool"
+  },
+  "Cycle: Issues → PRs → Files → Worktrees → Memo. Swipe the header, hint, or list; text editors and file previews keep their own gestures.": {
+    "ko": "순환: 이슈 → PR → 파일 → 워크트리 → 메모. 헤더·안내·목록에서 스와이프하세요. 텍스트 편집기와 파일 미리보기는 자체 제스처를 유지합니다.",
+    "en": "Cycle: Issues → PRs → Files → Worktrees → Memo. Swipe the header, hint, or list; text editors and file previews keep their own gestures."
+  },
+  "Laymux update": {
+    "ko": "Laymux 업데이트",
+    "en": "Laymux update"
+  },
+  "Checking PC update status...": {
+    "ko": "PC 업데이트 상태 확인 중...",
+    "en": "Checking PC update status..."
+  },
+  "Open update": {
+    "ko": "업데이트 열기",
+    "en": "Open update"
+  },
+  "Install this app": {
+    "ko": "이 앱 설치",
+    "en": "Install this app"
+  },
+  "Install": {
+    "ko": "설치",
+    "en": "Install"
+  },
+  "Install PWA": {
+    "ko": "PWA 설치",
+    "en": "Install PWA"
+  },
+  "iOS installs from the share sheet: Share → “Add to Home Screen”.": {
+    "ko": "iOS에서는 공유 메뉴에서 설치합니다: 공유 → ‘홈 화면에 추가’.",
+    "en": "iOS installs from the share sheet: Share → “Add to Home Screen”."
+  },
+  "Open connection": {
+    "ko": "연결 열기",
+    "en": "Open connection"
+  },
+  "Terminal output": {
+    "ko": "터미널 출력",
+    "en": "Terminal output"
+  },
+  "Scroll to bottom": {
+    "ko": "맨 아래로 스크롤",
+    "en": "Scroll to bottom"
+  },
+  "Terminal input composer": {
+    "ko": "터미널 입력 Composer",
+    "en": "Terminal input composer"
+  },
+  "Recent terminal input": {
+    "ko": "최근 터미널 입력",
+    "en": "Recent terminal input"
+  },
+  "Terminal input suggestions": {
+    "ko": "터미널 입력 추천",
+    "en": "Terminal input suggestions"
+  },
+  "Compose terminal input": {
+    "ko": "터미널 입력 작성",
+    "en": "Compose terminal input"
+  },
+  "Special keys": {
+    "ko": "특수 키",
+    "en": "Special keys"
+  },
+  "Input actions": {
+    "ko": "입력 동작",
+    "en": "Input actions"
+  },
+  "Toggle special-key toolbar": {
+    "ko": "특수 키 도구 모음 전환",
+    "en": "Toggle special-key toolbar"
+  },
+  "Attach image or text file": {
+    "ko": "이미지 또는 텍스트 파일 첨부",
+    "en": "Attach image or text file"
+  },
+  "Send input": {
+    "ko": "입력 전송",
+    "en": "Send input"
+  },
+  "No terminal selected.": {
+    "ko": "선택한 터미널이 없습니다.",
+    "en": "No terminal selected."
+  },
+  "PC memo": {
+    "ko": "PC 메모",
+    "en": "PC memo"
+  },
+  "Reload memo": {
+    "ko": "메모 다시 불러오기",
+    "en": "Reload memo"
+  },
+  "Copy draft": {
+    "ko": "초안 복사",
+    "en": "Copy draft"
+  },
+  "Copy memo": {
+    "ko": "메모 복사",
+    "en": "Copy memo"
+  },
+  "Close memos": {
+    "ko": "메모 닫기",
+    "en": "Close memos"
+  },
+  "Memo content": {
+    "ko": "메모 내용",
+    "en": "Memo content"
+  },
+  "Worktree list": {
+    "ko": "워크트리 목록",
+    "en": "Worktree list"
+  },
+  "전체 0": {
+    "ko": "전체 0",
+    "en": "All 0"
+  },
+  "정리 후보 0": {
+    "ko": "정리 후보 0",
+    "en": "Cleanup candidates 0"
+  },
+  "Refresh worktrees": {
+    "ko": "워크트리 새로고침",
+    "en": "Refresh worktrees"
+  },
+  "Close worktrees": {
+    "ko": "워크트리 닫기",
+    "en": "Close worktrees"
+  },
+  "워크트리 상세": {
+    "ko": "워크트리 상세",
+    "en": "Worktree details"
+  },
+  "GitHub list": {
+    "ko": "GitHub 목록",
+    "en": "GitHub list"
+  },
+  "Issues": {
+    "ko": "이슈",
+    "en": "Issues"
+  },
+  "PRs": {
+    "ko": "PR",
+    "en": "PRs"
+  },
+  "Refresh now": {
+    "ko": "지금 새로고침",
+    "en": "Refresh now"
+  },
+  "Refresh GitHub list": {
+    "ko": "GitHub 목록 새로고침",
+    "en": "Refresh GitHub list"
+  },
+  "Close GitHub view": {
+    "ko": "GitHub 보기 닫기",
+    "en": "Close GitHub view"
+  },
+  "Back to the folder": {
+    "ko": "폴더로 돌아가기",
+    "en": "Back to the folder"
+  },
+  "Zoom out": {
+    "ko": "축소",
+    "en": "Zoom out"
+  },
+  "Zoom in": {
+    "ko": "확대",
+    "en": "Zoom in"
+  },
+  "Reset zoom": {
+    "ko": "확대/축소 초기화",
+    "en": "Reset zoom"
+  },
+  "Open": {
+    "ko": "열기",
+    "en": "Open"
+  },
+  "Close host files": {
+    "ko": "호스트 파일 닫기",
+    "en": "Close host files"
+  },
+  "Open host file by path": {
+    "ko": "경로로 호스트 파일 열기",
+    "en": "Open host file by path"
+  },
+  "Host file path": {
+    "ko": "호스트 파일 경로",
+    "en": "Host file path"
+  },
+  "Safe file preview": {
+    "ko": "안전한 파일 미리보기",
+    "en": "Safe file preview"
+  },
+  "Edit starred input": {
+    "ko": "즐겨찾는 입력 편집",
+    "en": "Edit starred input"
+  },
+  "Value": {
+    "ko": "값",
+    "en": "Value"
+  },
+  "Send on pick": {
+    "ko": "선택 시 전송",
+    "en": "Send on pick"
+  },
+  "http://localhost:PORT/?code=...": {
+    "ko": "http://localhost:PORT/?code=...",
+    "en": "http://localhost:PORT/?code=..."
+  },
+  "공유 파일 첨부": {
+    "ko": "공유 파일 첨부",
+    "en": "Attach shared files"
+  },
+  "여기에 첨부": {
+    "ko": "여기에 첨부",
+    "en": "Attach here"
+  },
+  "대상 변경": {
+    "ko": "대상 변경",
+    "en": "Change target"
+  },
+  "취소": {
+    "ko": "취소",
+    "en": "Cancel"
+  },
+  "첨부 취소": {
+    "ko": "첨부 취소",
+    "en": "Cancel attachment"
+  },
+  "다른 터미널": {
+    "ko": "다른 터미널",
+    "en": "Another terminal"
+  },
+  "다른 PC": {
+    "ko": "다른 PC",
+    "en": "Another PC"
+  },
+  "Close menu": {
+    "ko": "메뉴 닫기",
+    "en": "Close menu"
+  },
+  "Close pane management": {
+    "ko": "Pane 관리 닫기",
+    "en": "Close pane management"
+  },
+  "Close workspace management": {
+    "ko": "워크스페이스 관리 닫기",
+    "en": "Close workspace management"
+  },
+  "Rename workspace": {
+    "ko": "워크스페이스 이름 변경",
+    "en": "Rename workspace"
+  },
+  "Save as template": {
+    "ko": "템플릿으로 저장",
+    "en": "Save as template"
+  },
+  "Language": {
+    "ko": "언어",
+    "en": "Language"
+  },
+  "Language on this device": {
+    "ko": "이 기기의 언어",
+    "en": "Language on this device"
+  },
+  "System language": {
+    "ko": "시스템 언어",
+    "en": "System language"
+  },
+  "{0} exceeds the Cloud relay payload limit of {1}. Connect through Tailscale (direct Remote) to attach up to {2}.": {
+    "ko": "{0}이(가) Cloud 중계 페이로드 한도 {1}을(를) 초과합니다. Tailscale(직접 Remote)로 연결하면 최대 {2}까지 첨부할 수 있습니다.",
+    "en": "{0} exceeds the Cloud relay payload limit of {1}. Connect through Tailscale (direct Remote) to attach up to {2}."
+  },
+  "Image{0}": {
+    "ko": "이미지{0}",
+    "en": "Image{0}"
+  },
+  "검사 중…": {
+    "ko": "검사 중…",
+    "en": "Inspecting…"
+  },
+  "정리 후보": {
+    "ko": "정리 후보",
+    "en": "Cleanup candidate"
+  },
+  "변경 {0}": {
+    "ko": "변경 {0}",
+    "en": "Changed {0}"
+  },
+  "미추적 {0}": {
+    "ko": "미추적 {0}",
+    "en": "Untracked {0}"
+  },
+  "무시 {0}": {
+    "ko": "무시 {0}",
+    "en": "Ignored {0}"
+  },
+  "터미널 {0}개": {
+    "ko": "터미널 {0}개",
+    "en": "Terminals {0}"
+  },
+  "{0} · {1}": {
+    "ko": "{0} · {1}",
+    "en": "{0} · {1}"
+  },
+  "기본 워크트리": {
+    "ko": "기본 워크트리",
+    "en": "Main worktree"
+  },
+  "변경 없음": {
+    "ko": "변경 없음",
+    "en": "No changes"
+  },
+  "보존 상태 확인 필요": {
+    "ko": "보존 상태 확인 필요",
+    "en": "Review why this worktree is kept"
+  },
+  "bare 저장소": {
+    "ko": "bare 저장소",
+    "en": "Bare repository"
+  },
+  "잠금 설정됨": {
+    "ko": "잠금 설정됨",
+    "en": "Locked"
+  },
+  "경로 또는 연결 정보 확인 필요": {
+    "ko": "경로 또는 연결 정보 확인 필요",
+    "en": "Review path or linkage"
+  },
+  "브랜치 없는 HEAD": {
+    "ko": "브랜치 없는 HEAD",
+    "en": "Detached HEAD"
+  },
+  "서브모듈 포함": {
+    "ko": "서브모듈 포함",
+    "en": "Contains submodules"
+  },
+  "추적 파일 변경 있음": {
+    "ko": "추적 파일 변경 있음",
+    "en": "Tracked changes"
+  },
+  "미추적 파일 있음": {
+    "ko": "미추적 파일 있음",
+    "en": "Untracked files"
+  },
+  "무시된 파일 있음": {
+    "ko": "무시된 파일 있음",
+    "en": "Ignored files"
+  },
+  "현재 조회 경로": {
+    "ko": "현재 조회 경로",
+    "en": "Current directory"
+  },
+  "laymux에서 사용 중": {
+    "ko": "laymux에서 사용 중",
+    "en": "In use by laymux"
+  },
+  "laymux 사용 여부 확인 실패": {
+    "ko": "laymux 사용 여부 확인 실패",
+    "en": "Could not determine laymux usage"
+  },
+  "변경 감지를 생략한 파일 있음": {
+    "ko": "변경 감지를 생략한 파일 있음",
+    "en": "Files with skipped change detection"
+  },
+  "브랜치 없음": {
+    "ko": "브랜치 없음",
+    "en": "No branch"
+  },
+  "변경": {
+    "ko": "변경",
+    "en": "Changed"
+  },
+  "무시": {
+    "ko": "무시",
+    "en": "Ignored"
+  },
+  "PC mode": {
+    "ko": "PC 모드",
+    "en": "PC mode"
+  },
+  "entry": {
+    "ko": "항목",
+    "en": "entry"
+  },
+  "entries": {
+    "ko": "항목",
+    "en": "entries"
+  },
+  "open": {
+    "ko": "열기",
+    "en": "open"
+  },
+  "save": {
+    "ko": "저장",
+    "en": "save"
+  },
+  "Cleared {0} terminal.": {
+    "ko": "터미널 {0}개를 지웠습니다.",
+    "en": "Cleared {0} terminal."
+  },
+  "Cleared {0} terminals.": {
+    "ko": "터미널 {0}개를 지웠습니다.",
+    "en": "Cleared {0} terminals."
+  },
+  "허용되지 않는 Remote 설정값: {0}; {1}": {
+    "ko": "허용되지 않는 Remote 설정값: {0}; {1}",
+    "en": "Invalid Remote setting: {0}; {1}"
+  },
+  "필수 Remote 설정: {0}/{1}": {
+    "ko": "필수 Remote 설정: {0}/{1}",
+    "en": "Required Remote setting: {0}/{1}"
+  },
+  "알 수 없는 Remote 설정: {0}/{1}": {
+    "ko": "알 수 없는 Remote 설정: {0}/{1}",
+    "en": "Unknown Remote setting: {0}/{1}"
+  },
+  "알 수 없는 Remote 기기 설정: {0}": {
+    "ko": "알 수 없는 Remote 기기 설정: {0}",
+    "en": "Unknown Remote device setting: {0}"
+  },
+  "입력바 액션 배치 오류: {0}": {
+    "ko": "입력바 액션 배치 오류: {0}",
+    "en": "Invalid input bar action placement: {0}"
+  },
+  "설정 patch는 JSON object여야 합니다.": {
+    "ko": "설정 patch는 JSON object여야 합니다.",
+    "en": "The settings patch must be a JSON object."
+  },
+  "사용자 키 ID는 고유해야 하며 라벨 양끝 공백은 허용하지 않습니다.": {
+    "ko": "사용자 키 ID는 고유해야 하며 라벨 양끝 공백은 허용하지 않습니다.",
+    "en": "Custom key IDs must be unique and labels must not have surrounding whitespace."
+  },
+  "플로팅 버튼 ID·액션이 올바르지 않습니다. 패드는 전용 설정을 사용하세요.": {
+    "ko": "플로팅 버튼 ID·액션이 올바르지 않습니다. 패드는 전용 설정을 사용하세요.",
+    "en": "Invalid floating button ID or action. Use the dedicated settings for pads."
+  },
+  "입력창 불투명도는 idle ≤ focused ≤ active여야 합니다.": {
+    "ko": "입력창 불투명도는 idle ≤ focused ≤ active여야 합니다.",
+    "en": "Composer opacity must follow idle ≤ focused ≤ active."
+  },
+  "설정 변경 요청이 만료됐습니다. 최신 값을 조회하세요.": {
+    "ko": "설정 변경 요청이 만료됐습니다. 최신 값을 조회하세요.",
+    "en": "The settings request expired. Read the latest values."
+  },
+  "Remote 설정 revision 충돌입니다. 최신 값을 조회하세요.": {
+    "ko": "Remote 설정 revision 충돌입니다. 최신 값을 조회하세요.",
+    "en": "Remote settings revision conflict. Read the latest values."
+  },
+  "xterm assets failed to load": {
+    "ko": "xterm 자산을 불러오지 못했습니다",
+    "en": "xterm assets failed to load"
+  },
+  "Automatic keyboard detection is not supported in this browser. Keyboard shortcuts still work.": {
+    "ko": "이 브라우저는 키보드 자동 감지를 지원하지 않습니다. 키보드 단축키는 계속 사용할 수 있습니다.",
+    "en": "Automatic keyboard detection is not supported in this browser. Keyboard shortcuts still work."
+  },
+  "Idle ≤ Focused ≤ Active. Lowering a later state also lowers earlier states when needed.": {
+    "ko": "대기 ≤ 포커스 ≤ 사용 중 순서입니다. 뒤 상태의 값을 낮추면 필요한 경우 앞 상태의 값도 낮아집니다.",
+    "en": "Idle ≤ Focused ≤ Active. Lowering a later state also lowers earlier states when needed."
+  },
+  "Also adjusted: {0}.": {
+    "ko": "함께 조정됨: {0}.",
+    "en": "Also adjusted: {0}."
+  },
+  "PC shortcut overridden by Remote Nav": {
+    "ko": "리모트 탐색이 대신하는 PC 단축키",
+    "en": "PC shortcut overridden by Remote Nav"
+  },
+  "Remote Nav: {0} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input bar settings.": {
+    "ko": "리모트 탐색: {0} + ↑ / ↓ = 이전 / 다음 Pane, ← / → = 최근 / 가장 오래된 읽지 않은 알림. 취소선이 있는 PC 단축키는 리모트 탐색이 대신합니다. 입력 설정에서 변경하세요.",
+    "en": "Remote Nav: {0} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input bar settings."
+  },
+  "Remote Nav: {0} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input settings.": {
+    "ko": "리모트 탐색: {0} + ↑ / ↓ = 이전 / 다음 Pane, ← / → = 최근 / 가장 오래된 읽지 않은 알림. 취소선이 있는 PC 단축키는 리모트 탐색이 대신합니다. 입력 설정에서 변경하세요.",
+    "en": "Remote Nav: {0} + ↑ / ↓ = previous / next pane; ← / → = recent / oldest unread alert. Crossed-out PC shortcuts are overridden. Change this in Input settings."
+  },
+  "Remote Nav is off. The PC keybindings below apply.": {
+    "ko": "리모트 탐색이 꺼져 있습니다. 아래 PC 키 바인딩이 적용됩니다.",
+    "en": "Remote Nav is off. The PC keybindings below apply."
+  }
+}

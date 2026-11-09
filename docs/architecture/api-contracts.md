@@ -58,6 +58,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - **누락 키 감지(dev):** `import.meta.env.DEV` 일 때만 i18next `saveMissing` + `missingKeyHandler` 활성화(`reportMissingKey()` 순수 함수). prod 번들에서는 트리셰이킹으로 제거. `locale-parity.test.ts` 가 ko/en 키 집합 대칭을 강제. 보간 변수는 i18next 예약어 `count` 대신 `num` 등 비예약어를 쓴다(불필요한 복수형 처리·거짓 누락키 경고 회피).
 - **현재 번역 범위:** `WorkspaceSelectorView`, `SettingsView`(전체), `UpdateButton`(툴팁·접근성 라벨), `SettingsRecoveryModal`, `TerminalView`(붙여넣기 확인·스크롤 버튼). 설정의 업데이트 진입 문구와 상단 `UpdateButton` 라벨은 `settings.update` 사전에서 관리한다. 나머지 뷰의 하드코딩 영어 라벨까지 ko 로 보이게 하는 완전 양방향 번역은 후속 작업.
 - **번역 용어 정책(글로사리):** ko 값은 (1) 자연스러운 한국어 우선(모양/커서/여백/불투명도/선택 시 복사 등), (2) 굳어진 IT 외래어는 음차(폰트·프로필·워크스페이스·독·테마), (3) 영어 유지 = ANSI 색상명(Black/Red/…)·브랜드/표준/포맷 고유명사(Claude Code·Codex·ANSI·ClearType·Grayscale·Aliased·settings.json)·제품 약어(Pane·CWD·Git). 외래어 표기는 국립국어원 기준(프로필/셸/디렉터리). 제목과 설명문은 같은 개념을 동일 용어로 표기한다. en 값은 일관된 Title Case.
+- **Remote 언어:** [ADR-0380](../adr/0380-remote-device-language-and-message-boundaries.md). Remote는 PC i18next singleton과 독립적으로 `remote-i18n.js`·`remote-messages.json`을 사용하고 순수 `resolveLanguage()`만 공유한다. 메뉴·설정·파일/메모/GitHub/워크트리·공유 첨부·상태/오류·OAuth·물리 키보드·접근성 제품 문구를 같은 언어로 표시한다. 사용자 이름·경로·출력·메모·파일 내용·외부 오류 세부는 번역하지 않는다.
 
 ### 접근 방법
 
@@ -1891,6 +1892,8 @@ v1.9.0의 내장 localhost 프리뷰는 v1.9.1에서 철회했다([ADR-0318](../
 Remote 터미널 host(`#terminal`)는 `-webkit-tap-highlight-color: #00000000`를 지정해 탭할 때 브라우저 기본 강조색이 출력 영역 전체를 덮지 않게 한다. 이 속성은 내부 xterm 요소에 상속되며, 기존 터치 스크롤·길게 눌러 선택·선택 핸들 동작은 유지한다.
 
 새 기기의 기본 구성은 [ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)를 따른다. 설정 진입은 PC 상단 톱니바퀴 또는 `Ctrl+,`, Remote drawer → Settings이며 Remote의 표시·입력 선호는 PC `settings.json`이 아니라 기기별 `localStorage`가 소유한다. 호스트 `settings.remote`는 연결·보안과 폰트·위젯 공개 정책을 소유한다.
+
+Remote Settings → App의 언어는 `localStorage["laymux.remote.language"]`에 JSON 문자열 `"system" | "ko" | "en"`으로 저장한다([ADR-0380](../adr/0380-remote-device-language-and-message-boundaries.md)). 기본·손상 값은 `system`이며 브라우저 `ko*`만 한국어, 나머지는 영어로 해석한다. 선택은 PC·API·lease 없이 `document.documentElement.lang`과 열린 DOM에 즉시 적용하고 초안·포커스·도구·연결을 보존한다. 저장 불가 시 문서에서 적용하고 상태를 알린다. origin별 선호이며 PC 설정에 전송하지 않는다. 정적 `data-remote-i18n*`과 `t()`/보간 제품 토큰만 번역하고 일반 문자열은 같은 단어라도 그대로 둔다. DOM setter의 WeakMap 바인딩과 현재 관리 노드 순회로 갱신하며 임의 텍스트 관찰·치환은 하지 않는다.
 
 | 항목 | PC 기본 | 새 Remote 기기 기본·설정 경로 |
 |---|---|---|

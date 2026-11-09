@@ -47,7 +47,7 @@ export class MemoDocument {
       this.baseline = text;
       this.publish({ text, dirty: false, loaded: true, error: null });
     } catch (error) {
-      this.publish({ error: String(error instanceof Error ? error.message : error) });
+      this.publish({ error: error instanceof Error ? error.message : String(error) });
     } finally {
       this.reading = false;
     }
@@ -76,7 +76,7 @@ export class MemoDocument {
         this.baseline = text;
         this.publish({ dirty: this.snapshot.text !== text, error: null });
       } catch (error) {
-        this.publish({ error: String(error instanceof Error ? error.message : error) });
+        this.publish({ error: error instanceof Error ? error.message : String(error) });
         return;
       }
     } while (this.saveAgain && this.snapshot.dirty);

@@ -42,7 +42,10 @@ const packageInputHash = (lock: PackageLock, packageName: string): string => {
 
 describe("remote page bundle", () => {
   it("committed minified artifacts match the sources", () => {
-    const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 9);
+    const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 10);
+    expect(banner).toContain(
+      `// I18n-SHA256: ${["remote/remote-i18n.js", "remote/remote-messages.json", "i18n/resolve-language.ts", "lib/lifecycle-progress.ts"].map((file) => `${file}=${fileHash(path.resolve(__dirname, "..", file))}`).join(" ")}`,
+    );
     const stamp = banner.find((line) => line.startsWith("// Source-SHA256:"));
     expect(banner).toContain(
       `// View-instance-SHA256: ${fileHash(path.resolve(__dirname, "../lib/view-instance-id.ts"))}`,

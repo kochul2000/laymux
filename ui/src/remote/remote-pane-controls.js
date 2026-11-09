@@ -1,3 +1,10 @@
+import {
+  setRemoteAttribute,
+  t,
+  setRemoteText,
+  setRemoteHtml,
+  remoteAttributeMessage,
+} from "./remote-i18n.js";
 import { setRemoteIcon } from "./remote-icons.js";
 
 // Key rows preserve editor focus, so confirmation belongs to an explicit
@@ -10,17 +17,22 @@ export function createPaneCloseKeyConfirmation(document) {
     if (!pending) return;
     const { button, title, label } = pending;
     delete button.dataset.confirming;
-    button.title = title;
-    if (label === null) button.removeAttribute("aria-label");
-    else button.setAttribute("aria-label", label);
+    setRemoteAttribute(button, "title", title);
+    setRemoteAttribute(button, "aria-label", label);
     pending = null;
   }
 
   function update(target, lease) {
-    if (pending && (
-      pending.paneId !== target?.id || pending.lease !== lease || !target?.canClose ||
-      !pending.button.isConnected || pending.button.closest("[hidden]") || pending.button.disabled
-    )) reset();
+    if (
+      pending &&
+      (pending.paneId !== target?.id ||
+        pending.lease !== lease ||
+        !target?.canClose ||
+        !pending.button.isConnected ||
+        pending.button.closest("[hidden]") ||
+        pending.button.disabled)
+    )
+      reset();
   }
 
   function cancelOutside(event) {
@@ -28,9 +40,13 @@ export function createPaneCloseKeyConfirmation(document) {
   }
   document.addEventListener("pointerdown", cancelOutside, true);
   document.addEventListener("click", cancelOutside, true);
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") reset();
-  }, true);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape") reset();
+    },
+    true,
+  );
   document.defaultView.addEventListener("blur", reset);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) reset();
@@ -41,8 +57,15 @@ export function createPaneCloseKeyConfirmation(document) {
     update,
     activate(button, target, lease) {
       update(target, lease);
-      if (!button || button.disabled || !button.isConnected || button.closest("[hidden]") ||
-          !target?.canClose || !lease) return false;
+      if (
+        !button ||
+        button.disabled ||
+        !button.isConnected ||
+        button.closest("[hidden]") ||
+        !target?.canClose ||
+        !lease
+      )
+        return false;
       if (pending?.button === button) {
         reset();
         return true;
@@ -58,12 +81,16 @@ export function createPaneCloseKeyConfirmation(document) {
         });
       }
       pending = {
-        button, paneId: target.id, lease,
-        title: button.title, label: button.getAttribute("aria-label"),
+        button,
+        paneId: target.id,
+        lease,
+        title: remoteAttributeMessage(button, "title"),
+        label: remoteAttributeMessage(button, "aria-label"),
       };
       button.dataset.confirming = "true";
-      button.title = "Click again to close pane";
-      button.setAttribute("aria-label", button.title);
+      const confirmation = t("Click again to close pane");
+      setRemoteAttribute(button, "title", confirmation);
+      setRemoteAttribute(button, "aria-label", confirmation);
       return false;
     },
   };
@@ -90,11 +117,13 @@ export function createPaneControls({
     hideButton.disabled = !lease || busy || !target?.canHide;
     closeButton.disabled = !lease || busy || !target?.canClose || closedId === target.id;
     hideButton.setAttribute("aria-pressed", String(Boolean(target?.hidden)));
-    const label = target?.hidden ? "Show pane in workspace list" : "Hide pane from workspace list";
-    hideButton.setAttribute("aria-label", label);
-    hideButton.title = label;
+    const label = target?.hidden
+      ? t("Show pane in workspace list")
+      : t("Hide pane from workspace list");
+    setRemoteAttribute(hideButton, "aria-label", label);
+    setRemoteAttribute(hideButton, "title", label);
     if (iconOnly) setRemoteIcon(hideButton, target?.hidden ? "EyeOff" : "Eye");
-    else hideButton.textContent = target?.hidden ? "Show pane" : "Hide pane";
+    else setRemoteText(hideButton, target?.hidden ? t("Show pane") : t("Hide pane"));
     if (armed) closeButton.dataset.confirming = "true";
     else delete closeButton.dataset.confirming;
   }
@@ -169,11 +198,10 @@ export function createPaneManager({ getLease, hide, close }) {
   dialog.id = "paneManager";
   dialog.className = "workspace-manager";
   dialog.setAttribute("aria-labelledby", "paneManagerTitle");
-  dialog.innerHTML = `<div class="workspace-manager-heading"><h2 id="paneManagerTitle"></h2>
-    <button type="button" class="item-manager-dismiss" data-pane-action="dismiss" aria-label="Close pane management" title="Close menu"></button></div>
-    <div class="item-manager-actions"><button type="button" data-pane-action="hide">Hide pane</button>
-    <button type="button" data-pane-action="close-pane" class="pane-close-button">Close pane</button></div>
-    <p role="alert" hidden></p>`;
+  setRemoteHtml(
+    dialog,
+    '<div class="workspace-manager-heading"><h2 id="paneManagerTitle"></h2>\n    <button type="button" class="item-manager-dismiss" data-pane-action="dismiss" aria-label="Close pane management" title="Close menu" data-remote-i18n-title="Close menu" data-remote-i18n-aria-label="Close pane management"></button></div>\n    <div class="item-manager-actions"><button type="button" data-pane-action="hide" data-remote-i18n="Hide pane">Hide pane</button>\n    <button type="button" data-pane-action="close-pane" class="pane-close-button" data-remote-i18n="Close pane">Close pane</button></div>\n    <p role="alert" hidden></p>',
+  );
   document.body.append(dialog);
   setRemoteIcon(dialog.querySelector('[data-pane-action="dismiss"]'), "X");
   const title = dialog.querySelector("h2");
@@ -204,7 +232,7 @@ export function createPaneManager({ getLease, hide, close }) {
     hide: (...args) => perform(hide, ...args),
     close: (...args) => perform(close, ...args),
     onError: (err) => {
-      error.textContent = err.message || String(err);
+      setRemoteText(error, err.message || String(err));
       error.hidden = false;
     },
   });
@@ -251,7 +279,7 @@ export function createPaneManager({ getLease, hide, close }) {
       target = pane;
       openingLease = getLease();
       trigger = button;
-      title.textContent = pane.label;
+      setRemoteText(title, pane.label);
       error.hidden = true;
       controls.update(pane, openingLease);
       trigger.setAttribute("aria-expanded", "true");
@@ -265,7 +293,7 @@ export function createPaneManager({ getLease, hide, close }) {
         return;
       }
       target = pane;
-      title.textContent = pane.label;
+      setRemoteText(title, pane.label);
       controls.update(pane, openingLease);
     },
     isOpenFor: (id) => dialog.open && target?.id === id,

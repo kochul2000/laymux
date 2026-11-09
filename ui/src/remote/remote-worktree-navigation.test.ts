@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteWorktrees } from "./remote-worktrees.js";
+import { initializeRemoteLanguage } from "./remote-i18n.js";
 
 const source = readFileSync(
   path.resolve(__dirname, "../../../src-tauri/src/remote_server/assets/remote-app.js"),
@@ -18,6 +19,8 @@ describe("Remote navigation과 Worktrees 연결", () => {
     controller = undefined;
   });
   function setup() {
+    localStorage.clear();
+    initializeRemoteLanguage({ locale: "ko" });
     document.body.innerHTML = `<div class="app"></div><div id="worktreesOverlay" hidden>
       <button id="worktreesAll"></button><button id="worktreesCandidates"></button>
       <button id="worktreesRefresh"></button><button id="worktreesClose"></button>

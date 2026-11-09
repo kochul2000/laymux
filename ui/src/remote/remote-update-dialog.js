@@ -1,10 +1,13 @@
+import { setRemoteAttribute, t, setRemoteText } from "./remote-i18n.js";
 import { lifecycleCopy, lifecycleSteps, progressPercent } from "../lib/lifecycle-progress.ts";
 import "../components/ui/lifecycle.css";
 const { document, setTimeout, clearTimeout } = globalThis;
 
 /** Same stages/copy as desktop, backed only by the host update snapshot. */
 export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
-  const copy = lifecycleCopy.en;
+  const copy = Object.fromEntries(
+    Object.entries(lifecycleCopy.en).map(([key, value]) => [key, t(value)]),
+  );
   const dialog = document.createElement("dialog");
   const backdrop = document.createElement("div");
   backdrop.className = "lifecycle-backdrop";
@@ -12,7 +15,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
   backdrop.setAttribute("aria-hidden", "true");
   document.body.append(backdrop);
   dialog.className = "lifecycle-dialog remote-update-dialog";
-  dialog.setAttribute("aria-label", "Connected PC update");
+  setRemoteAttribute(dialog, "aria-label", t("Connected PC update"));
   dialog.dataset.testid = "remote-update-dialog";
   document.body.append(dialog);
   let status = null;
@@ -27,7 +30,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
   function element(tag, className, text) {
     const node = document.createElement(tag);
     node.className = className;
-    if (text) node.textContent = text;
+    if (text) setRemoteText(node, text);
     return node;
   }
   function button(text, action, disabled = false, primary = false) {
@@ -56,7 +59,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
     try {
       await action();
     } catch (cause) {
-      error = String(cause);
+      error = cause?.message || String(cause);
     } finally {
       busyRequest = false;
       render();
@@ -72,10 +75,10 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         "h2",
         "lifecycle-title",
         complete
-          ? "Update complete"
+          ? t("Update complete")
           : reconnectSince && installingObserved
-            ? "Waiting for Laymux to restart"
-            : "Connected PC update",
+            ? t("Waiting for Laymux to restart")
+            : t("Connected PC update"),
       ),
     );
     const version = element("div", "lifecycle-version");
@@ -92,7 +95,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
     content.append(version);
     if (complete)
       content.append(
-        element("p", "lifecycle-subtitle", "Reconnected and verified the new version."),
+        element("p", "lifecycle-subtitle", t("Reconnected and verified the new version.")),
       );
     else if (reconnectSince) {
       content.append(
@@ -100,8 +103,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
           "p",
           "lifecycle-subtitle",
           installingObserved
-            ? "The app on your PC is restarting. Reconnecting automatically…"
-            : "Connection interrupted. Checking the PC's update status…",
+            ? t("The app on your PC is restarting. Reconnecting automatically…")
+            : t("Connection interrupted. Checking the PC's update status…"),
         ),
       );
       if (Date.now() - reconnectSince > 60000)
@@ -109,7 +112,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
           element(
             "div",
             "lifecycle-error",
-            "The PC has not reconnected yet. Check that Laymux is running.",
+            t("The PC has not reconnected yet. Check that Laymux is running."),
           ),
         );
     } else if (isBusy()) {
@@ -139,7 +142,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
           body.append(detail);
           const track = element("div", "lifecycle-track");
           track.setAttribute("role", "progressbar");
-          track.setAttribute("aria-label", copy[stage]);
+          setRemoteAttribute(track, "aria-label", copy[stage]);
           if (percent !== null) track.setAttribute("aria-valuenow", String(percent));
           const bar = element("div", `lifecycle-bar ${percent === null ? "is-indeterminate" : ""}`);
           bar.style.width = percent === null ? "35%" : `${percent}%`;
@@ -181,8 +184,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
     }
     const actions = element("div", "lifecycle-actions");
     if (!locked() || reconnectSince || complete)
-      actions.append(button(isBusy() && !complete ? copy.hide : "Close", () => dialog.close()));
-    if (reconnectSince) actions.append(button("Retry connection", () => void run(check)));
+      actions.append(button(isBusy() && !complete ? copy.hide : t("Close"), () => dialog.close()));
+    if (reconnectSince) actions.append(button(t("Retry connection"), () => void run(check)));
     else if (!isBusy() && !complete) {
       actions.append(
         button(
@@ -202,7 +205,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         );
       if (!getCanInstall())
         content.append(
-          element("p", "lifecycle-subtitle", "Take control of the PC to install an update."),
+          element("p", "lifecycle-subtitle", t("Take control of the PC to install an update.")),
         );
       if (status?.canForceInstall && status.operation === "idle") {
         const forceButton = button(
@@ -210,13 +213,17 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
           () => void run(() => install(true)),
           busyRequest || !status.enabled || !getCanInstall(),
         );
-        forceButton.title = !getCanInstall()
-          ? "Take control of the PC to install an update."
-          : !status.enabled
-            ? copy.dev
-            : busyRequest
-              ? copy.updateBusy
-              : copy.lossWarning;
+        setRemoteAttribute(
+          forceButton,
+          "title",
+          !getCanInstall()
+            ? t("Take control of the PC to install an update.")
+            : !status.enabled
+              ? copy.dev
+              : busyRequest
+                ? copy.updateBusy
+                : copy.lossWarning,
+        );
         actions.append(forceButton);
       }
     }

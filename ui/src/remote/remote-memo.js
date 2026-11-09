@@ -1,3 +1,4 @@
+import { remoteError, t, setRemoteText, setRemoteAttribute, tr } from "./remote-i18n.js";
 /* global document, window */
 import { MemoDocument } from "../lib/memo-document.ts";
 
@@ -17,9 +18,9 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
 
   async function list() {
     const lease = getLease();
-    if (!lease) throw new Error("Connect to read PC memos.");
+    if (!lease) throw remoteError(t("Connect to read PC memos."));
     const result = await api(`/remote/v1/memos?leaseId=${encodeURIComponent(lease)}`);
-    if (lease !== getLease()) throw new Error("Connection changed. Reopen memos.");
+    if (lease !== getLease()) throw remoteError(t("Connection changed. Reopen memos."));
     return new Map((result.memos || []).map((memo) => [memo.key, memo.content]));
   }
 
@@ -28,30 +29,40 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
     if (textarea.value !== (state?.text || "")) textarea.value = state?.text || "";
     textarea.disabled = !state?.loaded || !getLease();
     $("memoSave").disabled = !getLease() || !state?.dirty || state.busy;
-    $("memoSave").textContent = state?.busy ? "Saving…" : "Save";
-    $("memoSave").title = !getLease()
-      ? "Connect before saving"
-      : state?.busy
-        ? "Saving to PC"
-        : !state?.dirty
-          ? "No unsaved changes"
-          : "Save to PC";
+    setRemoteText($("memoSave"), state?.busy ? t("Saving…") : t("Save"));
+    setRemoteAttribute(
+      $("memoSave"),
+      "title",
+      !getLease()
+        ? t("Connect before saving")
+        : state?.busy
+          ? t("Saving to PC")
+          : !state?.dirty
+            ? t("No unsaved changes")
+            : t("Save to PC"),
+    );
     $("memoReload").disabled = !getLease() || state?.busy;
-    $("memoReload").title = !getLease()
-      ? "Connect before reloading"
-      : state?.busy
-        ? "Wait for the save to finish"
-        : "Reload from PC";
+    setRemoteAttribute(
+      $("memoReload"),
+      "title",
+      !getLease()
+        ? t("Connect before reloading")
+        : state?.busy
+          ? t("Wait for the save to finish")
+          : t("Reload from PC"),
+    );
     status.classList.toggle("error", Boolean(state?.error));
-    status.textContent =
+    setRemoteText(
+      status,
       state?.error ||
-      (!state
-        ? "No PC memos. Add a Memo view on the PC first."
-        : !state.loaded
-          ? "Loading…"
-          : state.dirty
-            ? "Unsaved changes · shared with PC"
-            : "Saved on PC");
+        (!state
+          ? t("No PC memos. Add a Memo view on the PC first.")
+          : !state.loaded
+            ? t("Loading…")
+            : state.dirty
+              ? t("Unsaved changes · shared with PC")
+              : t("Saved on PC")),
+    );
   }
 
   function choose(key) {
@@ -64,7 +75,7 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
           async () => (await list()).get(key) || "",
           async (content, expectedContent) => {
             const leaseId = getLease();
-            if (!leaseId) throw new Error("Reconnect before saving your draft.");
+            if (!leaseId) throw remoteError(t("Reconnect before saving your draft."));
             await api("/remote/v1/memos", {
               method: "POST",
               body: JSON.stringify({ leaseId, key, content, expectedContent }),
@@ -84,7 +95,7 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
     beforeOpen();
     overlay.hidden = false;
     const request = ++generation;
-    status.textContent = "Loading PC memos…";
+    setRemoteText(status, t("Loading PC memos…"));
     try {
       const memos = await list();
       if (request !== generation || !isOpen()) return;
@@ -96,7 +107,7 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
             const key = `memo-${pane.id}`;
             labels.set(
               key,
-              `${owner.name || owner.position || owner.id} · ${pane.title || "Memo"}`,
+              tr`${owner.name || owner.position || owner.id} · ${pane.title || t("Memo")}`,
             );
             if (!memos.has(key)) memos.set(key, "");
           }
@@ -110,14 +121,16 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
       for (const [key, content] of memos) {
         const option = document.createElement("option");
         option.value = key;
-        option.textContent =
+        setRemoteText(
+          option,
           labels.get(key) ||
-          content
-            .split("\n")
-            .find((line) => line.trim())
-            ?.slice(0, 60) ||
-          key;
-        option.title = key;
+            content
+              .split("\n")
+              .find((line) => line.trim())
+              ?.slice(0, 60) ||
+            key,
+        );
+        setRemoteAttribute(option, "title", key);
         select.appendChild(option);
       }
       if (memos.size) choose(memos.has(currentKey) ? currentKey : memos.keys().next().value);
@@ -128,7 +141,7 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       render();
-      status.textContent = String(error.message || error);
+      setRemoteText(status, error.message || String(error));
       status.classList.add("error");
     }
   }
@@ -151,14 +164,14 @@ export function createRemoteMemo({ api, getLease, getNavigation, copy, beforeOpe
     }
     if (
       !current().getSnapshot().dirty ||
-      window.confirm("Discard your draft and reload the PC memo?")
+      window.confirm(t("Discard your draft and reload the PC memo?"))
     ) {
       void current().refresh(true);
     }
   });
   $("memoCopy").addEventListener("click", () => {
     copy(textarea.value).catch((error) => {
-      status.textContent = `Could not copy: ${error.message || error}`;
+      setRemoteText(status, tr`Could not copy: ${error.message || error}`);
       status.classList.add("error");
     });
   });
