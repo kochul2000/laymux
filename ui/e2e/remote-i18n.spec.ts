@@ -3,6 +3,21 @@ import { fulfillRemoteClientAsset, installRemoteClientRoutes } from "./remote-cl
 
 test.describe("Floating 설정의 언어 전환", () => {
   test.use({ locale: "en-US" });
+  test("플로팅 패드의 이동 안내도 언어 전환 뒤 유지한다", async ({ page }) => {
+    await installRemoteClientRoutes(page);
+    await page.goto("http://remote.test/remote/");
+    await settings(page);
+    await page.locator("#settingsTabFloating").click();
+    await expect(
+      page.getByRole("checkbox", { name: "Arrow pad Enabled", exact: true }),
+    ).toBeChecked();
+    const pad = page.locator('#floatingControls [data-key="dpad"]');
+    await expect(pad).toHaveAttribute("title", /hold center to move/);
+    await changeWhileToolOpen(page, "ko");
+    await expect(pad).toHaveAttribute("title", /가운데를 길게 눌러 이동/);
+    await changeWhileToolOpen(page, "en");
+    await expect(pad).toHaveAttribute("title", /hold center to move/);
+  });
   test("동작 선택의 번역과 선택값을 함께 유지한다", async ({ page }) => {
     await installRemoteClientRoutes(page);
     await page.goto("http://remote.test/remote/");

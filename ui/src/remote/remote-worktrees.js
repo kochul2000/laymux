@@ -262,7 +262,7 @@ export function createRemoteWorktrees({
           file.kind === "tracked" ? t("변경") : file.kind === "untracked" ? t("미추적") : t("무시");
         const path = `${selected.path.replace(/\/$/, "")}/${file.path}`;
         const fileButton = button(
-          `${kind} · ${file.path}`,
+          tr`${kind} · ${file.path}`,
           () => openFile(path),
           !canOpenFile() || removing,
         );

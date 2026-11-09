@@ -62,6 +62,33 @@ describe("Remote Worktrees 요청 소유권", () => {
   const button = (label: string) =>
     Array.from(document.querySelectorAll("button")).find((item) => item.textContent === label)!;
 
+  it("파일 종류만 새 언어로 바꾸고 파일명과 검사 결과를 보존한다", async () => {
+    api.mockImplementation(async (url: string) =>
+      url.endsWith("/inspect")
+        ? {
+            data: {
+              ...inspection,
+              files: [
+                { kind: "tracked", path: "Settings.txt" },
+                { kind: "untracked", path: "Connection.txt" },
+                { kind: "ignored", path: "Open settings.txt" },
+              ],
+            },
+          }
+        : result,
+    );
+    controller.open();
+    await vi.waitFor(() => expect(document.querySelector("[data-worktree-path]")).not.toBeNull());
+    click("[data-worktree-path]");
+    await vi.waitFor(() => expect(button("변경 · Settings.txt")).toBeDefined());
+    const requests = api.mock.calls.length;
+    setRemoteLanguage("en");
+    expect(button("Changed · Settings.txt")).toBeDefined();
+    expect(button("Untracked · Connection.txt")).toBeDefined();
+    expect(button("Ignored · Open settings.txt")).toBeDefined();
+    expect(api).toHaveBeenCalledTimes(requests);
+  });
+
   it("열린 워크트리 상세의 언어만 바꾸고 선택과 검사 결과를 보존한다", async () => {
     controller.open();
     await vi.waitFor(() => expect(document.querySelector("[data-worktree-path]")).not.toBeNull());

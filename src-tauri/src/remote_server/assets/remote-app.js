@@ -12603,7 +12603,7 @@ import {
             element.dataset.floatingId = id;
             const keyId = softKeyIdFromAction(actionId);
             const button = keyId ? createSoftKeyButton(keyId, !pad, pad ? item : null) : createActionProxy(actionId);
-            if (pad) button.title += t("; hold center to move");
+            if (pad) setRemoteAttribute(button, "title", tr`${remoteAttributeMessage(button, "title")}${t("; hold center to move")}`);
             else installFloatingDrag(element, element, item);
             element.append(button);
             layer.append(element);
