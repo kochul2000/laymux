@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { useId, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
@@ -102,102 +102,166 @@ export function SettingsNavigation({
   onOpenJson: () => void;
 }) {
   const { t } = useTranslation("settings");
+  const sectionId = useId();
+  const profileIndex = activeNav.startsWith("profile-") ? Number(activeNav.slice(8)) : -1;
+  const activeProfile = profiles[profileIndex];
   return (
-    <aside className="settings-sidebar">
-      <nav className="settings-nav-scroll">
-        {groups.map(({ label, items }) => (
-          <section
-            key={label}
-            data-testid={`settings-group-${label}`}
-            aria-label={t(`nav.${label}`)}
-          >
-            <div className="settings-nav-heading">
-              <h3>{t(`nav.${label}`)}</h3>
-            </div>
-            {items.map(({ id, label: itemLabel, icon: Icon }) => (
-              <button
-                key={id}
-                data-testid={`nav-${id === "remoteConnection" ? "remote" : id}`}
-                className="settings-nav-button"
-                aria-label={t(`nav.${itemLabel}`)}
-                title={t(`nav.${itemLabel}`)}
-                aria-current={activeNav === id ? "page" : undefined}
-                onClick={() => onNavigate(id)}
-              >
-                <Icon size={16} />
-                <span className="settings-nav-label">{t(`nav.${itemLabel}`)}</span>
-              </button>
-            ))}
-          </section>
-        ))}
-
-        <section aria-label={t("nav.groupProfiles")}>
-          <div className="settings-nav-heading">
-            <h3>{t("nav.groupProfiles")}</h3>
-          </div>
-          <p className="settings-profile-apply-hint">{t("nav.profileActionsImmediate")}</p>
-          <button
-            data-testid="nav-profile-defaults"
-            className="settings-nav-button"
-            aria-label={t("nav.profileDefaults")}
-            title={t("nav.profileDefaults")}
-            aria-current={activeNav === "defaults" ? "page" : undefined}
-            onClick={() => onNavigate("defaults")}
-          >
-            <LayersIcon size={16} />
-            <span className="settings-nav-label">{t("nav.profileDefaults")}</span>
-          </button>
-          {profiles.map((profile, index) => (
-            <div key={`profile-${index}-${profile.name}`} className="settings-profile-nav">
-              <button
-                className="settings-nav-button"
-                aria-label={profile.name}
-                title={profile.name}
-                aria-current={activeNav === `profile-${index}` ? "page" : undefined}
-                onClick={() => onNavigate(`profile-${index}`)}
-              >
-                <TerminalIcon size={16} />
-                <span className="settings-nav-label">{profile.name}</span>
-              </button>
-              <TwoClickConfirmButton
-                data-testid={`remove-profile-${index}`}
-                className="settings-profile-remove"
-                title={t("nav.deleteProfile")}
-                aria-label={t("nav.deleteProfile")}
-                confirmationEnabled={confirmationEnabled}
-                confirmLabel={t("nav.confirmDeleteProfile", { name: profile.name })}
-                confirmChildren={t("nav.confirmDeleteProfileShort")}
-                onConfirm={() => onRemoveProfile(index)}
-              >
-                <XIcon size={12} />
-                {t("nav.deleteProfile")}
-              </TwoClickConfirmButton>
-            </div>
+    <>
+      <div className="settings-compact-navigation">
+        <label htmlFor={sectionId}>{t("nav.section")}</label>
+        <select
+          id={sectionId}
+          data-testid="compact-settings-section"
+          value={activeNav}
+          onChange={(event) => onNavigate(event.target.value)}
+        >
+          {groups.map(({ label, items }) => (
+            <optgroup key={label} label={t(`nav.${label}`)}>
+              {items.map(({ id, label: itemLabel }) => (
+                <option key={id} value={id}>
+                  {t(`nav.${itemLabel}`)}
+                </option>
+              ))}
+            </optgroup>
           ))}
-          <button
-            data-testid="add-profile-btn"
-            className="settings-nav-button"
-            title={t("nav.addProfile")}
-            aria-label={t("nav.addProfile")}
+          <optgroup label={t("nav.groupProfiles")}>
+            <option value="defaults">{t("nav.profileDefaults")}</option>
+            {profiles.map((profile, index) => (
+              <option key={`profile-${index}-${profile.name}`} value={`profile-${index}`}>
+                {profile.name}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        <div className="settings-compact-actions">
+          <Button
+            data-testid="compact-add-profile"
+            icon={<PlusIcon size={16} />}
             onClick={onAddProfile}
           >
-            <PlusIcon size={16} />
-            <span className="settings-nav-label">{t("nav.addProfile")}</span>
-          </button>
-        </section>
-      </nav>
-      <div className="settings-nav-footer">
-        <Button
-          data-testid="sidebar-open-json"
-          className="settings-json-button"
-          icon={<FileJsonIcon size={16} />}
-          onClick={onOpenJson}
-          title={t("nav.openJsonTitle")}
-          aria-label={t("nav.openJsonTitle")}
-        >
-          <span className="settings-nav-label">{t("nav.openJson")}</span>
-        </Button>
+            {t("nav.addProfile")}
+          </Button>
+          <Button
+            data-testid="compact-open-json"
+            icon={<FileJsonIcon size={16} />}
+            onClick={onOpenJson}
+            title={t("nav.openJsonTitle")}
+          >
+            {t("nav.openJson")}
+          </Button>
+          {activeProfile && (
+            <TwoClickConfirmButton
+              key={`profile-${profileIndex}-${activeProfile.name}`}
+              data-testid="compact-remove-profile"
+              className="ui-btn settings-compact-remove"
+              confirmationEnabled={confirmationEnabled}
+              confirmLabel={t("nav.confirmDeleteProfile", { name: activeProfile.name })}
+              confirmChildren={t("nav.confirmDeleteProfileShort")}
+              onConfirm={() => onRemoveProfile(profileIndex)}
+            >
+              <XIcon size={16} />
+              {t("nav.deleteProfile")}
+            </TwoClickConfirmButton>
+          )}
+        </div>
+        <p className="settings-compact-profile-hint">{t("nav.profileActionsImmediate")}</p>
       </div>
-    </aside>
+      <aside className="settings-sidebar">
+        <nav className="settings-nav-scroll">
+          {groups.map(({ label, items }) => (
+            <section
+              key={label}
+              data-testid={`settings-group-${label}`}
+              aria-label={t(`nav.${label}`)}
+            >
+              <div className="settings-nav-heading">
+                <h3>{t(`nav.${label}`)}</h3>
+              </div>
+              {items.map(({ id, label: itemLabel, icon: Icon }) => (
+                <button
+                  key={id}
+                  data-testid={`nav-${id === "remoteConnection" ? "remote" : id}`}
+                  className="settings-nav-button"
+                  aria-label={t(`nav.${itemLabel}`)}
+                  title={t(`nav.${itemLabel}`)}
+                  aria-current={activeNav === id ? "page" : undefined}
+                  onClick={() => onNavigate(id)}
+                >
+                  <Icon size={16} />
+                  <span className="settings-nav-label">{t(`nav.${itemLabel}`)}</span>
+                </button>
+              ))}
+            </section>
+          ))}
+
+          <section aria-label={t("nav.groupProfiles")}>
+            <div className="settings-nav-heading">
+              <h3>{t("nav.groupProfiles")}</h3>
+            </div>
+            <p className="settings-profile-apply-hint">{t("nav.profileActionsImmediate")}</p>
+            <button
+              data-testid="nav-profile-defaults"
+              className="settings-nav-button"
+              aria-label={t("nav.profileDefaults")}
+              title={t("nav.profileDefaults")}
+              aria-current={activeNav === "defaults" ? "page" : undefined}
+              onClick={() => onNavigate("defaults")}
+            >
+              <LayersIcon size={16} />
+              <span className="settings-nav-label">{t("nav.profileDefaults")}</span>
+            </button>
+            {profiles.map((profile, index) => (
+              <div key={`profile-${index}-${profile.name}`} className="settings-profile-nav">
+                <button
+                  className="settings-nav-button"
+                  aria-label={profile.name}
+                  title={profile.name}
+                  aria-current={activeNav === `profile-${index}` ? "page" : undefined}
+                  onClick={() => onNavigate(`profile-${index}`)}
+                >
+                  <TerminalIcon size={16} />
+                  <span className="settings-nav-label">{profile.name}</span>
+                </button>
+                <TwoClickConfirmButton
+                  data-testid={`remove-profile-${index}`}
+                  className="settings-profile-remove"
+                  title={t("nav.deleteProfile")}
+                  aria-label={t("nav.deleteProfile")}
+                  confirmationEnabled={confirmationEnabled}
+                  confirmLabel={t("nav.confirmDeleteProfile", { name: profile.name })}
+                  confirmChildren={t("nav.confirmDeleteProfileShort")}
+                  onConfirm={() => onRemoveProfile(index)}
+                >
+                  <XIcon size={12} />
+                  {t("nav.deleteProfile")}
+                </TwoClickConfirmButton>
+              </div>
+            ))}
+            <button
+              data-testid="add-profile-btn"
+              className="settings-nav-button"
+              title={t("nav.addProfile")}
+              aria-label={t("nav.addProfile")}
+              onClick={onAddProfile}
+            >
+              <PlusIcon size={16} />
+              <span className="settings-nav-label">{t("nav.addProfile")}</span>
+            </button>
+          </section>
+        </nav>
+        <div className="settings-nav-footer">
+          <Button
+            data-testid="sidebar-open-json"
+            className="settings-json-button"
+            icon={<FileJsonIcon size={16} />}
+            onClick={onOpenJson}
+            title={t("nav.openJsonTitle")}
+            aria-label={t("nav.openJsonTitle")}
+          >
+            <span className="settings-nav-label">{t("nav.openJson")}</span>
+          </Button>
+        </div>
+      </aside>
+    </>
   );
 }

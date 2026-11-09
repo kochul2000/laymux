@@ -130,6 +130,15 @@
   container: settings / inline-size;
   background: var(--bg-surface);
 }
+.settings-layout {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.settings-compact-navigation {
+  display: none;
+}
 .settings-sidebar {
   display: flex;
   flex-direction: column;
@@ -298,6 +307,7 @@
   line-height: 1.25;
   letter-spacing: -0.02em;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 .settings-page__desc,
 .settings-group__desc {
@@ -702,7 +712,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Navigation: icons also identify pages when the dock collapses to a rail. */
+/* Navigation keeps names visible, including pages with the same icon. */
 .settings-nav-scroll {
   flex: 1;
   min-height: 0;
@@ -872,25 +882,80 @@
 }
 @container settings (max-width: 640px) {
   .settings-sidebar {
-    width: var(--settings-rail-width);
+    width: 160px;
+    max-width: 45%;
   }
-  .settings-nav-heading,
   .settings-nav-label {
-    display: none;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+  .settings-nav-heading {
+    margin-inline: 16px;
   }
   .settings-nav-scroll > section + section {
     margin-top: 8px;
   }
   .settings-nav-button,
   .settings-profile-nav .settings-nav-button {
-    justify-content: center;
-    padding-inline: 0;
+    justify-content: flex-start;
+    gap: 8px;
+    padding-inline: 8px;
+  }
+  .settings-nav-button svg {
+    flex-shrink: 0;
+  }
+  .settings-profile-nav .settings-nav-button {
+    padding-right: 8px;
   }
   .settings-nav-footer {
     padding-inline: 12px;
   }
   .settings-nav-footer .settings-json-button {
-    justify-content: center;
+    justify-content: flex-start;
+  }
+}
+@container settings (max-width: 420px) {
+  .settings-layout {
+    flex-direction: column;
+  }
+  .settings-sidebar {
+    display: none;
+  }
+  .settings-compact-navigation {
+    display: grid;
+    flex-shrink: 0;
+    gap: 8px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: var(--fs-md);
+  }
+  .settings-compact-navigation select {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--settings-control-height);
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    color-scheme: dark;
+    font-size: var(--fs-md);
+  }
+  .settings-compact-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .settings-compact-actions .ui-btn {
+    min-height: var(--settings-control-height);
+  }
+  .settings-compact-profile-hint {
+    color: var(--text-secondary);
+    font-size: var(--settings-desc-size);
+  }
+  .settings-compact-remove {
+    color: var(--red);
   }
 }
 

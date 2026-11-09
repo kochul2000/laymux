@@ -231,6 +231,7 @@
       "delete": "삭제"
     },
     "nav": {
+      "section": "설정 분류",
       "openJson": "settings.json",
       "openJsonTitle": "settings.json 열기",
       "groupAppearance": "모양",

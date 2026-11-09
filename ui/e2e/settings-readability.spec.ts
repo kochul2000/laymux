@@ -57,7 +57,7 @@ test("settings navigation and controls remain reachable in a compact dock", asyn
     element.style.width = "520px";
   });
   const sidebar = settings.locator(".settings-sidebar");
-  expect((await sidebar.boundingBox())!.width).toBeLessThanOrEqual(64);
+  expect((await sidebar.boundingBox())!.width).toBeLessThanOrEqual(180);
   await expect(page.getByTestId("sidebar-open-json")).toBeInViewport();
   const fields = settings.locator(".settings-fields");
 
@@ -101,6 +101,32 @@ test("settings navigation and controls remain reachable in a compact dock", asyn
     );
     expect(clipped).toEqual([]);
     await expect(page.getByTestId("save-settings-btn")).toBeInViewport();
+  }
+});
+
+test("좁은 설정에서도 같은 아이콘의 분류 이름이 보인다", async ({ appPage: page }, info) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.keyboard.press("Control+,");
+  const settings = page.getByTestId("settings-view");
+  for (const width of [320, 520, 640]) {
+    await settings.evaluate((element, width) => {
+      element.style.width = `${width}px`;
+    }, width);
+    if (width === 320) {
+      const selection = page.getByTestId("compact-settings-section");
+      await expect(selection).toBeVisible();
+      for (const id of ["claude", "codex", "grok", "terminal", "ptySessions"]) {
+        await expect(selection.locator(`option[value="${id}"]`)).toHaveText(/.+/);
+      }
+      continue;
+    }
+    await page.getByTestId("nav-codex").scrollIntoViewIfNeeded();
+    if (width === 520) await settings.screenshot({ path: info.outputPath("narrow-labels.png") });
+    for (const id of ["claude", "codex", "grok", "terminal", "ptySessions"]) {
+      const label = page.getByTestId(`nav-${id}`).locator(".settings-nav-label");
+      await expect(label).toBeVisible();
+      expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
   }
 });
 

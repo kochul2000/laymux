@@ -5229,97 +5229,99 @@ export function SettingsView() {
         className="settings-view flex h-full min-h-0"
         style={{ color: "var(--text-primary)" }}
       >
-        <SettingsNavigation
-          activeNav={activeNav}
-          profiles={profiles}
-          confirmationEnabled={confirmationEnabled}
-          onNavigate={setActiveNav}
-          onAddProfile={handleAddProfile}
-          onRemoveProfile={(index) => {
-            removeProfile(index);
-            setImmediateAction("nav.deleteProfile");
-            setActiveNav("startup");
-          }}
-          onOpenJson={handleOpenSettingsJson}
-        />
+        <div className="settings-layout">
+          <SettingsNavigation
+            activeNav={activeNav}
+            profiles={profiles}
+            confirmationEnabled={confirmationEnabled}
+            onNavigate={setActiveNav}
+            onAddProfile={handleAddProfile}
+            onRemoveProfile={(index) => {
+              removeProfile(index);
+              setImmediateAction("nav.deleteProfile");
+              setActiveNav("startup");
+            }}
+            onOpenJson={handleOpenSettingsJson}
+          />
 
-        {/* Content Area */}
-        <div className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <div ref={fieldsRef} className="settings-fields min-h-0 flex-1 overflow-y-auto">
-            {activeNav === "startup" && <StartupSection />}
-            {activeNav === "font" && <FontSection />}
-            {activeNav === "update" && <UpdateSection />}
-            {activeNav === "defaults" && <DefaultsSection />}
-            {activeNav.startsWith("profile-") && (
-              <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
-            )}
-            {activeNav === "colorSchemes" && <ColorSchemesSection />}
-            {activeNav === "ptySessions" && <PtySessionsSection />}
-            {activeNav === "keybindings" && <KeybindingsSection />}
-            {activeNav === "terminal" && <TerminalSection />}
-            {activeNav === "paste" && <PasteSection />}
-            {activeNav === "interface" && <InterfaceSection />}
-            {activeNav === "workspaceDisplay" && <WorkspacesSection />}
-            {activeNav === "remoteConnection" && <RemoteConnectionSection />}
-            {activeNav === "claude" && <ClaudeSection />}
-            {activeNav === "codex" && <CodexSection />}
-            {activeNav === "grok" && <GrokSection />}
-            {activeNav === "memo" && <MemoSection />}
-            {activeNav === "fileExplorer" && <FileExplorerSection />}
-            {activeNav === "viewer" && <ViewerSection />}
-            {activeNav === "widgets" && <WidgetsSection />}
-            {activeNav === "issueReporter" && <IssueReporterSection />}
-            {activeNav === "github" && <GitHubSection />}
-          </div>
+          {/* Content Area */}
+          <div className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <div ref={fieldsRef} className="settings-fields min-h-0 flex-1 overflow-y-auto">
+              {activeNav === "startup" && <StartupSection />}
+              {activeNav === "font" && <FontSection />}
+              {activeNav === "update" && <UpdateSection />}
+              {activeNav === "defaults" && <DefaultsSection />}
+              {activeNav.startsWith("profile-") && (
+                <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
+              )}
+              {activeNav === "colorSchemes" && <ColorSchemesSection />}
+              {activeNav === "ptySessions" && <PtySessionsSection />}
+              {activeNav === "keybindings" && <KeybindingsSection />}
+              {activeNav === "terminal" && <TerminalSection />}
+              {activeNav === "paste" && <PasteSection />}
+              {activeNav === "interface" && <InterfaceSection />}
+              {activeNav === "workspaceDisplay" && <WorkspacesSection />}
+              {activeNav === "remoteConnection" && <RemoteConnectionSection />}
+              {activeNav === "claude" && <ClaudeSection />}
+              {activeNav === "codex" && <CodexSection />}
+              {activeNav === "grok" && <GrokSection />}
+              {activeNav === "memo" && <MemoSection />}
+              {activeNav === "fileExplorer" && <FileExplorerSection />}
+              {activeNav === "viewer" && <ViewerSection />}
+              {activeNav === "widgets" && <WidgetsSection />}
+              {activeNav === "issueReporter" && <IssueReporterSection />}
+              {activeNav === "github" && <GitHubSection />}
+            </div>
 
-          {/* Sticky save bar — always visible at bottom */}
-          <div className="settings-save-bar">
-            <span
-              role={saveError !== null ? "alert" : "status"}
-              className="settings-save-status"
-              tabIndex={saveError !== null ? 0 : undefined}
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {saveError !== null
-                ? t("save.failed", { error: saveError })
-                : saving
-                  ? t("save.saving")
-                  : saveLabel === "Saved!"
-                    ? t("save.saved")
-                    : saveLabel === "Error!"
-                      ? t("save.error")
-                      : dirty
-                        ? t("save.unsaved")
-                        : immediateAction
-                          ? t("save.immediateApplied", { action: t(immediateAction) })
-                          : t("save.noChanges")}
-            </span>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                data-testid="discard-settings-btn"
-                onClick={handleDiscard}
-                disabled={!dirty || saving}
-                title={!dirty ? t("save.noChanges") : undefined}
+            {/* Sticky save bar — always visible at bottom */}
+            <div className="settings-save-bar">
+              <span
+                role={saveError !== null ? "alert" : "status"}
+                className="settings-save-status"
+                tabIndex={saveError !== null ? 0 : undefined}
+                style={{ color: "var(--text-secondary)" }}
               >
-                {t("save.discard")}
-              </Button>
-              <Button
-                data-testid="save-settings-btn"
-                variant="primary"
-                onClick={handleSave}
-                disabled={(!dirty && saveError === null) || saving}
-                title={!dirty && saveError === null ? t("save.noChanges") : undefined}
-              >
-                {saving
-                  ? t("save.saving")
-                  : saveError !== null
-                    ? t("save.retry")
+                {saveError !== null
+                  ? t("save.failed", { error: saveError })
+                  : saving
+                    ? t("save.saving")
                     : saveLabel === "Saved!"
                       ? t("save.saved")
                       : saveLabel === "Error!"
                         ? t("save.error")
-                        : t("save.save")}
-              </Button>
+                        : dirty
+                          ? t("save.unsaved")
+                          : immediateAction
+                            ? t("save.immediateApplied", { action: t(immediateAction) })
+                            : t("save.noChanges")}
+              </span>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  data-testid="discard-settings-btn"
+                  onClick={handleDiscard}
+                  disabled={!dirty || saving}
+                  title={!dirty ? t("save.noChanges") : undefined}
+                >
+                  {t("save.discard")}
+                </Button>
+                <Button
+                  data-testid="save-settings-btn"
+                  variant="primary"
+                  onClick={handleSave}
+                  disabled={(!dirty && saveError === null) || saving}
+                  title={!dirty && saveError === null ? t("save.noChanges") : undefined}
+                >
+                  {saving
+                    ? t("save.saving")
+                    : saveError !== null
+                      ? t("save.retry")
+                      : saveLabel === "Saved!"
+                        ? t("save.saved")
+                        : saveLabel === "Error!"
+                          ? t("save.error")
+                          : t("save.save")}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

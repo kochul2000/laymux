@@ -231,6 +231,7 @@
       "delete": "Delete"
     },
     "nav": {
+      "section": "Settings section",
       "openJson": "settings.json",
       "openJsonTitle": "Open settings.json",
       "groupAppearance": "Appearance",

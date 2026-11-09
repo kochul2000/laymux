@@ -828,7 +828,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByTestId("add-keybinding-btn")).toBeInTheDocument();
   });
 
@@ -836,7 +836,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByTestId("default-keybindings")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Shift+B")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Alt+1")).toBeInTheDocument();
@@ -847,7 +847,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Draft should show the new binding but store should not have it yet
@@ -866,7 +866,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     // Remove the custom keybinding
     await user.click(screen.getByTestId("remove-keybinding-0"));
 
@@ -882,7 +882,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Discard
@@ -896,14 +896,14 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
     // Navigate away
-    await user.click(screen.getByText("Startup"));
+    await user.click(screen.getByTestId("nav-startup"));
 
     // Navigate back
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
 
     // Save should flush the added keybinding
     await user.click(screen.getByTestId("save-settings-btn"));
@@ -916,7 +916,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     // pane.focus 기본값 kbd를 클릭해 캡처 시작
     await user.click(screen.getByText("Alt+Arrow"));
     const captureBox = screen.getByText("Press keys...");
@@ -941,7 +941,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     expect(screen.getByTestId("add-color-scheme-btn")).toBeInTheDocument();
   });
 
@@ -950,7 +950,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Store should be unchanged
@@ -966,7 +966,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // Delete the first scheme
     await user.click(screen.getByText("Delete"));
 
@@ -983,7 +983,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const originalName = useSettingsStore.getState().colorSchemes[0].name;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // The name input is a text input, not the select dropdown
     const nameInput = screen
       .getAllByDisplayValue(originalName)
@@ -1005,7 +1005,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Discard
@@ -1020,14 +1020,14 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     const initialCount = useSettingsStore.getState().colorSchemes.length;
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     await user.click(screen.getByTestId("add-color-scheme-btn"));
 
     // Navigate away
-    await user.click(screen.getByText("Startup"));
+    await user.click(screen.getByTestId("nav-startup"));
 
     // Navigate back
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
 
     // Save should flush the added scheme
     await user.click(screen.getByTestId("save-settings-btn"));
@@ -1038,7 +1038,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("nav-colorSchemes"));
     // The preview should exist and show draft values
     const preview = document.querySelector("[class*='font-mono']") as HTMLElement;
     expect(preview).toBeTruthy();
@@ -1191,7 +1191,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("nav-keybindings"));
     expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("Pane")).toBeInTheDocument();
     expect(screen.getByText("UI")).toBeInTheDocument();
