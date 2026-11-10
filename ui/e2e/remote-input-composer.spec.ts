@@ -2425,6 +2425,61 @@ async function sendComposerLine(
   await expect(editor).toHaveText("");
 }
 
+for (const deletion of ["Backspace", "Delete", "last-character"] as const) {
+  test(`${deletion}로 컴포저를 비우면 반투명 표시와 빈 초안 recall을 복구한다`, async ({
+    page,
+  }, testInfo) => {
+    const remote = await installRemotePage(page, { coarse: true });
+    await connect(page);
+    const editor = page.locator("#composerInput");
+    const composer = page.locator("#terminalComposer");
+    const list = page.locator("#composerHistoryList");
+    await sendComposerLine(page, remote, editor, "echo remembered", 1);
+    await page.setViewportSize({ width: 390, height: 500 });
+
+    await editor.fill(deletion === "last-character" ? "x" : "draft\nsecond line");
+    await expect(composer).toHaveAttribute("data-opacity-state", "active");
+    if (deletion !== "last-character") await editor.press("Control+a");
+    await editor.press(deletion === "last-character" ? "Backspace" : deletion);
+    await expect(editor).toHaveText("");
+    await expect(composer).toHaveAttribute("data-opacity-state", "focused");
+    await expect(composer).toHaveCSS("opacity", "0.7");
+    await page.screenshot({ path: testInfo.outputPath("cleared-composer.png") });
+
+    await editor.press("Tab");
+    await expect(list).toBeVisible();
+    await expect(list.locator('[role="option"]')).toHaveText(["echo remembered"]);
+    await page.screenshot({ path: testInfo.outputPath("empty-composer-recall.png") });
+    await editor.press("Escape");
+    await editor.click();
+    await expect(list).toBeVisible();
+    await editor.click();
+    await editor.blur();
+    await expect(composer).toHaveAttribute("data-opacity-state", "idle");
+    await expect(composer).toHaveCSS("opacity", "0.5");
+    expect(remote.inputs).toHaveLength(1);
+  });
+}
+
+test("삭제 후 새로 입력한 줄바꿈은 초안과 전송 원문에 보존한다", async ({ page }) => {
+  const remote = await installRemotePage(page, { coarse: true });
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  await editor.fill("x");
+  await editor.press("Backspace");
+  await editor.press("Enter");
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-opacity-state", "active");
+  await editor.press("Tab");
+  await expect(page.locator("#composerHistoryList")).toBeHidden();
+  await editor.pressSequentially("next");
+  await editor.press("Enter");
+  await editor.press("Shift+Enter");
+  await editor.press("Control+Enter");
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body.text).toBe("\nnext\n\n");
+  await expect(editor).toHaveText("");
+});
+
 test("Tab on an empty draft opens the newest-first recall popup and Enter fills it (#504)", async ({
   page,
 }) => {

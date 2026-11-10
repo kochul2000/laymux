@@ -680,6 +680,8 @@ human-control permit은 등록 시점의 owner epoch·absolute deadline·operati
 
 [ADR-0236](../adr/0236-remote-composer-inline-attachments.md)에 따라 Remote의 입력 표면은 contenteditable이다(Desktop은 textarea 유지). terminal별 draft의 raw `text`와 `attachments`(원문 offset 범위·path·원래 파일명·이미지 여부)가 SoT이며, 편집 중 DOM을 raw text와 범위로 직렬화한다. 첨부 span은 `contenteditable=false`이고 이미지는 Image/번호, 그 외는 파일명으로 표시한다. Backspace/Delete·선택 삭제는 칩 전체를 제거하고 별도 제거 버튼·undo 바인딩은 없다. 일반 붙여넣기는 plain text만 수용하고 직접 입력한 경로는 칩으로 바꾸지 않는다. Send에는 원래 경로를 기존 quoting 그대로 보내며 성공 시 동일 revision의 text와 metadata만 함께 비운다. history는 실제 전송 원문을 보관하고 recall은 일반 텍스트다. 업로드와 전송 실패·terminal 전환·취소는 기존 draft 격리와 보존 규칙을 따른다. 칩을 제거해도 서버 파일은 기존 cache 정리 정책을 따른다.
 
+DOM 직렬화는 editor 끝의 caret용 `<br>`를 초안에서 제외한다. 전체 삭제 뒤 브라우저가 남긴 `<br>` 하나도 빈 초안으로 읽으므로 Focused·Idle 반투명 표시와 빈 입력의 Tab·탭 recall이 복구된다. Enter로 삽입한 텍스트 노드의 실제 줄바꿈은 그대로 보존한다.
+
 #### Windows Codex 복원 최초 색상 응답 위임
 
 색상 setter/reset의 OSC 번호는 선행 0을 정규화해 판정한다. 예를 들어 `OSC 011` setter와 `OSC 0111` reset도 초기 snapshot을 무효화한다. 응답을 위임하는 startup query 자체의 exact marker 제한은 유지한다.
