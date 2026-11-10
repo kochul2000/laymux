@@ -12,6 +12,10 @@ export function createComposerEditor(element) {
     let text = "";
     const attachments = [];
     const positions = new Map();
+    // Chromium leaves a trailing BR as a caret placeholder after native
+    // deletion (including a lone BR in an empty editor). Authored newlines
+    // are text nodes; this placeholder must not become part of the draft.
+    const endBreak = element.lastChild?.nodeName === "BR" ? element.lastChild : null;
     function visit(node) {
       const start = text.length;
       const attachment = chips.get(node);
@@ -21,7 +25,7 @@ export function createComposerEditor(element) {
       } else if (node.nodeType === Node.TEXT_NODE) {
         text += node.data;
       } else if (node.nodeName === "BR") {
-        if (!node.hasAttribute("data-composer-end")) text += "\n";
+        if (node !== endBreak && !node.hasAttribute("data-composer-end")) text += "\n";
       } else {
         for (const child of node.childNodes) visit(child);
       }
