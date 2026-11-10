@@ -22,7 +22,8 @@ describe("워크트리 dock 표시", () => {
       blockers: ["index_flags", "usage_unknown"],
     } as unknown as WorktreeInspection;
     expect(worktreeRowStatus(entry, inspection)).toContain("변경 감지를 생략한 파일 있음");
-    expect(worktreeRowStatus(entry, inspection)).toContain("사용 여부 확인 실패");
+    expect(worktreeRowStatus(entry, inspection)).toContain("사용 상태 미확인 · 제거 보류");
+    expect(worktreeRowStatus(entry, inspection)).not.toContain("실패");
     expect(worktreeRowStatus(entry, inspection)).not.toContain("정리 후보");
   });
   it("터미널 선택을 따로 표시하는 목록에서는 디렉터리 상태만 계산한다", () => {

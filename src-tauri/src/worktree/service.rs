@@ -14,6 +14,13 @@ pub(super) fn snapshot_with(git: &Git) -> Result<WorktreeSnapshot, AppError> {
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )?;
     let mut worktrees = git.worktrees()?;
+    // 흡수된 서브모듈은 Git이 기본 항목을 checkout 대신 .git/modules로 보고한다.
+    // metadata와 일치하는 기본 항목만 기존 core.worktree 해석으로 보정한다.
+    if let Some(main) = worktrees.first_mut() {
+        if main.is_main && !main.bare && git.same_path(&main.path, &common_dir) {
+            main.path = git.text(&main.path, &["rev-parse", "--show-toplevel"])?;
+        }
+    }
     for worktree in &mut worktrees {
         worktree.path = git.host_path(&worktree.path);
     }

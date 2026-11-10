@@ -93,6 +93,50 @@ fn clean_removal_preserves_branch_and_commits() {
 }
 
 #[test]
+fn absorbed_submodule_lists_checkout_root_from_main_and_linked_worktree() {
+    let source = Repository::new();
+    let parent = Repository::new();
+    git(
+        &parent.main,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.cwd(),
+            "child",
+        ],
+    );
+    git(&parent.main, &["commit", "-am", "add submodule"]);
+    let child = parent.main.join("child");
+    let linked = parent.temp.path().join("child-feature");
+    git(
+        &child,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "child-feature",
+            linked.to_str().unwrap(),
+        ],
+    );
+    for cwd in [&child, &linked] {
+        let result = snapshot(cwd.to_str().unwrap()).unwrap();
+        assert_eq!(result.worktrees.len(), 2);
+        let main = &result.worktrees[0];
+        assert!(main.is_main);
+        assert_eq!(
+            std::fs::canonicalize(&main.path).unwrap(),
+            std::fs::canonicalize(&child).unwrap()
+        );
+        assert_eq!(result.repository_path, main.path);
+        let checked = inspect(cwd.to_str().unwrap(), &main.path).unwrap();
+        assert!(checked.blockers.iter().any(|reason| reason == "main"));
+        assert!(!checked.can_remove);
+    }
+}
+
+#[test]
 fn dirty_untracked_and_ignored_files_are_visible_and_protected() {
     let repo = Repository::new();
     let linked = repo.add("dirty");
@@ -298,6 +342,95 @@ fn long_file_lists_keep_total_counts_and_mark_the_preview_as_truncated() {
     assert!(result.files.len() < 300);
     assert!(result.files_truncated);
     assert!(!result.can_remove);
+}
+
+#[test]
+fn inspection_accepts_status_and_index_lists_larger_than_eight_mib() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = Repository::new();
+    let linked = repo.add("large-index");
+    let blob = git(&repo.main, &["rev-parse", "HEAD:tracked.txt"]);
+    let mut records = String::new();
+    const COUNT: usize = 65_536;
+    let suffix = "x".repeat(128);
+    for index in 0..COUNT {
+        records.push_str(&format!("100644 {blob}\tbulk-{index:06}-{suffix}\n"));
+    }
+    let mut child = crate::process::headless_command("git")
+        .args([
+            "-C",
+            linked.to_str().unwrap(),
+            "update-index",
+            "--index-info",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(records.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(COUNT * ("bulk-000000-".len() + suffix.len() + 4) > 8 * 1024 * 1024);
+    let result = repo.inspect(&linked);
+    assert_eq!(result.tracked_changes, COUNT);
+    assert_eq!(result.files.len(), 200);
+    assert!(result.files_truncated);
+    assert!(result.blockers.contains(&"tracked_changes".into()));
+    assert!(!result.can_remove);
+}
+
+#[test]
+fn streamed_git_failure_is_not_accepted_as_an_empty_clean_status() {
+    let repo = Repository::new();
+    let result = super::git::Git::new(repo.cwd()).unwrap().read(
+        repo.cwd(),
+        &["status", "--invalid-worktree-status-option"],
+        super::parsing::status,
+    );
+    assert!(result
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Git 검사 또는 작업에 실패"));
+}
+
+#[test]
+#[ignore = "LAYMUX_WORKTREE_VERIFY_PATHS로 지정한 실제 저장소의 읽기 전용 검증"]
+fn verify_existing_repositories_read_only() {
+    let paths: Vec<String> = serde_json::from_str(
+        &std::env::var("LAYMUX_WORKTREE_VERIFY_PATHS").expect("JSON 경로 배열이 필요합니다"),
+    )
+    .unwrap();
+    assert!(!paths.is_empty());
+    for cwd in paths {
+        let started = std::time::Instant::now();
+        let listed = snapshot(&cwd).unwrap();
+        let main = listed.worktrees.iter().find(|entry| entry.is_main).unwrap();
+        let checked = inspect(&cwd, &main.path).unwrap();
+        assert!(checked.blockers.contains(&"main".into()));
+        assert!(!checked.can_remove);
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": cwd, "repositoryPath": listed.repository_path,
+                "worktrees": listed.worktrees.len(), "tracked": checked.tracked_changes,
+                "untracked": checked.untracked_files, "ignored": checked.ignored_files,
+                "preview": checked.files.len(), "truncated": checked.files_truncated,
+                "milliseconds": started.elapsed().as_millis(),
+            })
+        );
+    }
 }
 
 #[test]

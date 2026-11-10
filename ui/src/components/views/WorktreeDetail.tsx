@@ -15,6 +15,7 @@ import { worktreeFolderName } from "@/lib/worktree-display";
 import { joinPath } from "@/lib/file-explorer-parse";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { WorktreeWarnings } from "./WorktreeWarnings";
 
 interface Props {
   workingDir: string;
@@ -223,11 +224,7 @@ export function WorktreeDetail({
                   ))}
                 </div>
               )}
-              {(inspection.usageWarnings ?? []).map((warning) => (
-                <p key={warning} className="worktree-warning">
-                  {warning}
-                </p>
-              ))}
+              <WorktreeWarnings warnings={inspection.usageWarnings ?? []} />
               {inspection.files.length > 0 && (
                 <details open>
                   <summary className="cursor-pointer">

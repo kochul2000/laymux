@@ -11,6 +11,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
+import { clearWorktreeSnapshotCache } from "@/lib/worktree-snapshot-cache";
 import type { WorktreeEntry, WorktreeInspection, WorktreeSnapshot } from "@/lib/worktree-api";
 
 const api = vi.hoisted(() => ({
@@ -81,6 +82,7 @@ function renderView() {
 describe("WorktreeView", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    clearWorktreeSnapshotCache();
     api.useContainerSize.mockReturnValue({ w: 240, h: 452 });
     api.useSyncGroupCwdContext.mockReturnValue({
       cwd: "D:/repo",
@@ -106,7 +108,7 @@ describe("WorktreeView", () => {
     });
     useTerminalDisplayStore.setState({ contexts: {} });
     useSettingsStore.setState(useSettingsStore.getInitialState());
-    useUiStore.setState({ hiddenWorkspaceIds: new Set() });
+    useUiStore.setState({ hiddenWorkspaceIds: new Set(), hiddenPaneIds: new Set() });
     useNotificationStore.setState({ notifications: [] });
     useGridStore.setState({ focusedPaneIndex: 0 });
     useDockStore.setState({ focusedDock: null, focusedDockPaneId: null });
@@ -169,6 +171,50 @@ describe("WorktreeView", () => {
     fireEvent.click(move);
     expect(api.focusWorktreeUsage).toHaveBeenCalledWith(usage);
     expect(screen.queryByTestId("worktree-detail")).not.toBeInTheDocument();
+  });
+
+  it("숨긴 작업 공간의 데몬 세션을 목록에서 숨기지 않고 연결 대기와 이동 효과를 표시한다", async () => {
+    const usage = {
+      terminalId: "terminal-hidden",
+      paneId: "hidden-pane",
+      workspaceId: "hidden",
+      workspaceName: "숨은 작업",
+      cwd: clean.path,
+      kind: "daemon" as const,
+      agentType: null,
+    };
+    const linked = { ...clean, usage: [usage] };
+    api.getWorktreeSnapshot.mockResolvedValue(snapshot([linked]));
+    api.inspectWorktree.mockResolvedValue(
+      inspection(linked, { canRemove: false, blockers: ["in_use", "usage_unknown"] }),
+    );
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "hidden",
+          name: "숨은 작업",
+          panes: [
+            {
+              id: "slot-hidden",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "hidden-pane", view: { type: "TerminalView" } }],
+              activeLayerId: "hidden-pane",
+            },
+          ],
+        },
+      ],
+    });
+    useUiStore.setState({ hiddenWorkspaceIds: new Set(["hidden"]) });
+    renderView();
+    const move = await screen.findByRole("button", { name: "터미널로 이동", exact: true });
+    expect(within(move).getByText("숨긴 작업 공간 · 연결 대기")).toBeInTheDocument();
+    expect(move).toHaveAttribute("title", expect.stringContaining("이동하면 표시합니다"));
+    expect(move.querySelector(".workspace-identity > span:first-child")).toBeEmptyDOMElement();
+    fireEvent.click(move);
+    expect(api.focusWorktreeUsage).toHaveBeenCalledWith(usage);
   });
 
   it("터미널 여러 개도 첫 pane으로 바로 이동하고 별도 화살표에서 대상을 선택한다", async () => {
@@ -358,7 +404,13 @@ describe("WorktreeView", () => {
     expect(move.querySelector('[data-pane-index="1"]')).toHaveAttribute("data-highlighted", "true");
     expect(move).toHaveAttribute("title", expect.stringContaining("저장된 세션"));
     act(() => useWorkspaceStore.setState({ workspaceDisplayOrder: ["ws-a", "ws-b", "ws-hidden"] }));
-    expect(move.querySelector(".workspace-identity > span:first-child")).toHaveTextContent("1");
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "터미널로 이동", exact: true })
+          .querySelector(".workspace-identity > span:first-child"),
+      ).toHaveTextContent("1"),
+    );
   });
 
   it("디렉터리 상태는 둘째 줄에, 에이전트 상태는 이동 버튼에 표시한다", async () => {
@@ -496,7 +548,7 @@ describe("WorktreeView", () => {
     expect(screen.queryByText("터미널 시작을 확인하고 있습니다")).not.toBeInTheDocument();
   });
 
-  it.each(["ready", "generation", "removed"])(
+  it.each(["ready", "generation", "removed", "cwd"])(
     "다른 터미널의 %s 변화 뒤 재연결 중 경고와 이전 검사를 갱신한다",
     async (transition) => {
       const warning =
@@ -505,6 +557,7 @@ describe("WorktreeView", () => {
         id: "terminal-restored",
         sessionReady: transition !== "ready",
         generation: 1,
+        cwd: "D:/other",
       };
       useTerminalStore.setState({ instances: [terminal as never] });
       api.getWorktreeSnapshot.mockResolvedValue({ ...snapshot(), usageWarnings: [warning] });
@@ -535,6 +588,7 @@ describe("WorktreeView", () => {
                     ...terminal,
                     sessionReady: true,
                     generation: transition === "generation" ? 2 : 1,
+                    cwd: transition === "cwd" ? clean.path : terminal.cwd,
                   } as never,
                 ],
         }),
@@ -735,7 +789,93 @@ describe("WorktreeView", () => {
     expect(api.inspectWorktree).toHaveBeenCalledTimes(3);
     view.unmount();
     await act(async () => waiting.resolve(inspection(clean)));
-    expect(api.inspectWorktree).toHaveBeenCalledTimes(3);
+    expect(api.inspectWorktree).toHaveBeenCalledTimes(5);
+  });
+
+  it("같은 대상 재진입은 진행 중 작업과 완료 결과를 공유하고 수동 갱신은 다시 검사한다", async () => {
+    const waiting = deferred<WorktreeInspection>();
+    api.inspectWorktree.mockReturnValue(waiting.promise);
+    const first = renderView();
+    await waitFor(() => expect(api.inspectWorktree).toHaveBeenCalledTimes(2));
+    first.unmount();
+    const second = renderView();
+    await screen.findByText("feature");
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(1);
+    expect(api.inspectWorktree).toHaveBeenCalledTimes(2);
+    await act(async () => waiting.resolve(inspection(clean)));
+    second.unmount();
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByTestId("view-worktree")).toHaveAttribute("aria-busy", "false"),
+    );
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "워크트리 새로고침" }));
+    await waitFor(() => expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(2));
+  });
+
+  it("한 뷰의 수동 갱신 후에도 다른 뷰와 다음 세션 변경 검사를 공유한다", async () => {
+    render(
+      <>
+        <WorktreeView instanceId="first" paneId="first" syncGroup="ws" />
+        <WorktreeView instanceId="second" paneId="second" syncGroup="ws" />
+      </>,
+    );
+    const expectFinished = () => {
+      for (const view of screen.getAllByTestId("view-worktree"))
+        expect(view).toHaveAttribute("aria-busy", "false");
+    };
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "워크트리 새로고침" })[1]);
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(2);
+    act(() =>
+      useTerminalStore.setState({
+        instances: [{ id: "restored", sessionReady: true, generation: 1 } as never],
+      }),
+    );
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it("복원 이벤트가 겹쳐도 진행 중 검사를 취소하지 않고 최신 상태를 한 번 더 검사한다", async () => {
+    const trees = Array.from({ length: 5 }, (_, i) => entry(`D:/tree-${i}`));
+    const waiting = trees.map(() => deferred<WorktreeInspection>());
+    api.getWorktreeSnapshot.mockResolvedValue(snapshot(trees));
+    api.inspectWorktree.mockImplementation(
+      (_cwd, path) => waiting[trees.findIndex((t) => t.path === path)].promise,
+    );
+    renderView();
+    await waitFor(() => expect(api.inspectWorktree).toHaveBeenCalledTimes(3));
+    await act(async () => waiting[0].resolve(inspection(trees[0])));
+    expect(screen.getByTestId("worktree-progress")).toHaveTextContent("1/5");
+    for (let generation = 1; generation <= 3; generation++) {
+      act(() =>
+        useTerminalStore.setState({
+          instances: [{ id: "restored", sessionReady: true, generation } as never],
+        }),
+      );
+    }
+    expect(screen.getByTestId("worktree-progress")).toHaveTextContent("1/5");
+    expect(screen.getByRole("button", { name: /정리 후보.*검사 중/ })).toBeInTheDocument();
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(1);
+    await act(async () => waiting.forEach((item, i) => item.resolve(inspection(trees[i]))));
+    await waitFor(() => expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("view-worktree")).toHaveAttribute("aria-busy", "false"),
+    );
+    expect(api.inspectWorktree).toHaveBeenCalledTimes(10);
+  });
+
+  it("다수의 사용 경고는 한 곳에 접어 두고 목록을 유지한다", async () => {
+    const warnings = Array.from({ length: 12 }, (_, i) => `terminal-${i}: 연결 대기`);
+    api.getWorktreeSnapshot.mockResolvedValue({ ...snapshot(), usageWarnings: warnings });
+    renderView();
+    await screen.findByText("feature");
+    const summary = screen.getByText("제거 보류 · 사용 확인 필요 12건");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(within(summary.closest("details")!).getByText(/제거를 보류/)).toBeInTheDocument();
+    expect(screen.getByText(warnings[0]).closest(".worktree-warning-list")).toBeInTheDocument();
   });
 
   it("제거 시점의 백엔드 거부는 표시하고 이전 검사로 다시 제거하지 않는다", async () => {

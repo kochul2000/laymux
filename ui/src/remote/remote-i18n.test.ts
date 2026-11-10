@@ -12,8 +12,19 @@ import {
 } from "./remote-i18n.js";
 import { setRemoteIcon } from "./remote-icons.js";
 import { MemoDocument } from "../lib/memo-document";
+import { formatWorktreeBlockerLabel } from "../lib/worktree-presentation";
 
 describe("Remote 기기 언어", () => {
+  it("워크트리 사용 미확인의 제거 보류 문구도 선택 언어로 표시한다", () => {
+    initializeRemoteLanguage({ locale: "en" });
+    expect(String(formatWorktreeBlockerLabel("usage_unknown", t))).toBe(
+      "Usage unknown · Removal blocked",
+    );
+    setRemoteLanguage("ko");
+    expect(String(formatWorktreeBlockerLabel("usage_unknown", t))).toBe(
+      "사용 상태 미확인 · 제거 보류",
+    );
+  });
   it("메모의 제품 오류도 문서 상태를 잃지 않고 새 언어로 표시한다", async () => {
     initializeRemoteLanguage({ locale: "en" });
     const memo = new MemoDocument(
