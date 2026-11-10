@@ -31,7 +31,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {"method":"GET","path":"/api/v1/worktrees","description":"현재 저장소의 Git 워크트리와 laymux 사용 정보를 조회합니다. 사용 정보가 불완전하면 usageWarnings로 알립니다.","query":{"workingDir":"저장소 안의 절대 경로"}},
             {"method":"POST","path":"/api/v1/worktrees/inspect","description":"워크트리의 변경·미추적·ignored 파일과 laymux 사용 상태, 제거 차단 사유를 검사합니다.","body":{"workingDir":"string","path":"string"}},
             {"method":"POST","path":"/api/v1/worktrees/remove","description":"확인한 HEAD와 Git·laymux 사용 상태를 재검증해 워크트리 하나를 제거합니다. 브랜치는 보존합니다. 강제 제거는 지원하지 않습니다.","body":{"workingDir":"string","path":"string","expectedHead":"검사한 HEAD"}},
-            {"method":"POST","path":"/api/v1/ui/worktrees","description":"열린 WorktreeView의 상세 선택·필터·새로고침을 조작합니다.","body":{"paneId":"string","action":"select | filter | refresh","path":"select일 때 대상 경로","filter":"all | candidates"}},
+            {"method":"POST","path":"/api/v1/ui/worktrees","description":"열린 WorktreeView의 상세 선택·필터·새로고침·표시 상태 조회·설명 펼침을 조작합니다.","body":{"paneId":"string","action":"select | filter | refresh | status | disclosure","path":"select일 때 대상 경로","filter":"all | candidates","section":"disclosure일 때 warnings | criteria","open":"disclosure일 때 boolean"}},
             {"method":"GET","path":"/api/v1/settings/export","description":"다른 PC로 옮길 수 있는 사용자 설정만 반환합니다. 로컬 실행 환경과 복원 상태는 제외합니다."},
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/environments",

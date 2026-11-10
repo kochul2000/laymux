@@ -26,6 +26,7 @@ export function useWorktreeTerminalTargets(usage: WorktreeUsage[]) {
   const sortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
   const notifications = useNotificationStore((s) => s.notifications);
   const hiddenIds = useUiStore((s) => s.hiddenWorkspaceIds);
+  const hiddenPaneIds = useUiStore((s) => s.hiddenPaneIds);
   const docks = useDockStore((s) => s.docks);
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
@@ -83,7 +84,7 @@ export function useWorktreeTerminalTargets(usage: WorktreeUsage[]) {
       notifications,
     ).terminalSummaries[0];
     const kind = live?.sessionReady ? "live" : value.kind;
-    const availability = kind === "saved" ? "저장된 세션" : kind === "daemon" ? "백그라운드" : "";
+    const availability = kind === "saved" ? "저장된 세션" : kind === "daemon" ? "연결 대기" : "";
     const name =
       workspace?.name ||
       value.workspaceName ||
@@ -91,6 +92,16 @@ export function useWorktreeTerminalTargets(usage: WorktreeUsage[]) {
     const panes = workspace?.panes ?? dock?.panes ?? [];
     const number = value.paneId ? paneNumberFor(panes, value.paneId) : null;
     const isActive = workspace?.id === activeWorkspaceId;
+    const visibility =
+      workspace && hiddenIds.has(workspace.id) && !isActive
+        ? "숨긴 작업 공간"
+        : value.paneId && hiddenPaneIds.has(value.paneId)
+          ? "숨긴 터미널"
+          : dock && !dock.visible
+            ? "숨긴 독"
+            : slot && slot.activeLayerId !== value.paneId
+              ? "뒤쪽 레이어"
+              : "";
     return {
       value,
       name,
@@ -100,6 +111,8 @@ export function useWorktreeTerminalTargets(usage: WorktreeUsage[]) {
       paneIndex: workspace
         ? slotIndex
         : (dock?.panes.findIndex((pane) => pane.id === value.paneId) ?? -1),
+      visibility,
+      availability,
       isFocusedPane: workspace
         ? isActive && focusedPaneIndex === slotIndex && slot?.activeLayerId === value.paneId
         : !!value.paneId && focusedDockPaneId === value.paneId,
@@ -108,6 +121,7 @@ export function useWorktreeTerminalTargets(usage: WorktreeUsage[]) {
         number ? `pane ${number}` : null,
         formatActivity(activity).label,
         availability,
+        visibility ? `${visibility} · 이동하면 표시합니다` : null,
         value.paneId ? value.cwd : "이동할 pane이 없는 터미널입니다",
       ]
         .filter(Boolean)

@@ -3,6 +3,7 @@ mod git;
 mod inspection;
 mod legacy;
 mod main_cwd;
+mod output;
 mod parsing;
 mod service;
 mod types;
@@ -12,5 +13,7 @@ pub use main_cwd::main_worktree_cwd;
 pub use service::{inspect, remove, remove_with_guard, snapshot};
 pub use types::{WorktreeEntry, WorktreeFile, WorktreeInspection, WorktreeSnapshot};
 
+#[cfg(test)]
+mod parsing_tests;
 #[cfg(test)]
 mod tests;

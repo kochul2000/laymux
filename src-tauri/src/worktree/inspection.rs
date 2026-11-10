@@ -70,7 +70,7 @@ pub(super) fn inspect_with(git: &Git, path: &str) -> Result<WorktreeInspection, 
     if source_is_target || process_cwd_is_within(target) {
         result.blockers.push("current_directory".into());
     }
-    let status = parsing::status(&git.run(
+    let status = git.read(
         target,
         &[
             "status",
@@ -80,15 +80,19 @@ pub(super) fn inspect_with(git: &Git, path: &str) -> Result<WorktreeInspection, 
             "--ignored=traditional",
             "--ignore-submodules=none",
         ],
-    )?)?;
+        parsing::status,
+    )?;
     result.tracked_changes = status.tracked;
     result.untracked_files = status.untracked;
     result.ignored_files = status.ignored;
     result.files_truncated =
         status.tracked + status.untracked + status.ignored > status.files.len();
     result.files = status.files;
-    let (submodules, hidden_index) =
-        parsing::index_guards(&git.run(target, &["ls-files", "-v", "--stage", "-z"])?)?;
+    let (submodules, hidden_index) = git.read(
+        target,
+        &["ls-files", "-v", "--stage", "-z"],
+        parsing::index_guards,
+    )?;
     for (blocked, code) in [
         (result.tracked_changes > 0, "tracked_changes"),
         (result.untracked_files > 0, "untracked_files"),

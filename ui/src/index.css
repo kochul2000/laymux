@@ -101,6 +101,8 @@
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
   --worktree-row-leading: 16px;
+  --worktree-warning-max-height: 120px;
+  --worktree-criteria-max-height: 140px;
   --worktree-content-padding: 8px;
   --worktree-row-padding: 6px;
   --worktree-action-height: 32px;
@@ -2051,6 +2053,10 @@
   color: var(--text-muted);
   font-size: var(--fs-xs);
 }
+.worktree-target-state {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
 .ui-btn.worktree-filter {
   min-height: var(--btn-h);
   padding: 0 var(--worktree-row-padding);
@@ -2285,9 +2291,51 @@
   color: var(--yellow);
   overflow-wrap: anywhere;
 }
+.worktree-warnings {
+  margin: var(--worktree-row-padding) var(--worktree-content-padding);
+  color: var(--yellow);
+  font-size: var(--fs-xs);
+}
+.worktree-criteria {
+  flex-shrink: 0;
+  padding: var(--worktree-row-padding) var(--worktree-content-padding);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  max-height: var(--worktree-criteria-max-height);
+  overflow: auto;
+}
+.worktree-criteria summary {
+  cursor: pointer;
+}
+.worktree-criteria p {
+  margin-top: var(--worktree-row-padding);
+}
+/* 캡처 엔진도 닫힌 details의 내용을 그리지 않도록 명시한다. */
+.worktree-criteria:not([open]) > :not(summary),
+.worktree-warnings:not([open]) > :not(summary) {
+  display: none;
+}
+.worktree-warnings summary {
+  cursor: pointer;
+}
+.worktree-warnings > p {
+  margin-top: var(--worktree-row-padding);
+  overflow-wrap: anywhere;
+}
+.worktree-warning-list {
+  max-height: var(--worktree-warning-max-height);
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.worktree-warning-list p {
+  margin-top: var(--worktree-row-padding);
+}
 .worktree-error {
   color: var(--red);
   overflow-wrap: anywhere;
+  max-height: var(--worktree-warning-max-height);
+  overflow: auto;
 }
 .pane-link-decoration {
   box-sizing: border-box;

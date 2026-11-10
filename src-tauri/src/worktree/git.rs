@@ -1,13 +1,10 @@
-use std::io::Read;
-use std::process::{Command, Output, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::process::{ChildStdout, Command, Output};
+use std::time::Duration;
 
 use crate::error::AppError;
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(30);
-const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
-const EXIT_POLL: Duration = Duration::from_millis(10);
+pub(super) use super::output::bounded_output;
+use super::output::{bounded_output_for, read_output_for, GIT_TIMEOUT};
 
 /// All commands use argument vectors; a WSL path stays attached to its distro.
 pub(super) struct Git {
@@ -142,6 +139,23 @@ impl Git {
         checked_stdout(output)
     }
 
+    pub fn read<T: Send + 'static>(
+        &self,
+        cwd: &str,
+        args: &[&str],
+        read: impl FnOnce(ChildStdout) -> Result<T, AppError> + Send + 'static,
+    ) -> Result<T, AppError> {
+        let cwd = self.git_path(cwd)?;
+        let output = read_output_for(&mut self.command(&cwd, args), self.timeout, read)?;
+        if !output.status.success() {
+            return Err(AppError::Other(format!(
+                "Git 검사 또는 작업에 실패했습니다: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(output.stdout)
+    }
+
     pub fn worktrees(&self) -> Result<Vec<super::types::WorktreeEntry>, AppError> {
         let cwd = self.git_path(&self.cwd)?;
         let mut command = self.command(&cwd, &["worktree", "list", "--porcelain", "-z"]);
@@ -238,78 +252,6 @@ fn checked_stdout(output: Output) -> Result<Vec<u8>, AppError> {
     Ok(output.stdout)
 }
 
-fn drain(source: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>>> {
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = source
-            .take((OUTPUT_LIMIT + 1) as u64)
-            .read_to_end(&mut bytes)
-            .and_then(|_| {
-                if bytes.len() > OUTPUT_LIMIT {
-                    Err(std::io::Error::other(
-                        "Git output exceeded the inspection limit",
-                    ))
-                } else {
-                    Ok(bytes)
-                }
-            });
-        let _ = sender.send(result);
-    });
-    receiver
-}
-
-/// Bounded pipe reads fail closed; truncated status is never accepted as clean.
-pub(super) fn bounded_output(command: &mut Command) -> Result<Output, AppError> {
-    bounded_output_for(command, GIT_TIMEOUT)
-}
-
-fn bounded_output_for(command: &mut Command, timeout: Duration) -> Result<Output, AppError> {
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::Other("Git stdout pipe missing".into()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| AppError::Other("Git stderr pipe missing".into()))?;
-    let stdout = drain(stdout);
-    let stderr = drain(stderr);
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(EXIT_POLL),
-            outcome => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(outcome.err().map(AppError::Io).unwrap_or_else(|| {
-                    AppError::Other(
-                        "Git 작업이 제한 시간을 초과했습니다. 목록을 새로 고쳐 상태를 확인하세요."
-                            .into(),
-                    )
-                }));
-            }
-        }
-    };
-    let receive = |receiver: Receiver<std::io::Result<Vec<u8>>>| -> Result<Vec<u8>, AppError> {
-        receiver
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .map_err(|_| AppError::Other("Git 출력을 끝까지 확인하지 못했습니다.".into()))?
-            .map_err(AppError::Io)
-    };
-    Ok(Output {
-        status,
-        stdout: receive(stdout)?,
-        stderr: receive(stderr)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,13 +270,5 @@ mod tests {
         assert!(!git.same_path("//wsl.localhost/Ubuntu/home/Repo", "/home/repo"));
         assert!(!git.same_path("//wsl.localhost/Debian/home/repo", "/home/repo"));
         assert!(!git.same_path("//wsl.localhost/Ubuntu/home/repo\\tail", "/home/repo/tail"));
-    }
-
-    #[test]
-    fn oversized_output_fails_instead_of_becoming_a_partial_status() {
-        let result = drain(std::io::Cursor::new(vec![b'x'; OUTPUT_LIMIT + 1]))
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert!(result.is_err());
     }
 }

@@ -11,7 +11,18 @@ export function WorktreeTerminalTarget({
   const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
   return (
     <span className="worktree-terminal-target">
-      <WorkspaceIdentity index={target.index} name={target.name} isActive={target.isFocusedPane} />
+      <span className="flex w-full min-w-0 items-center gap-1">
+        <WorkspaceIdentity
+          index={target.index}
+          name={target.name}
+          isActive={target.isFocusedPane}
+        />
+        {(target.visibility || target.availability) && (
+          <span className="worktree-target-state truncate">
+            {[target.visibility, target.availability].filter(Boolean).join(" · ")}
+          </span>
+        )}
+      </span>
       <WorkspaceTerminalSummary
         terminal={target.terminal}
         minimapPanes={target.panes}

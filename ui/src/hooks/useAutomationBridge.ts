@@ -74,6 +74,7 @@ import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
 import { selectTerminalLastInputEntry } from "@/lib/terminal-last-input";
 import { WORKTREE_ACTION_EVENT, type WorktreeViewAction } from "@/lib/worktree-view-control";
+import { worktreeCacheMetrics } from "@/lib/worktree-snapshot-cache";
 
 export interface HandlerResult {
   success: boolean;
@@ -1535,6 +1536,36 @@ const handlers: HandlerMap = {
       ).find((element) => element.dataset.paneId === p.paneId);
       if (!root) return err("WorktreeView pane is not mounted");
       const action = p.action;
+      if (action === "status") {
+        const list = root.querySelector<HTMLElement>('[data-testid="worktree-list"]');
+        return ok({
+          busy: root.getAttribute("aria-busy") === "true",
+          error: root.querySelector('[role="alert"]')?.textContent ?? "",
+          cache: worktreeCacheMetrics(),
+          repository: root
+            .querySelector('[data-testid="worktree-repository"]')
+            ?.getAttribute("title"),
+          progress: root.querySelector('[data-testid="worktree-progress"]')?.textContent ?? "",
+          rows: Array.from(root.querySelectorAll<HTMLElement>("[data-worktree-path]")).map(
+            (row) => ({
+              path: row.dataset.worktreePath,
+              summary: row.querySelector(".worktree-directory-status")?.textContent,
+            }),
+          ),
+          warnings: root.querySelector(".worktree-warnings summary")?.textContent ?? "",
+          listHeight: list?.clientHeight ?? 0,
+        });
+      }
+      if (action === "disclosure") {
+        if ((p.section !== "warnings" && p.section !== "criteria") || typeof p.open !== "boolean")
+          return err("section and boolean open required");
+        const elements = root.querySelectorAll<HTMLDetailsElement>(`.worktree-${p.section}`);
+        if (!elements.length) return err("disclosure is not available");
+        elements.forEach((element) => {
+          element.open = p.open as boolean;
+        });
+        return ok({ accepted: true });
+      }
       if (action !== "refresh" && action !== "select" && action !== "filter")
         return err("action must be refresh, select or filter");
       if (

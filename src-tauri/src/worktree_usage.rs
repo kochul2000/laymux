@@ -271,14 +271,26 @@ fn assemble_usage(
         // Ending merges an exited child with an asynchronous termination
         // request. A failed teardown can leave that request set while the child
         // is alive, so it cannot release the worktree's usage protection.
-        let reason = if session.state == PtySessionState::Ending {
-            "종료 요청된 PTY의 종료 완료를 확인할 수 없습니다"
-        } else {
-            "연결되지 않은 PTY의 현재 CWD를 확인할 수 없습니다"
+        let reason = match session.state {
+            PtySessionState::Ending => {
+                "종료 확인 대기 · 종료 요청된 PTY의 종료 완료를 확인할 수 없습니다"
+            }
+            PtySessionState::AwaitingPane => {
+                "화면 연결 대기 · 복원 대상 세션의 현재 CWD는 확인 전입니다"
+            }
+            PtySessionState::Detached => "복원 대상 없는 세션 · 현재 CWD를 확인할 수 없습니다",
+            PtySessionState::OtherClient => {
+                "다른 클라이언트에 연결됨 · 현재 CWD를 확인할 수 없습니다"
+            }
+            PtySessionState::Pane => "화면 연결 정보 확인 중 · 현재 CWD를 확인할 수 없습니다",
         };
+        let child = session
+            .child_pid
+            .map(|pid| format!(", PID {pid}"))
+            .unwrap_or_default();
         warnings.push(format!(
-            "{} ({}): {reason}",
-            session.terminal_id, session.daemon
+            "{} ({}{child}): {reason}",
+            session.terminal_id, session.daemon,
         ));
     }
     for daemon in &inventory.unavailable_daemons {

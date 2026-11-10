@@ -13,6 +13,7 @@ import { getInstanceId } from "@/lib/view-instance-id";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { WorktreeDetail } from "./WorktreeDetail";
 import { WorktreeRow } from "./WorktreeRow";
+import { WorktreeWarnings } from "./WorktreeWarnings";
 import { focusWorktreeUsage, openWorktreeTerminal } from "@/lib/worktree-navigation";
 import { WORKTREE_ACTION_EVENT, type WorktreeViewAction } from "@/lib/worktree-view-control";
 import type { WorktreeEntry } from "@/lib/worktree-api";
@@ -77,22 +78,26 @@ function WorktreeContent({
   if (created && ready && readyCreation !== created.id) setReadyCreation(created.id);
   const creationSettled = ready || readyCreation === created?.id;
   // 복원/재연결은 이 뷰의 새 터미널 버튼을 거치지 않는다. 실제 세션의
-  // 준비·교체·제거만 재검사 신호로 쓰며 출력·활동·표시 갱신은 제외한다.
+  // 준비·교체·제거·실제 CWD 이동만 재검사 신호로 쓰며 출력·활동·표시 갱신은 제외한다.
   const terminalLifecycle = useTerminalStore((s) =>
     s.instances
-      .map(
-        (terminal) =>
-          `${terminal.id}:${terminal.sessionReady === true ? (terminal.generation ?? 0) : "pending"}`,
+      .map((terminal) =>
+        JSON.stringify([
+          terminal.id,
+          terminal.sessionReady === true ? (terminal.generation ?? 0) : "pending",
+          terminal.cwd ?? "",
+        ]),
       )
       .sort()
       .join("\0"),
   );
-  const { snapshot, error, inspections, loading, refresh, version } = useWorktreeSnapshot(
-    workingDir,
-    sourceTerminalId,
-    `${terminalLifecycle}\x01${created ? `${created.id}:${creationSettled}` : ""}`,
-    !cwdReceive,
-  );
+  const { snapshot, error, inspections, loading, refresh, version, completed, queued } =
+    useWorktreeSnapshot(
+      workingDir,
+      sourceTerminalId,
+      `${terminalLifecycle}\x01${created ? `${created.id}:${creationSettled}` : ""}`,
+      !cwdReceive,
+    );
   const [filter, setFilter] = useState<"all" | "candidates">("all");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -231,6 +236,23 @@ function WorktreeContent({
           />
         </div>
       </div>
+      <details className="worktree-criteria">
+        <summary>표시·정리 기준</summary>
+        <p>
+          전체는 Git에 등록된 워크트리입니다. 숨긴 작업 공간·터미널과 뒤쪽 레이어도 사용 중으로
+          보호하며, 이동하면 다시 표시합니다.
+        </p>
+        <p>
+          정리 후보는 파일·Git 상태와 laymux 사용 검사를 통과한 항목입니다. 현재 경로를 확인할 수
+          없는 세션이 하나라도 있으면 제거를 보류합니다. 저장된 경로는 현재 실행 경로를 보증하지
+          않습니다.
+        </p>
+        <p>
+          검사는 최대 3개씩 진행합니다. 같은 대상의 진행 중 검사와 30초 이내 완료 결과를 재사용하며,
+          사용 상태 변경과 새로고침은 다시 검사합니다. 제거는 최신 상세 검사와 실행 직전 재검증을
+          거칩니다.
+        </p>
+      </details>
       <div
         className={`worktree-panes ${split && selected ? "worktree-panes-split" : ""}`}
         data-testid="worktree-panes"
@@ -245,16 +267,17 @@ function WorktreeContent({
           }}
         >
           {!workingDir && <p className="p-3">터미널에서 Git 저장소를 열어 주세요.</p>}
-          {loading && (
-            <p role="status" className="p-2">
+          {loading && !queued && (
+            <p role="status" className="p-2" data-testid="worktree-progress">
               {snapshot
                 ? "기존 목록을 표시하며 다시 검사합니다…"
                 : "워크트리 목록을 읽고 있습니다…"}
             </p>
           )}
-          {pending > 0 && !loading && (
-            <p role="status" className="p-2">
-              내용 검사 중 · {worktrees.length - pending}/{worktrees.length}
+          {(queued || (pending > 0 && !loading)) && (
+            <p role="status" className="p-2" data-testid="worktree-progress">
+              내용 검사 중 · {completed}/{worktrees.length}
+              {queued && <span className="block">사용 정보 변경 · 완료 후 다시 확인합니다</span>}
             </p>
           )}
           {error && (
@@ -267,11 +290,7 @@ function WorktreeContent({
               {notice}
             </p>
           )}
-          {(snapshot?.usageWarnings ?? []).map((warning) => (
-            <p key={warning} className="worktree-warning p-2">
-              {warning}
-            </p>
-          ))}
+          <WorktreeWarnings warnings={snapshot?.usageWarnings ?? []} />
           {entries.map((entry) => {
             const result = inspections[entry.path];
             const value = result && "value" in result ? result.value : undefined;

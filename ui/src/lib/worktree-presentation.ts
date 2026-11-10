@@ -10,7 +10,7 @@ const BLOCKER_LABELS: Record<string, string> = {
   ignored_files: "무시된 파일 있음",
   current_directory: "현재 조회 경로",
   in_use: "laymux에서 사용 중",
-  usage_unknown: "laymux 사용 여부 확인 실패",
+  usage_unknown: "사용 상태 미확인 · 제거 보류",
   index_flags: "변경 감지를 생략한 파일 있음",
 };
 export type WorktreeMessage = (key: string, values?: Array<string | number>) => string;

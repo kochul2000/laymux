@@ -2691,6 +2691,10 @@
     "ko": "laymux 사용 여부 확인 실패",
     "en": "Could not determine laymux usage"
   },
+  "사용 상태 미확인 · 제거 보류": {
+    "ko": "사용 상태 미확인 · 제거 보류",
+    "en": "Usage unknown · Removal blocked"
+  },
   "변경 감지를 생략한 파일 있음": {
     "ko": "변경 감지를 생략한 파일 있음",
     "en": "Files with skipped change detection"

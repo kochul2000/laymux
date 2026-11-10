@@ -283,6 +283,25 @@ fn an_old_detached_child_with_a_live_terminal_id_is_still_unknown() {
 }
 
 #[test]
+fn daemon_warnings_name_the_observed_state_and_child_pid() {
+    for (state, label) in [
+        (PtySessionState::AwaitingPane, "화면 연결 대기"),
+        (PtySessionState::Detached, "복원 대상 없는 세션"),
+        (PtySessionState::OtherClient, "다른 클라이언트에 연결됨"),
+        (PtySessionState::Ending, "종료 확인 대기"),
+    ] {
+        let mut daemons = inventory(&["terminal-one"]);
+        daemons.sessions[0].state = state;
+        let snapshot = assemble_usage(vec![], &settings(), &daemons, true, || None);
+        assert!(!snapshot.complete);
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains(label) && warning.contains("PID 1")));
+    }
+}
+
+#[test]
 fn ending_daemon_does_not_prove_the_child_has_exited() {
     // Inventory's Ending covers both an exited child and an asynchronous
     // terminate request, including a request whose process teardown failed.

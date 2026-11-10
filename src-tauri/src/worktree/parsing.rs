@@ -1,5 +1,7 @@
+use super::output::OUTPUT_LIMIT;
 use super::types::{WorktreeEntry, WorktreeFile};
 use crate::error::AppError;
+use std::io::{BufRead, BufReader, Read};
 
 pub(super) const FILE_PREVIEW_LIMIT: usize = 200;
 
@@ -72,14 +74,26 @@ pub(super) struct FileStatus {
     pub files: Vec<WorktreeFile>,
 }
 
-pub(super) fn status(bytes: &[u8]) -> Result<FileStatus, AppError> {
-    if !bytes.is_empty() && !bytes.ends_with(&[0]) {
+fn record(reader: &mut impl BufRead, buffer: &mut Vec<u8>) -> Result<bool, AppError> {
+    buffer.clear();
+    let size = Read::take(reader, (OUTPUT_LIMIT + 1) as u64).read_until(0, buffer)?;
+    if size == 0 {
+        return Ok(false);
+    }
+    if size > OUTPUT_LIMIT || buffer.last() != Some(&0) {
         return Err(invalid());
     }
-    let text = std::str::from_utf8(bytes).map_err(|_| invalid())?;
-    let mut fields = text.split_terminator('\0');
+    buffer.pop();
+    Ok(true)
+}
+
+pub(super) fn status(source: impl Read) -> Result<FileStatus, AppError> {
+    let mut reader = BufReader::new(source);
+    let mut buffer = Vec::new();
     let mut result = FileStatus::default();
-    while let Some(field) = fields.next() {
+    let mut preview_bytes = 0;
+    while record(&mut reader, &mut buffer)? {
+        let field = std::str::from_utf8(&buffer).map_err(|_| invalid())?;
         let raw = field.as_bytes();
         if raw.len() < 4 || raw[2] != b' ' {
             return Err(invalid());
@@ -95,33 +109,41 @@ pub(super) fn status(bytes: &[u8]) -> Result<FileStatus, AppError> {
             }
             code if code.iter().all(|byte| b" MADRCUT".contains(byte)) => {
                 result.tracked += 1;
-                if (code.contains(&b'R') || code.contains(&b'C'))
-                    && fields.next().is_none_or(str::is_empty)
-                {
-                    return Err(invalid());
-                }
                 "tracked"
             }
             _ => return Err(invalid()),
         };
-        if result.files.len() < FILE_PREVIEW_LIMIT {
+        let renamed = raw[..2].contains(&b'R') || raw[..2].contains(&b'C');
+        if result.files.len() < FILE_PREVIEW_LIMIT
+            && preview_bytes + field[3..].len() <= OUTPUT_LIMIT
+        {
+            preview_bytes += field[3..].len();
             result.files.push(WorktreeFile {
                 kind: kind.into(),
                 path: field[3..].into(),
             });
+        }
+        if renamed {
+            if !record(&mut reader, &mut buffer)? || buffer.is_empty() {
+                return Err(invalid());
+            }
+            std::str::from_utf8(&buffer).map_err(|_| invalid())?;
         }
     }
     Ok(result)
 }
 
 /// `-v --stage` prefixes each index entry with its visibility tag and mode.
-pub(super) fn index_guards(bytes: &[u8]) -> Result<(bool, bool), AppError> {
+pub(super) fn index_guards(source: impl Read) -> Result<(bool, bool), AppError> {
+    let mut reader = BufReader::new(source);
+    let mut buffer = Vec::new();
     let mut submodules = false;
     let mut hidden = false;
-    for record in bytes
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-    {
+    while record(&mut reader, &mut buffer)? {
+        let record = &buffer;
+        if record.is_empty() {
+            continue;
+        }
         if record.len() < 10 || record[1] != b' ' || record[8] != b' ' {
             return Err(invalid());
         }
