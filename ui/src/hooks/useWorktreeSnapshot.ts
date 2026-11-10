@@ -34,8 +34,11 @@ export function useWorktreeSnapshot(
     sourceTerminalId?: string;
     workingDir: string;
   } | null>(null);
+  const refreshedRevision = useRef(0);
   useEffect(() => {
     if (!workingDir) return;
+    const force = run.revision > refreshedRevision.current;
+    refreshedRevision.current = run.revision;
     const resolved = resolvedTarget.current;
     const retain =
       retainResolvedTarget &&
@@ -46,7 +49,7 @@ export function useWorktreeSnapshot(
       run.invalidation,
       retain ? resolved.workingDir : workingDir,
       retain ? undefined : sourceTerminalId,
-      run.revision > 0,
+      force,
       (next) => {
         if (next.snapshot)
           resolvedTarget.current = {

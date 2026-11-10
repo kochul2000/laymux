@@ -813,6 +813,31 @@ describe("WorktreeView", () => {
     await waitFor(() => expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(2));
   });
 
+  it("한 뷰의 수동 갱신 후에도 다른 뷰와 다음 세션 변경 검사를 공유한다", async () => {
+    render(
+      <>
+        <WorktreeView instanceId="first" paneId="first" syncGroup="ws" />
+        <WorktreeView instanceId="second" paneId="second" syncGroup="ws" />
+      </>,
+    );
+    const expectFinished = () => {
+      for (const view of screen.getAllByTestId("view-worktree"))
+        expect(view).toHaveAttribute("aria-busy", "false");
+    };
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "워크트리 새로고침" })[1]);
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(2);
+    act(() =>
+      useTerminalStore.setState({
+        instances: [{ id: "restored", sessionReady: true, generation: 1 } as never],
+      }),
+    );
+    await waitFor(expectFinished);
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledTimes(3);
+  });
+
   it("복원 이벤트가 겹쳐도 진행 중 검사를 취소하지 않고 최신 상태를 한 번 더 검사한다", async () => {
     const trees = Array.from({ length: 5 }, (_, i) => entry(`D:/tree-${i}`));
     const waiting = trees.map(() => deferred<WorktreeInspection>());
