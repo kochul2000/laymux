@@ -1,15 +1,15 @@
 {
-  "version": "3.15.0",
+  "version": "3.15.1",
   "notes": "",
-  "pub_date": "2026-11-10T02:27:46.812Z",
+  "pub_date": "2026-11-10T06:37:32.477Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVI3dnJrNGlGZDZ3Y3JIby9WZzZLMHp4bWkyeDd5andSL0haRFU1VjE4WC8ySWlGWjBaNm5JL01lTk5CZ2tmYkcrM0R4SGxLMEluakxoZjRLR1M3aGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mjc3NjYzCWZpbGU6TGF5bXV4XzMuMTUuMF94NjQtc2V0dXAuZXhlCXZlcnNpb246My4xNS4wCm5JN3Q1S05hQWxFVzFhVnJoSHN2R0RzQzF4TFlZbnhrVWdOZWhWZjJvbFpIWWExYXViRXdJVUwweHNRaVNBakZTeUpFd0ZnQ3ZrbTFPdmNJblREQkJnPT0K",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v3.15.0/Laymux_3.15.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dWJHbVNWYiswNGpxdVd6SkxjMnZqekkxOU1yU3lJcy91VlNuVGlneklHVSs1UjNWMzhKa1NnY0RjZXJDaWNzQTlMZ2U1b3oyWHJhaS9RaGpGMTBVQkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjkyNjUwCWZpbGU6TGF5bXV4XzMuMTUuMV94NjQtc2V0dXAuZXhlCXZlcnNpb246My4xNS4xCmgvUTUzRWRRYVFQSWFzNXBLUnpuV1dFVlhzT1oyWU15OTJUa2I2L2g0clZCMU56dUtwbFhHcDFjdU9yZXF3L2pYeVlPZzlwWDZZRmQwSzZWbFEzekNBPT0K",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v3.15.1/Laymux_3.15.1_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVI3dnJrNGlGZDZ3Y3JIby9WZzZLMHp4bWkyeDd5andSL0haRFU1VjE4WC8ySWlGWjBaNm5JL01lTk5CZ2tmYkcrM0R4SGxLMEluakxoZjRLR1M3aGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mjc3NjYzCWZpbGU6TGF5bXV4XzMuMTUuMF94NjQtc2V0dXAuZXhlCXZlcnNpb246My4xNS4wCm5JN3Q1S05hQWxFVzFhVnJoSHN2R0RzQzF4TFlZbnhrVWdOZWhWZjJvbFpIWWExYXViRXdJVUwweHNRaVNBakZTeUpFd0ZnQ3ZrbTFPdmNJblREQkJnPT0K",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v3.15.0/Laymux_3.15.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dWJHbVNWYiswNGpxdVd6SkxjMnZqekkxOU1yU3lJcy91VlNuVGlneklHVSs1UjNWMzhKa1NnY0RjZXJDaWNzQTlMZ2U1b3oyWHJhaS9RaGpGMTBVQkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjkyNjUwCWZpbGU6TGF5bXV4XzMuMTUuMV94NjQtc2V0dXAuZXhlCXZlcnNpb246My4xNS4xCmgvUTUzRWRRYVFQSWFzNXBLUnpuV1dFVlhzT1oyWU15OTJUa2I2L2g0clZCMU56dUtwbFhHcDFjdU9yZXF3L2pYeVlPZzlwWDZZRmQwSzZWbFEzekNBPT0K",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v3.15.1/Laymux_3.15.1_x64-setup.exe"
     }
   }
 }
