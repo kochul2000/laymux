@@ -20,6 +20,25 @@ function dump(term: Terminal): TerminalBufferDump {
 }
 
 describe("실제 xterm 입력창 clear 판독", () => {
+  it("Codex 첫 실행의 context 없는 모델 상태줄에서도 입력창을 확인한다", async () => {
+    const surface = createScreenTerminal({ cols: 51, rows: 36 });
+    const frame = (text: string) =>
+      "  >_ OpenAI Codex (v0.167.0)\r\n" +
+      "     D:\\PycharmProjects\\laymux\r\n\r\n" +
+      `› ${text}\r\n \r\n` +
+      "  GPT-6.1-Sol high Fast · …  ⚠ 1 warning · f2 to view";
+    try {
+      await surface.write(frame("Ask Codex to do anything"));
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("empty");
+      await surface.write("\x1b[H\x1b[2J" + frame("첫 초안\r\n  두 번째 줄"));
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write("\r\n  enter to confirm · esc to cancel");
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("unsupported");
+    } finally {
+      surface.dispose();
+    }
+  });
+
   it("Grok의 테두리 입력창은 초안·여러 줄·빈 입력과 메뉴를 구분한다", async () => {
     const surface = createScreenTerminal({ cols: 96, rows: 12 });
     const frame = (text: string) =>

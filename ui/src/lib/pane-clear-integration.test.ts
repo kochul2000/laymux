@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  registerTerminalInspector,
-  unregisterTerminalInspector,
+  registerTerminalPtyInspector,
+  unregisterTerminalPtyInspector,
+  type TerminalBufferDump,
 } from "./terminal-serialize-registry";
 
 vi.mock("./agent-clear-input-api", () => ({
@@ -41,6 +42,10 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const CTRL_C = "\x03";
+
+function registerClearScreen(id: string, inspect: (limit: number) => TerminalBufferDump) {
+  registerTerminalPtyInspector(id, async () => ({ ...inspect(0), generation: 1, seq: 0 }));
+}
 
 function resetStores() {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -132,7 +137,7 @@ function makeBusy(paneId: string) {
 
 describe("clearPane against live stores", () => {
   afterEach(() => {
-    unregisterTerminalInspector("terminal-pane-a");
+    unregisterTerminalPtyInspector("terminal-pane-a");
     vi.useRealTimers();
   });
   beforeEach(() => {
@@ -227,7 +232,7 @@ describe("clearPane against live stores", () => {
       activity: { type: "interactiveApp", name },
     });
     observeTerminalTask("terminal-pane-a", { state: "idle" });
-    registerTerminalInspector("terminal-pane-a", () => ({
+    registerClearScreen("terminal-pane-a", () => ({
       cols: 96,
       rows: 6,
       length: 6,
@@ -265,7 +270,7 @@ describe("clearPane against live stores", () => {
     expect(result.cleared).toEqual(["terminal-dock-pane-1"]);
   });
 
-  it.each(["Claude", "Grok"])(
+  it.each(["Claude", "Codex", "Grok"])(
     "deletes the %s draft and submits as the Remote lease holder",
     async (provider) => {
       seedWorkspace();
@@ -274,14 +279,16 @@ describe("clearPane against live stores", () => {
       });
       observeTerminalTask("terminal-pane-a", { state: "idle" });
       let text = "unsent draft";
-      registerTerminalInspector("terminal-pane-a", () => ({
+      registerClearScreen("terminal-pane-a", () => ({
         cols: 96,
         rows: 6,
         length: 6,
         baseY: 0,
         lines: (provider === "Grok"
           ? ["╭──────────╮", "│ ❯ " + text + " │", "╰── Grok 4.7 ──╯"]
-          : ["──────────", "> " + text, "──────────", "  auto mode on"]
+          : provider === "Codex"
+            ? ["› " + text, "", "  GPT-6.1-Sol high · /mnt/d/PycharmProjects/laymux…"]
+            : ["──────────", "> " + text, "──────────", "  auto mode on"]
         ).map((text, index) => ({
           index,
           text,
@@ -319,7 +326,7 @@ describe("clearPane against live stores", () => {
     vi.useFakeTimers();
     seedWorkspace();
     makeBusy("pane-a");
-    registerTerminalInspector("terminal-pane-a", () => ({
+    registerClearScreen("terminal-pane-a", () => ({
       cols: 96,
       rows: 6,
       length: 6,
@@ -357,7 +364,7 @@ describe("clearPane against live stores", () => {
       activity: { type: "interactiveApp", name: "Codex" },
     });
     observeTerminalTask("terminal-pane-a", { state: "idle" });
-    registerTerminalInspector("terminal-pane-a", () => ({
+    registerClearScreen("terminal-pane-a", () => ({
       cols: 96,
       rows: 6,
       length: 6,

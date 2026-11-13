@@ -13,6 +13,7 @@ import {
 } from "./terminal-render-checkpoint-worker";
 import { activateTerminalUnicodeProvider } from "./terminal-unicode-width";
 import type { TerminalOutputAttachment } from "./terminal-output-attach-coordinator";
+import { agentClearComposer } from "./agent-clear-composer";
 
 const buildDir = mkdtempSync(path.join(tmpdir(), "laymux-checkpoint-worker-"));
 let asset: string;
@@ -76,6 +77,55 @@ function createWorker(): CheckpointWorkerPort {
 }
 
 describe("built checkpoint Worker screen parity", () => {
+  it.each(["Claude", "Codex"] as const)(
+    "%s의 리모트 입력창은 좁은 PC 격자와 달라도 PTY 격자로 판독한다",
+    async (provider) => {
+      const worker = new TerminalRenderCheckpointWorker({ createWorker });
+      const local = new TerminalRenderCheckpointModel();
+      const visible = new Terminal({ cols: 26, rows: 36 });
+      const geometry = { revision: 2, cols: 81, rows: 43 };
+      const frame = (draft: string) =>
+        provider === "Claude"
+          ? `${"─".repeat(81)}\r\n> ${draft}\r\n${"─".repeat(81)}\r\n  auto mode on`
+          : `› ${draft}\r\n\r\n  GPT-6.1-Sol high · /mnt/d/PycharmProjects/laymux`;
+      const snapshot = encoder.encode(frame("첫 초안\r\n  두 번째 줄"));
+      try {
+        const attachment = {
+          state: { generation: 11, snapshotStartSeq: 0, snapshotSeq: snapshot.length, geometry },
+          snapshot,
+        } as TerminalOutputAttachment;
+        await Promise.all([worker.attach(attachment), local.attach(attachment)]);
+        await new Promise<void>((resolve) => visible.write(snapshot, resolve));
+        const before = await worker.inspect();
+        expect(before).toEqual(await local.inspect());
+        expect(before.generation).toBe(11);
+        expect(before.cols).toBe(81);
+        expect(agentClearComposer(before, provider)).toBe("draft");
+        expect(visible.cols).toBe(26);
+        const data = encoder.encode("\x1b[H\x1b[2J" + frame(""));
+        const segment = {
+          generation: 11,
+          seqStart: snapshot.length,
+          seqEnd: snapshot.length + data.length,
+          data,
+          geometry,
+        };
+        const applying = worker.apply(segment);
+        // 이미 수락한 출력 파싱을 기다려 삭제 전 셀을 반환하지 않는다.
+        const after = await worker.inspect();
+        await applying;
+        expect(after.seq).toBe(segment.seqEnd);
+        expect(agentClearComposer(after, provider)).toBe("empty");
+        worker.dispose();
+        await expect(worker.inspect()).rejects.toThrow("disposed");
+      } finally {
+        worker.dispose();
+        local.dispose();
+        visible.dispose();
+      }
+    },
+  );
+
   it("keeps retained wrapped rows identical through repeated widening", async () => {
     const worker = new TerminalRenderCheckpointWorker({ createWorker });
     const local = new TerminalRenderCheckpointModel();
