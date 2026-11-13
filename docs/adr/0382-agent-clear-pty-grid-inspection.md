@@ -1,6 +1,6 @@
 # 0382. 에이전트 지우기는 실제 PTY 격자의 미러 화면을 검사한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-13
 - Source: 사용자 보고(첫 실행 후 Remote Claude·Codex 지우기 실패), dev Remote Claude 재현(PTY 81열·PC 26열), [ADR-0355](0355-agent-hook-results-and-clear-drafts.md), [ADR-0069](0069-remote-render-checkpoint-attach.md), architecture/overview.md §4.1.1
 - 관계: ADR-0355의 현재 입력창 검증 원칙을 유지하며, 화면 근거를 PC 표시 격자에서 실제 PTY 격자로 명확히 한다.
