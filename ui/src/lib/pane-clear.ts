@@ -413,6 +413,7 @@ export async function clearPane(
         await prepareAgentClear(
           id,
           provider,
+          before.generation,
           () => step("deleteDraft"),
           current,
           clearDeadline,

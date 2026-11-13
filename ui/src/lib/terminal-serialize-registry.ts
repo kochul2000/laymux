@@ -69,6 +69,27 @@ export interface TerminalBufferDump {
   lines: TerminalBufferLine[];
 }
 
+/** 실제 PTY 격자에서 순서대로 파싱한 현재 입력창 판독용 화면. */
+export interface TerminalPtyBufferDump extends TerminalBufferDump {
+  generation: number;
+  seq: number;
+}
+
+type PtyInspector = () => Promise<TerminalPtyBufferDump>;
+const ptyInspectRegistry = new Map<string, PtyInspector>();
+
+export function registerTerminalPtyInspector(id: string, inspect: PtyInspector): void {
+  ptyInspectRegistry.set(id, inspect);
+}
+
+export function unregisterTerminalPtyInspector(id: string): void {
+  ptyInspectRegistry.delete(id);
+}
+
+export function getTerminalPtyInspector(id: string): PtyInspector | undefined {
+  return ptyInspectRegistry.get(id);
+}
+
 export interface TerminalViewportState {
   cols: number;
   rows: number;

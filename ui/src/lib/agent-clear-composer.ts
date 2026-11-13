@@ -1,4 +1,4 @@
-import { getTerminalInspector, type TerminalBufferDump } from "./terminal-serialize-registry";
+import { getTerminalPtyInspector, type TerminalBufferDump } from "./terminal-serialize-registry";
 
 type Provider = "Claude" | "Codex" | "Grok";
 const POLL_MS = 60;
@@ -42,7 +42,11 @@ export function agentClearComposer(
     );
     const footer = lines.reduce(
       (last, line, index) =>
-        index > prompt && /^\s{2,}.*(?:Context|% left|shortcuts)/i.test(line) ? index : last,
+        // A fresh session has no context usage yet. Custom status lines can
+        // therefore contain only the model/effort (and be width-truncated).
+        index > prompt && /^\s{2,}(?:.*(?:Context|% left|shortcuts)|gpt-\d\S*(?:\s|$))/i.test(line)
+          ? index
+          : last,
       -1,
     );
     if (prompt < 0 || footer < 0 || unsupportedChrome(lines.slice(footer))) return "unsupported";
@@ -76,6 +80,7 @@ export function agentClearComposer(
 export async function prepareAgentClear(
   id: string,
   provider: Provider,
+  expectedGeneration: number,
   erase: () => Promise<void>,
   current: () => boolean,
   deadline: number,
@@ -84,19 +89,38 @@ export async function prepareAgentClear(
   if (pending.has(id)) throw new Error("Agent clear is already in progress");
   pending.add(id);
   try {
-    const inspect = () => {
+    const ensureCurrent = () => {
       if (!current() || Date.now() >= deadline)
         throw new Error("Agent clear scope changed or timed out");
-      const screen = getTerminalInspector(id)?.(0);
-      if (!screen || agentClearComposer(screen, provider) === "unsupported")
+    };
+    const inspect = async () => {
+      ensureCurrent();
+      const ptyInspector = getTerminalPtyInspector(id);
+      if (!ptyInspector) throw new Error("Agent clear PTY screen is unavailable");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const screen = await Promise.race([
+        ptyInspector(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Agent clear screen timed out")),
+            Math.max(0, deadline - Date.now()),
+          );
+        }),
+      ]).finally(() => {
+        if (timer !== undefined) clearTimeout(timer);
+      });
+      ensureCurrent();
+      if (screen.generation !== expectedGeneration)
+        throw new Error("Agent clear PTY screen generation changed");
+      if (agentClearComposer(screen, provider) === "unsupported")
         throw new Error("Agent clear needs a supported idle text composer");
       return screen;
     };
-    inspect();
+    await inspect();
     // Always delete once: a typed placeholder string cannot authorize append.
     let emptySince: number | undefined;
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const screen = inspect();
+      const screen = await inspect();
       if (round > 0 && agentClearComposer(screen, provider) === "empty") {
         emptySince ??= Date.now();
         if (Date.now() - emptySince >= 180) {

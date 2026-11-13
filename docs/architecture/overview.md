@@ -260,6 +260,10 @@ Remote 템플릿 저장은 내보내기 함수에 source workspace id를 명시�
 
 Claude·Codex·Grok은 [ADR-0355](../adr/0355-agent-hook-results-and-clear-drafts.md)·[ADR-0356](../adr/0356-grok-hook-task-state-and-safe-clear.md)에 따라 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 xterm viewport에서 지원하는 입력창을 확인한다. 과거 응답·초안과 footer를 구분하고 모든 연속 행을 판독한다. Grok은 둥근 테두리 안의 입력 행과 아래 footer를 검사한다. Backspace/Delete 배치로 초안을 삭제한 뒤 빈 입력창이 안정된 경우에만 `/clear`를 제출한다. 각 삭제·제출은 기존 human-control 소유권과 공통 PTY enqueue 게이트에서 generation·입력 revision을 검사하므로 Local·Remote·Automation·MCP 입력이 끼어들면 화면 갱신 전이라도 실패한다. 미확인 작업, 모달, 미지원 편집 모드, 40열 미만 화면, 삭제 한도·deadline·세대 교체도 실패로 반환한다. 숨김 pane에서 화면 inspector를 사용할 수 없으면 입력하지 않는다.
 
+Codex의 첫 세션은 context 사용량이 아직 없어 사용자 지정 footer에 모델·effort만 표시될 수 있다. 이때도 들여쓴 `GPT-<숫자>…` 모델 상태줄을 footer로 인식하며, 폭 때문에 잘린 경로·경고 문구는 필수로 요구하지 않는다. 입력창과 footer 사이의 모든 초안 행 검사와 모달·편집 모드 거부는 동일하게 적용한다.
+
+입력창 판독의 화면은 실제 PTY 격자를 따르는 기존 rendererless checkpoint 미러의 현재 viewport다([ADR-0382](../adr/0382-agent-clear-pty-grid-inspection.md)). Remote 제어 중 PC visible xterm의 열·행은 PTY와 다를 수 있으므로 PC 화면 inspector를 지우기 근거로 사용하지 않는다. inline·Worker 미러의 비동기 판독은 수락한 출력 FIFO를 기다리고 generation을 반환한다. 판독 전후 대상·작업 상태·기한과 화면 세대를 재검증하며, 미러 부재·실패·재구성 불가에는 입력하지 않는다.
+
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 
 사용자 구성(`settings.json`), PC 환경·복원 상태(`state.db`), UI 오버라이드(localStorage)를 분리한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).

@@ -2601,6 +2601,8 @@ Codex 턴 조회는 프로세스 선택 키가 없는 경우에 한해 현재 PT
 
 `POST /api/v1/panes/{paneId}/clear` 및 Remote clear는 Claude·Codex·Grok에서 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 화면의 지원하는 텍스트 입력창을 확인한다. 과거 응답·초안 문구는 모드 판정에서 제외하고 footer 앞의 모든 연속 행을 검사한다. Grok은 둥근 테두리와 입력 prompt, 취소·확인 footer를 검사한다. 초안을 제한된 Backspace/Delete 배치로 삭제하고 180ms 동안 빈 입력창을 확인한 뒤 제출한다. 최대 32회·3초이며 bridge hard deadline을 우선한다. 지원하지 않는 화면·미확인 작업·세대 교체·삭제 실패는 기존 `failed` 배열로 반환하고 `/clear`를 제출하지 않는다.
 
+화면 근거는 실제 PTY geometry로 파싱하는 rendererless checkpoint 미러의 현재 viewport이며 PC visible 격자를 사용하지 않는다([ADR-0382](../adr/0382-agent-clear-pty-grid-inspection.md)). Worker/inline `inspect`는 수락한 출력 FIFO 뒤에서 viewport와 generation·sequence를 반환한다. 판독 전후 대상·작업 상태·deadline과 generation을 확인하며, 미러 부재·실패·재구성 불가에 visible inspector로 대체하지 않는다. 이 내부 판독 계약은 기존 REST/Remote 응답 shape와 Rust 입력 권한을 바꾸지 않는다.
+
 - `begin_agent_clear({id,generation,remoteLeaseId?})`는 현재 입력 소유권·PTY 세대와 요청 이후의 해당 대상 에이전트 생존 귀속을 검증하고 `{generation,inputRevision}`을 반환한다. 검증 중 다른 입력이나 세대 변경은 거부한다. 표시의 오래된 positive는 이 입력 허가의 근거가 아니다([ADR-0362](../adr/0362-hook-driven-activity-fallback.md)).
 - PTY별 `input_enqueue_gate`는 revision 비교·증가와 FIFO enqueue를 직렬화하는 leaf mutex다. human-control 게이트 밖의 Automation·MCP 직접 쓰기도 공유하며 이 게이트 안에서는 AppState 락이나 물리 I/O 완료를 기다리지 않는다. clear의 입력 receipt는 이 게이트 안에서 자신의 enqueue 직후 읽는다.
 - `agent_clear_input({id,expected,step,remainingMs,remoteLeaseId?})`는 고정된 `deleteDraft`(Backspace/Delete 128쌍) 또는 `submitClear`(`/clear`의 bracketed-paste 인코딩과 별도 CR)만 허용한다. 기존 human-control enqueue 게이트 안에서 `expected.inputRevision`을 현재 PTY revision과 비교한 뒤 같은 FIFO에 enqueue하며 자신의 쓰기로 증가한 revision을 반환한다. 완료를 기다린 뒤 revision을 다시 읽어 다른 입력을 흡수하지 않는다. Local·Remote·Automation의 중간 입력·Remote lease 변경·기한 초과는 후속 쓰기를 거부한다. 물리 I/O 실패는 기존 quarantine·소유권 barrier 처리를 공유한다.

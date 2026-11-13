@@ -215,8 +215,10 @@ import {
   registerTerminalRenderCheckpointProvider,
   unregisterTerminalRenderCheckpointProvider,
   registerTerminalInspector,
+  registerTerminalPtyInspector,
   registerTerminalScroller,
   unregisterTerminalInspector,
+  unregisterTerminalPtyInspector,
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
@@ -4664,6 +4666,11 @@ export function TerminalView({
     const createCheckpoint = () =>
       createTerminalRenderCheckpoint(checkpointWorkerEnabled, terminalParserAdmission);
     let renderCheckpointModel = createCheckpoint();
+    registerTerminalPtyInspector(instanceId, () => {
+      if (cancelled || !terminalSessionReady || outputTransportMode === "fail-stop")
+        return Promise.reject(new Error("Agent clear PTY screen is unavailable"));
+      return renderCheckpointModel.inspect();
+    });
     registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
       renderCheckpointModel.capture(target, maxBytes),
     );
@@ -6665,6 +6672,7 @@ export function TerminalView({
       unregisterCheckpointGeometry();
       unregisterTerminalRenderCheckpointProvider(instanceId);
       unregisterTerminalInspector(instanceId);
+      unregisterTerminalPtyInspector(instanceId);
       unregisterTerminalScroller(instanceId);
       unregisterAtlasRebuilder(instanceId);
       unlistenOutput?.();

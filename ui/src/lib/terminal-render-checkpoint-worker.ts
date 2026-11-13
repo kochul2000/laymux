@@ -9,14 +9,16 @@ import type {
 import type { TerminalParserAdmission } from "./terminal-parser-admission";
 import { TERMINAL_WRITE_BATCH_MAX_BYTES } from "./terminal-write-batch-queue";
 import { TERMINAL_CHECKPOINT_CAPTURE_WAIT_MS } from "./terminal-checkpoint-timeouts";
+import type { TerminalPtyBufferDump } from "./terminal-serialize-registry";
 
 export type CheckpointWorkerRequest = { id: number } & (
   | { op: "attach"; attachment: TerminalOutputAttachment }
   | { op: "apply"; segment: TerminalOutputAppliedSegment }
   | { op: "capture"; target: TerminalRenderCheckpointTarget; maxBytes: number }
+  | { op: "inspect" }
 );
 export type CheckpointWorkerResponse =
-  | { id: number; ok: true; result?: TerminalRenderCheckpoint }
+  | { id: number; ok: true; result?: TerminalRenderCheckpoint | TerminalPtyBufferDump }
   | { id: number; ok: false; error: string };
 export interface CheckpointWorkerPort {
   onmessage: ((event: MessageEvent<CheckpointWorkerResponse>) => void) | null;
@@ -99,6 +101,10 @@ export class TerminalRenderCheckpointWorker {
     return this.enqueue(() => this.writeChunks(segment));
   }
 
+  inspect(): Promise<TerminalPtyBufferDump> {
+    return this.enqueue(() => this.request<TerminalPtyBufferDump>({ op: "inspect" }));
+  }
+
   async capture(
     target: TerminalRenderCheckpointTarget,
     maxBytes: number,
@@ -136,13 +142,16 @@ export class TerminalRenderCheckpointWorker {
     this.fail(error);
   }
 
-  private enqueue(operation: () => Promise<void>): Promise<void> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.chain.then(() => {
       if (this.disposed || this.failure)
         throw this.failure ?? new Error("terminal render checkpoint is disposed");
       return operation();
     });
-    this.chain = result.catch(() => {});
+    this.chain = result.then(
+      () => {},
+      () => {},
+    );
     return result;
   }
 
@@ -214,6 +223,7 @@ export class TerminalRenderCheckpointWorker {
     message:
       | Omit<Extract<CheckpointWorkerRequest, { op: "attach" }>, "id">
       | Omit<Extract<CheckpointWorkerRequest, { op: "apply" }>, "id">
+      | Omit<Extract<CheckpointWorkerRequest, { op: "inspect" }>, "id">
       | Omit<Extract<CheckpointWorkerRequest, { op: "capture" }>, "id">,
     transfer: Transferable[] = [],
   ): Promise<T> {

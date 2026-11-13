@@ -26,6 +26,7 @@ scope.onmessage = ({ data }) => {
       let result;
       if (data.op === "attach") await model.attach(data.attachment);
       else if (data.op === "apply") await model.apply(data.segment);
+      else if (data.op === "inspect") result = await model.inspect();
       else result = await model.capture(data.target, data.maxBytes);
       scope.postMessage({ id: data.id, ok: true, result });
     } catch (error) {

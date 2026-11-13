@@ -9,6 +9,7 @@ import type {
   TerminalOutputAttachment,
 } from "./terminal-output-attach-coordinator";
 import type { TerminalParserAdmission } from "./terminal-parser-admission";
+import type { TerminalPtyBufferDump } from "./terminal-serialize-registry";
 
 const CAPTURE_POLL_MS = 10;
 const CHECKPOINT_ABSOLUTE_MAX_BYTES = 1024 * 1024;
@@ -198,6 +199,32 @@ export class TerminalRenderCheckpointModel {
     this.terminal.dispose();
   }
 
+  inspect(): Promise<TerminalPtyBufferDump> {
+    return this.enqueue(async () => {
+      if (this.generation === null || !this.geometry)
+        throw new Error("terminal render checkpoint is not attached");
+      this.assertUsable({ generation: this.generation, seq: this.seq, geometry: this.geometry });
+      const buffer = this.terminal.buffer.active;
+      return {
+        generation: this.generation,
+        seq: this.seq,
+        cols: this.terminal.cols,
+        rows: this.terminal.rows,
+        length: buffer.length,
+        baseY: buffer.baseY,
+        lines: Array.from({ length: this.terminal.rows }, (_, row) => {
+          const index = buffer.baseY + row;
+          const line = buffer.getLine(index);
+          return {
+            index,
+            text: line?.translateToString(true) ?? "",
+            isWrapped: line?.isWrapped ?? false,
+          };
+        }),
+      };
+    });
+  }
+
   private writeData(data: Uint8Array): Promise<void> {
     const admission = this.admission;
     if (!admission) return this.write(data);
@@ -250,12 +277,15 @@ export class TerminalRenderCheckpointModel {
     });
   }
 
-  private enqueue(operation: () => Promise<void>): Promise<void> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const queued = this.writeChain.then(() => {
       if (this.disposed) throw new Error("terminal render checkpoint is disposed");
       return operation();
     });
-    this.writeChain = queued.catch(() => {});
+    this.writeChain = queued.then(
+      () => {},
+      () => {},
+    );
     return queued;
   }
 

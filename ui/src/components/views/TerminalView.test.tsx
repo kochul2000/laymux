@@ -549,6 +549,9 @@ const mockRegisterTerminalRenderCheckpointProvider = vi.fn();
 const mockUnregisterTerminalRenderCheckpointProvider = vi.fn();
 const mockRegisterTerminalInspector = vi.fn();
 const mockUnregisterTerminalInspector = vi.fn();
+const mockRegisterTerminalPtyInspector = vi.fn();
+const mockUnregisterTerminalPtyInspector = vi.fn();
+const mockInspectTerminalPty = vi.fn();
 const mockRegisterTerminalScroller = vi.fn();
 const mockUnregisterTerminalScroller = vi.fn();
 const mockTerminalRenderCheckpointApply = vi.fn().mockResolvedValue(undefined);
@@ -560,6 +563,9 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
   unregisterTerminalRenderCheckpointProvider: (...args: unknown[]) =>
     mockUnregisterTerminalRenderCheckpointProvider(...args),
   registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
+  registerTerminalPtyInspector: (...args: unknown[]) => mockRegisterTerminalPtyInspector(...args),
+  unregisterTerminalPtyInspector: (...args: unknown[]) =>
+    mockUnregisterTerminalPtyInspector(...args),
   unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
   registerTerminalScroller: (...args: unknown[]) => mockRegisterTerminalScroller(...args),
   unregisterTerminalScroller: (...args: unknown[]) => mockUnregisterTerminalScroller(...args),
@@ -588,6 +594,7 @@ vi.mock("@/lib/terminal-render-checkpoint", () => ({
     }
     attach = vi.fn().mockResolvedValue(undefined);
     apply = (...args: unknown[]) => mockTerminalRenderCheckpointApply(...args);
+    inspect = mockInspectTerminalPty;
     capture = vi.fn().mockResolvedValue({
       generation: 1,
       seq: 0,
@@ -841,6 +848,22 @@ afterEach(async () => {
 });
 
 describe("TerminalView", () => {
+  it("PTY 격자 판독은 현재 미러를 읽고 unmount 뒤에는 거부한다", async () => {
+    const id = "t-clear-pty-screen";
+    const view = render(<TerminalView instanceId={id} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const inspect = mockRegisterTerminalPtyInspector.mock.calls.find(
+      ([key]) => key === id,
+    )?.[1] as () => Promise<unknown>;
+    expect(inspect).toBeTypeOf("function");
+    const screen = { generation: 1, seq: 10, cols: 81, rows: 43, length: 43, baseY: 0, lines: [] };
+    mockInspectTerminalPty.mockResolvedValueOnce(screen);
+    await expect(inspect()).resolves.toBe(screen);
+    view.unmount();
+    expect(mockUnregisterTerminalPtyInspector).toHaveBeenCalledWith(id);
+    await expect(inspect()).rejects.toThrow("unavailable");
+  });
+
   it("applies and restores checkpoint geometry without issuing ordinary backend resizes", async () => {
     const { unmount } = render(
       <TerminalView instanceId="t-status-geometry" profile="PowerShell" syncGroup="" />,
