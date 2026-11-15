@@ -309,12 +309,46 @@ fn find_session_by_pids_picks_most_recent_on_multiple_matches() {
 }
 
 #[test]
-fn duplicate_claude_session_attribution_fails_closed() {
-    let candidates = vec![
-        ("pane-a".into(), "same-session".into()),
-        ("pane-b".into(), "same-session".into()),
-    ];
-    assert!(remove_duplicate_attributions(candidates).is_empty());
+fn distinct_claude_processes_can_resume_the_same_session() {
+    let claims = HashMap::from([
+        ("pane-a".into(), Some("same-session".into())),
+        ("pane-b".into(), Some("same-session".into())),
+    ]);
+    let owners = HashMap::from([
+        ("pane-a".into(), ProcessOwner(None, 100)),
+        ("pane-b".into(), ProcessOwner(None, 200)),
+    ]);
+    assert_eq!(reject_shared_processes(claims.clone(), &owners), claims);
+}
+
+#[test]
+fn pid_filename_must_agree_with_its_contents_without_poisoning_other_panes() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("100.json"),
+        r#"{"pid":200,"sessionId":"wrong-process","startedAt":1000}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("200.json"),
+        r#"{"pid":200,"sessionId":"current","startedAt":1000}"#,
+    )
+    .unwrap();
+    let lookup = read_claude_session_files_for_pids_detailed(
+        tmp.path(),
+        None,
+        Some(&HashSet::from([100, 200])),
+    );
+    assert_eq!(lookup.failed_pids, HashSet::from([100]));
+    assert!(!lookup.scope_failed);
+    assert_eq!(
+        find_session_by_pids(&lookup.sessions, &HashSet::from([100])),
+        None
+    );
+    assert_eq!(
+        find_session_by_pids(&lookup.sessions, &HashSet::from([200])).as_deref(),
+        Some("current")
+    );
 }
 
 // -- Stale session filtering tests --
