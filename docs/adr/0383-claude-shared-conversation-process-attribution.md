@@ -1,6 +1,6 @@
 # 0383. Claude의 공유 대화는 서로 다른 live 프로세스에 귀속할 수 있다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-15
 - Source: 사용자 종료 실패 보고(`activeButUnidentified`), 해당 두 WSL 프로세스의 PID 세션 파일, [data-flow §13](../architecture/data-flow.md), [ADR-0222](0222-agent-session-checkpoint-coordinator.md)
 - 관계: [ADR-0120](0120-wsl-agent-session-attribution.md)·ADR-0222의 중복 거부를 Claude의 대화 ID 중복과 프로세스 소유권 충돌로 구분한다. Codex·Grok·미소비 복원 요청 정책은 유지한다.
@@ -17,6 +17,7 @@ Claude의 `-c`와 `--resume`은 서로 다른 프로세스에서 같은 대화�
 - PID 세션 파일의 이름과 본문 PID가 선택한 live PID와 일치해야 한다. 손상·누락·잘못된 ID·최상위 프로세스 모호성은 기존 실패 경로를 따른다. CWD·방문 여부·저장된 ID로 귀속을 추정하지 않는다.
 - generation 확인, critical 이중 관측, 입력 fence와 저장 완료 조건은 유지한다. API와 영속 스키마를 추가하지 않는다. native·WSL에 같은 원칙을 적용한다.
 - 실행 상태와 transcript config root는 terminal별로 소유하여 같은 대화 ID의 다른 프로세스 상태·저장소가 서로 덮이지 않게 한다.
+- 같은 config root와 대화 ID를 공유하는 live 프로세스가 여럿이면 해당 transcript를 pane별 입력 보정·새 턴 결과 추적의 증거로 제공하지 않는다. 직접 확인한 ID와 PID별 상태는 유지한다. 서로 다른 config root의 동일 ID는 이 제한 대상이 아니다. 단독 추적 시작 뒤 다른 프로세스가 합류하는 기존 race의 해결은 별도 범위다.
 - 공유 대화의 동시 편집 충돌 해결 및 다른 provider의 귀속 정책 변경은 범위 밖이다.
 
 ## Alternatives Considered

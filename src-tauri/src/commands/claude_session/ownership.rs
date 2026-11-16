@@ -1,4 +1,25 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+/// Direct PID attribution does not prove which process wrote a shared transcript.
+pub(super) fn exclusive_transcript_roots(
+    attributions: &HashMap<String, Option<String>>,
+    mut roots: HashMap<String, PathBuf>,
+) -> HashMap<String, PathBuf> {
+    let mut counts = HashMap::new();
+    for (terminal, root) in &roots {
+        if let Some(Some(session)) = attributions.get(terminal) {
+            *counts.entry((root.clone(), session.clone())).or_insert(0) += 1;
+        }
+    }
+    roots.retain(|terminal, root| {
+        attributions
+            .get(terminal)
+            .and_then(Option::as_ref)
+            .is_some_and(|session| counts.get(&(root.clone(), session.clone())) == Some(&1))
+    });
+    roots
+}
 
 /// A conversation may be resumed by distinct processes. Only a process claimed
 /// by multiple panes is ambiguous (ADR-0383). WSL PIDs are distro-local.
@@ -35,6 +56,34 @@ pub(super) fn reject_shared_processes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_transcript_is_not_evidence_for_a_panes_input_or_result() {
+        let claims = HashMap::from([
+            ("a".into(), Some("shared".into())),
+            ("b".into(), Some("shared".into())),
+            ("separate-root".into(), Some("shared".into())),
+            ("separate-session".into(), Some("other".into())),
+            ("unresolved".into(), None),
+        ]);
+        let roots = HashMap::from([
+            ("a".into(), PathBuf::from("home-one")),
+            ("b".into(), PathBuf::from("home-one")),
+            ("separate-root".into(), PathBuf::from("home-two")),
+            ("separate-session".into(), PathBuf::from("home-one")),
+            ("unresolved".into(), PathBuf::from("home-three")),
+        ]);
+        let result = exclusive_transcript_roots(&claims, roots);
+        assert_eq!(
+            result,
+            HashMap::from([
+                ("separate-root".into(), PathBuf::from("home-two")),
+                ("separate-session".into(), PathBuf::from("home-one")),
+            ])
+        );
+        assert_eq!(claims["a"].as_deref(), Some("shared"));
+        assert_eq!(claims["b"].as_deref(), Some("shared"));
+    }
 
     #[test]
     fn same_process_claimed_by_two_panes_is_rejected_even_with_different_ids() {

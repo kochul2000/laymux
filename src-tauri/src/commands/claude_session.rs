@@ -12,7 +12,7 @@ use super::wsl_agent_session::{
 };
 
 mod ownership;
-use ownership::{reject_shared_processes, ProcessOwner};
+use ownership::{exclusive_transcript_roots, reject_shared_processes, ProcessOwner};
 
 /// Resolve Claude Code session IDs for live Claude processes under owned PTYs.
 ///
@@ -62,7 +62,8 @@ pub(crate) struct ClaudeSessionRecords {
     /// different live status and config roots (ADR-0383).
     pub statuses: HashMap<String, ClaudeSessionStatus>,
     /// Keyed by terminal ID: the config root (`sessions/`'s parent) whose
-    /// session file attributed it. Its `projects/` holds the transcript.
+    /// session file attributed it. Shared root/session pairs are omitted: the
+    /// transcript cannot prove which pane supplied an input or completed a turn.
     pub config_roots: HashMap<String, PathBuf>,
 }
 
@@ -183,9 +184,11 @@ pub(crate) fn get_claude_session_records_scoped(
             tracing::warn!(%error, "WSL Claude attribution failed");
         }
     }
+    let attributions = reject_shared_processes(result, &owners);
+    let config_roots = exclusive_transcript_roots(&attributions, config_roots);
     Ok(ClaudeSessionRecords {
         lookup: ProviderSessionLookup {
-            attributions: reject_shared_processes(result, &owners),
+            attributions,
             failed_terminal_ids,
             rollout_absence: HashMap::new(),
             fresh_sessions: HashMap::new(),

@@ -42,3 +42,7 @@ Windows `ui/`에서 `LAYMUX_REPRO_ISOLATED=1`을 지정하고 `node scripts/repr
 - `cargo clippy --workspace --all-targets -- -D warnings`, Rust fmt, 재현 스크립트 ESLint/Prettier 통과.
 - native/WSL PID namespace 분리, 같은 프로세스 다중 소유 거부, PID 파일 불일치의 실패 범위, 기존 손상·누락·최상위 선택 검사를 유지했다.
 - dev 실기는 Windows 호스트의 WSL fixture다. native 실제 Claude CLI, 실제 설치기·다른 provider의 공유 대화 허용은 검증·변경 범위 밖이다.
+
+## 2026-11-16 독립 리뷰 보강
+
+독립 리뷰 1회에서 P1 없음, P2 1건(공유 transcript의 입력·완료 증거 혼용)을 확인하여 수정했다. 같은 `(config root, session ID)`의 transcript root만 소비자에게 제공하지 않으며 직접 귀속과 PID별 상태는 보존한다. 회귀 테스트 RED→GREEN, Claude 관련 Rust 51개와 strict clippy all-targets 통과. 격리 dev `.tmp/shared-review/`에서 실제 공유 JSONL을 작성한 두 WSL fixture로 반복 저장·종료 준비 성공, busy/idle 구분, `submittedInput` 부재, `beginClaudeTurns` 빈 결과를 확인했다. 다른 root의 동일 ID와 같은 root의 다른 ID는 단위 테스트로 허용을 확인했다. 단독 baseline 이후 합류하는 기존 race는 비차단 후속 [#1330](https://github.com/kochul2000/laymux/issues/1330)으로 분리했다.

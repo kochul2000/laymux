@@ -1,5 +1,6 @@
 """격리 dev용: 네트워크 없이 PID별 Claude 세션 파일과 생존 프로세스를 만든다."""
 import ctypes
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,13 @@ path.write_text(json.dumps({
     "pid": os.getpid(), "sessionId": sys.argv[1],
     "startedAt": int(time.time() * 1000), "status": sys.argv[2] if len(sys.argv) > 2 else "idle",
 }))
+transcript = Path.home() / ".claude" / "projects" / "fixture" / f"{sys.argv[1]}.jsonl"
+transcript.parent.mkdir(parents=True, exist_ok=True)
+transcript.write_text(json.dumps({
+    "type": "user", "sessionId": sys.argv[1],
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "message": {"role": "user", "content": "OTHER_PANE_SHARED_INPUT"},
+}) + "\n")
 print(f"SHARED_CLAUDE_READY {os.getpid()}", flush=True)
 try:
     tick = 0

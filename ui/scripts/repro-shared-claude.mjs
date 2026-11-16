@@ -104,7 +104,10 @@ try {
       return {
         samples,
         closeError,
-        states: await api.getAgentSessionStates(terminalIds, []),
+        states: await api.getAgentSessionStates(terminalIds, [], terminalIds),
+        transcriptBaselines: await api.beginClaudeTurns(
+          terminalIds.map((terminalId) => ({ terminalId, key: "shared-transcript-probe" })),
+        ),
         neverVisited: ids.every((id) => ws.getState().activeWorkspaceId !== id),
         rendererless: terminalIds.every(
           (id) => !terminals.getState().instances.some((t) => t.id === id),
@@ -130,9 +133,12 @@ try {
   }
   assert.equal(Boolean(result.closeError), !expected);
   if (expected) {
+    assert.deepEqual(result.transcriptBaselines, []);
     if (mode !== "startup") {
       assert.equal(result.states["terminal-shared-claude-a"].status, "running");
       assert.equal(result.states["terminal-shared-claude-b"].status, "idle");
+      for (const state of Object.values(result.states))
+        assert.equal(state.submittedInput, undefined);
     }
     assert.equal(result.saved.length, 2);
     for (const workspace of result.saved)
