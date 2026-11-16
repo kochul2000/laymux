@@ -1680,6 +1680,10 @@ Rust `local_state`가 DB 연결과 짧은 트랜잭션을 소유한다. `setting
 
 ### 13.4 종료 시퀀스
 
+Claude에서 같은 `(config root, session ID)`를 여러 live pane이 공유하면 transcript root를 소비자에게 제공하지 않는다. 세션 저장과 PID별 busy/idle은 유지하지만 공유 파일의 마지막 user 본문이나 완료 경계를 특정 pane의 것으로 보정하지 않으며 새 transcript baseline도 등록하지 않는다. 서로 다른 root의 동일 ID에는 적용하지 않는다. 단독 baseline 등록 후 공유가 시작되는 기존 race는 이 제한의 보장 범위 밖이다.
+
+**Claude 공유 대화 ([ADR-0383](../adr/0383-claude-shared-conversation-process-attribution.md)).** 서로 다른 live PID가 같은 대화를 `-c`/`--resume`으로 열면 각 PID 파일이 명시한 ID를 양쪽 pane에 저장한다. native PID 또는 WSL `(distribution, PID)`를 여러 pane이 주장할 때는 모두 미식별로 유지한다. 파일 이름 PID와 본문 PID 불일치는 해당 PID의 조회 실패이며 다른 pane에 전파하지 않는다. Claude의 상태·config root는 terminal ID별로 전달하여 공유 대화의 busy/idle과 저장소 경로가 서로 덮이지 않는다. workspace 방문 여부로 검증을 생략하지 않으며 generation·이중 관측·미소비 복원 요청 충돌·Codex/Grok 중복 정책은 유지한다.
+
 ```
 [Window close-requested event]
     │  App.tsx onCloseRequested 핸들러

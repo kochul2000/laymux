@@ -378,7 +378,9 @@ pub(crate) fn begin_claude_turns_impl(
         };
         let Some((session_id, root)) = attributed(&records.lookup, &request.terminal_id)
             .filter(|session_id| is_valid_session_id(session_id))
-            .and_then(|session_id| Some((session_id, records.config_roots.get(session_id)?)))
+            .and_then(|session_id| {
+                Some((session_id, records.config_roots.get(&request.terminal_id)?))
+            })
         else {
             continue;
         };

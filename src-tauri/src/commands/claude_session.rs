@@ -11,6 +11,9 @@ use super::wsl_agent_session::{
     resolve_wsl_agent_processes_scoped, WslAgentProcess, WslAgentProvider,
 };
 
+mod ownership;
+use ownership::{exclusive_transcript_roots, reject_shared_processes, ProcessOwner};
+
 /// Resolve Claude Code session IDs for live Claude processes under owned PTYs.
 ///
 /// The PTY descendant PID must match `~/.claude/sessions/<pid>.json`.
@@ -55,10 +58,12 @@ pub(crate) fn get_claude_session_lookup_scoped(
 /// Session attribution plus each attributed session's self-reported status.
 pub(crate) struct ClaudeSessionRecords {
     pub lookup: ProviderSessionLookup,
-    /// Keyed by session ID; only sessions whose file reports a known status.
+    /// Keyed by terminal ID; two processes may share a conversation but have
+    /// different live status and config roots (ADR-0383).
     pub statuses: HashMap<String, ClaudeSessionStatus>,
-    /// Keyed by session ID: the config root (`sessions/`'s parent) whose
-    /// session file attributed it. Its `projects/` holds the transcript.
+    /// Keyed by terminal ID: the config root (`sessions/`'s parent) whose
+    /// session file attributed it. Shared root/session pairs are omitted: the
+    /// transcript cannot prove which pane supplied an input or completed a turn.
     pub config_roots: HashMap<String, PathBuf>,
 }
 
@@ -121,23 +126,23 @@ pub(crate) fn get_claude_session_records_scoped(
         .collect();
     let mut statuses = HashMap::new();
     let mut config_roots = HashMap::new();
+    let mut owners = HashMap::new();
     let candidates = native_descendants
         .into_iter()
         .filter_map(|(terminal_id, descendants)| {
             let session = find_session_file_by_pids(&session_files, &descendants)?;
+            owners.insert(terminal_id.clone(), ProcessOwner(None, session.pid));
             if let Some(status) = session.status {
-                statuses.insert(session.session_id.clone(), status);
+                statuses.insert(terminal_id.clone(), status);
             }
             if let Some(root) = sessions_dir.parent() {
-                config_roots.insert(session.session_id.clone(), root.to_path_buf());
+                config_roots.insert(terminal_id.clone(), root.to_path_buf());
             }
             Some((terminal_id, session.session_id.clone()))
         })
         .collect();
-    let mut result = crate::process_tree::complete_agent_session_attributions(
-        &observed,
-        remove_duplicate_attributions(candidates),
-    );
+    let mut result =
+        crate::process_tree::complete_agent_session_attributions(&observed, candidates);
     match resolve_wsl_agent_processes_scoped(state, WslAgentProvider::Claude, observation, scope) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
@@ -146,16 +151,19 @@ pub(crate) fn get_claude_session_records_scoped(
                     Some(process) => {
                         match find_wsl_claude_session_checked(&process, session_max_age_hours) {
                             Ok(session) => session.map(|session| {
+                                owners.insert(
+                                    terminal_id.clone(),
+                                    ProcessOwner(Some(process.distro.clone()), process.pid),
+                                );
                                 if let Some(status) = session.status {
-                                    statuses.insert(session.session_id.clone(), status);
+                                    statuses.insert(terminal_id.clone(), status);
                                 }
                                 if let Some(root) = process
                                     .claude_sessions_dir()
                                     .as_deref()
                                     .and_then(Path::parent)
                                 {
-                                    config_roots
-                                        .insert(session.session_id.clone(), root.to_path_buf());
+                                    config_roots.insert(terminal_id.clone(), root.to_path_buf());
                                 }
                                 session.session_id
                             }),
@@ -176,11 +184,11 @@ pub(crate) fn get_claude_session_records_scoped(
             tracing::warn!(%error, "WSL Claude attribution failed");
         }
     }
+    let attributions = reject_shared_processes(result, &owners);
+    let config_roots = exclusive_transcript_roots(&attributions, config_roots);
     Ok(ClaudeSessionRecords {
         lookup: ProviderSessionLookup {
-            attributions: crate::process_tree::reject_duplicate_session_attributions(
-                result, "Claude",
-            ),
+            attributions,
             failed_terminal_ids,
             rollout_absence: HashMap::new(),
             fresh_sessions: HashMap::new(),
@@ -412,6 +420,14 @@ fn read_claude_session_files_for_pids_detailed(
                 let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
                 let status = val.get("status").and_then(ClaudeSessionStatus::parse);
 
+                // A differently named PID file cannot vouch for this process.
+                if file_pid != Some(pid) {
+                    if let Some(file_pid) = file_pid {
+                        failed_pids.insert(file_pid);
+                    }
+                    continue;
+                }
+
                 // Skip stale sessions
                 if let Some(min_ts) = cutoff {
                     if started_at < min_ts {
@@ -474,26 +490,6 @@ fn find_session_file_by_pids<'a>(
         .iter()
         .filter(|s| pids.contains(&s.pid))
         .max_by_key(|s| s.started_at)
-}
-
-fn remove_duplicate_attributions(candidates: Vec<(String, String)>) -> HashMap<String, String> {
-    let mut seen = HashSet::new();
-    let mut duplicates = HashSet::new();
-    for (_, session_id) in &candidates {
-        if !seen.insert(session_id.clone()) {
-            duplicates.insert(session_id.clone());
-        }
-    }
-    if !duplicates.is_empty() {
-        tracing::warn!(
-            ?duplicates,
-            "Claude session attribution collision; skipping restore"
-        );
-    }
-    candidates
-        .into_iter()
-        .filter(|(_, session_id)| !duplicates.contains(session_id))
-        .collect()
 }
 
 #[cfg(test)]

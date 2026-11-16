@@ -97,7 +97,7 @@ fn get_agent_session_states_with_inputs(
             else {
                 continue;
             };
-            let Some(status) = records.statuses.get(session_id) else {
+            let Some(status) = records.statuses.get(id) else {
                 continue;
             };
             let status = match status {
@@ -116,7 +116,7 @@ fn get_agent_session_states_with_inputs(
                     submitted_input: input_terminal_ids
                         .contains(id)
                         .then(|| {
-                            let root = records.config_roots.get(session_id)?;
+                            let root = records.config_roots.get(id)?;
                             if !super::claude_session::is_valid_session_id(session_id) {
                                 return None;
                             }
