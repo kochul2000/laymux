@@ -19,6 +19,7 @@
 export interface CellInfo {
   chars: string;
   width: number;
+  foreground?: number;
 }
 
 /** `reconstructLine` 결과 — 라인 문자열과 두 방향의 컬럼 맵. */
@@ -108,11 +109,19 @@ export function findTokenCellRange(
 /** xterm `IBufferLine` 에서 필요한 부분만. */
 export interface BufferLineLike {
   length: number;
-  getCell: (x: number) => { getChars: () => string; getWidth: () => number } | undefined;
+  getCell: (x: number) =>
+    | {
+        getChars: () => string;
+        getWidth: () => number;
+        isFgDefault?: () => boolean;
+        isFgRGB?: () => boolean;
+        getFgColor?: () => number;
+      }
+    | undefined;
 }
 
 /** 버퍼 라인의 셀을 `CellInfo[]` 로 읽는다. 빈 셀은 공백 1칸으로 채운다. */
-export function readLineCells(line: BufferLineLike): CellInfo[] {
+export function readLineCells(line: BufferLineLike, readForeground = false): CellInfo[] {
   const cells: CellInfo[] = [];
   for (let i = 0; i < line.length; i++) {
     const cell = line.getCell(i);
@@ -120,7 +129,13 @@ export function readLineCells(line: BufferLineLike): CellInfo[] {
       cells.push({ chars: " ", width: 1 });
       continue;
     }
-    cells.push({ chars: cell.getChars(), width: cell.getWidth() });
+    const chars = cell.getChars();
+    const info: CellInfo = { chars, width: cell.getWidth() };
+    if (readForeground && chars && cell.getFgColor && cell.isFgDefault && cell.isFgRGB) {
+      // ANSI 16/256색은 같은 팔레트 인덱스를 공유한다. RGB와 기본색은 별도다.
+      info.foreground = cell.isFgDefault() ? 0 : cell.getFgColor() + (cell.isFgRGB() ? 256 : 0) + 1;
+    }
+    cells.push(info);
   }
   return cells;
 }

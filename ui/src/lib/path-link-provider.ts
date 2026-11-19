@@ -20,7 +20,12 @@ import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
 import type { OsHandoffMode } from "./os-handoff";
 import type { PathLinkClickAction } from "./path-link-os-open";
 import { readLineCells, reconstructLine } from "./terminal-cell-map";
-import { pathLinkPartsCurrent, type PathLinkPart } from "./path-link-lines";
+import {
+  movePathLinkCapture,
+  pathLinkPartsCurrent,
+  type PathLinkFrame,
+  type PathLinkPart,
+} from "./path-link-lines";
 
 /**
  * 검증된 링크의 소유 scope(ADR-0188). 세 트리거는 서로의 밑줄을 건드리지 않고
@@ -100,6 +105,7 @@ export interface PathLinkController {
 function tokenStillAtRange(
   terminal: Terminal,
   entry: { selection: VerifiedPathSelection; marker?: IMarker; decoration?: IDecoration },
+  frame: PathLinkFrame,
 ): boolean {
   try {
     // xterm disposes markers (and their decorations) when the coordinate itself
@@ -113,6 +119,7 @@ function tokenStillAtRange(
         terminal.buffer.active,
         entry.selection.pathParts,
         absoluteLine - (entry.selection.bufferLine - 1),
+        frame,
       );
     }
     const line = terminal.buffer.active.getLine(absoluteLine);
@@ -212,9 +219,10 @@ export function createPathLinkController(
       // 출력마다 불리는 경로다. 표시 중인 링크가 없으면 버퍼도 읽지 않는다.
       if (!PATH_LINK_SCOPES.some((scope) => scopes[scope].length > 0)) return 0;
       let dropped = 0;
+      const frame: PathLinkFrame = new Map();
       for (const scope of PATH_LINK_SCOPES) {
         scopes[scope] = scopes[scope].filter((entry) => {
-          if (tokenStillAtRange(terminal, entry)) return true;
+          if (tokenStillAtRange(terminal, entry, frame)) return true;
           disposeEntry(entry);
           dropped += 1;
           return false;
@@ -233,7 +241,11 @@ export function createPathLinkController(
           clientY >= rect.top &&
           clientY <= rect.bottom
         ) {
-          return { selection: entry.selection, rect };
+          const bufferLine =
+            entry.marker && !entry.marker.isDisposed
+              ? entry.marker.line + 1
+              : entry.selection.bufferLine;
+          return { selection: movePathLinkCapture(entry.selection, bufferLine), rect };
         }
       }
       return null;

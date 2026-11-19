@@ -102,6 +102,7 @@ type PathLinkRequest = {
   mode: unknown;
   lines: string[];
   caret?: { lineIndex: number; index: number };
+  foregroundRanges?: { lineIndex: number; startIndex: number; endIndex: number }[];
 };
 
 type CapturedTerminalWindow = typeof window & {
@@ -125,6 +126,7 @@ type CapturedTerminalWindow = typeof window & {
 type RemoteHarnessOptions = {
   delayedScreenRequest?: number;
   delayedScreenResponseMs?: number;
+  coloredPath?: { token: string; outputLine: string };
 };
 
 type RemoteHarness = {
@@ -142,22 +144,38 @@ type RemoteHarness = {
  * the token in exactly the lines the page sent, so a wrong caret, a wrong line
  * or a stale screen produces no match instead of a lucky one.
  */
-function matchesFor(body: PathLinkRequest, hostPath = HOST_PATH): Array<Record<string, unknown>> {
+function matchesFor(
+  body: PathLinkRequest,
+  hostPath = HOST_PATH,
+  coloredToken?: string,
+): Array<Record<string, unknown>> {
   const matches: Array<Record<string, unknown>> = [];
+  const token = coloredToken ?? TOKEN;
   body.lines.forEach((line, lineIndex) => {
-    const startIndex = line.indexOf(TOKEN);
+    const startIndex = line.indexOf(token);
     if (startIndex < 0) return;
+    const endIndex = startIndex + token.length;
+    if (
+      coloredToken &&
+      !body.foregroundRanges?.some(
+        (range) =>
+          range.lineIndex === lineIndex &&
+          range.startIndex === startIndex &&
+          range.endIndex === endIndex,
+      )
+    )
+      return;
     if (body.mode === "point") {
       const caret = body.caret;
       if (!caret || caret.lineIndex !== lineIndex) return;
-      if (caret.index < startIndex || caret.index >= startIndex + TOKEN.length) return;
+      if (caret.index < startIndex || caret.index >= endIndex) return;
     }
     matches.push({
-      token: TOKEN,
+      token,
       path: hostPath,
       lineIndex,
       startIndex,
-      endIndex: startIndex + TOKEN.length,
+      endIndex,
     });
   });
   return matches;
@@ -170,7 +188,8 @@ async function connectRemote(
   options: RemoteHarnessOptions = {},
 ): Promise<RemoteHarness> {
   let liveSocket: { send: (data: string | Buffer) => void } | null = null;
-  let deltaSeq = Buffer.byteLength(`${OUTPUT_LINE}\r\n`, "utf8");
+  const output = `${options.coloredPath?.outputLine ?? OUTPUT_LINE}\r\n`;
+  let deltaSeq = Buffer.byteLength(output, "utf8");
   let resolvedPath = HOST_PATH;
   const harness: RemoteHarness = {
     requests: [],
@@ -252,7 +271,7 @@ async function connectRemote(
         return route.fulfill({ json: { valid: false } }).catch(() => undefined);
       }
       harness.answeredModes.add(String(body.mode));
-      const matches = matchesFor(body, resolvedPath);
+      const matches = matchesFor(body, resolvedPath, options.coloredPath?.token);
       return route
         .fulfill({
           json: matches.length > 0 ? { valid: true, matches } : { valid: false },
@@ -272,7 +291,7 @@ async function connectRemote(
 
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
     liveSocket = socket;
-    const { header, payload } = snapshotFrames(`${OUTPUT_LINE}\r\n`);
+    const { header, payload } = snapshotFrames(output);
     socket.send(header);
     socket.send(payload);
   });
@@ -395,6 +414,29 @@ test("underlines every path on the visible screen once output stops", async ({ c
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();
   await expect(page.locator("#fileViewerTitle")).toHaveText(HOST_PATH);
+});
+
+test("Remote가 색 구간으로 공백 경로에 밑줄을 긋고 색 경계가 사라지면 같은 원문의 밑줄을 폐기한다", async ({
+  context,
+  page,
+}) => {
+  const token = "docs\\Release Notes.md";
+  const harness = await connectRemote(context, page, ["screen"], {
+    coloredPath: { token, outputLine: `See \x1b[36m${token}\x1b[39m next` },
+  });
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1);
+  expect(harness.requests.find((request) => request.mode === "screen")?.foregroundRanges).toEqual([
+    { lineIndex: 0, startIndex: 4, endIndex: 4 + token.length },
+  ]);
+  const original = await decoration.elementHandle();
+  harness.sendDelta(`\x1b[HSee \x1b[38;2;30;90;150m${token}\x1b[39m next`);
+  await expect
+    .poll(() => harness.requests.filter((request) => request.mode === "screen").length)
+    .toBeGreaterThan(1);
+  expect(await original?.evaluate((node) => node.isConnected)).toBe(true);
+  harness.sendDelta(`\x1b[HSee ${token} next`);
+  await expect(decoration).toHaveCount(0);
 });
 
 test.describe("mobile path-link focus ownership", () => {

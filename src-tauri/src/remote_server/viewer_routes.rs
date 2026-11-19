@@ -9,7 +9,7 @@ use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
 use crate::constants::{
     MAX_ANDROID_E2E_FILE_VIEWER_BYTES, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES,
-    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
+    MAX_PATH_LINK_CANDIDATES, MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
     MAX_REMOTE_PATH_LINK_SCREEN_CHARS, MAX_REMOTE_PATH_LINK_SCREEN_LINES,
     MAX_REMOTE_PATH_LINK_SELECTION_CHARS, MAX_REMOTE_PATH_LINK_SELECTION_LINES,
     MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS, REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
@@ -49,6 +49,8 @@ pub(super) struct FileViewerPathLinkRequest {
     mode: String,
     lines: Vec<String>,
     caret: Option<FileViewerPathLinkCaret>,
+    // Bad optional hints still allow an otherwise valid legacy request.
+    foreground_ranges: Option<Value>,
     lease_id: Option<String>,
 }
 
@@ -57,6 +59,14 @@ pub(super) struct FileViewerPathLinkRequest {
 pub(super) struct FileViewerPathLinkCaret {
     line_index: usize,
     index: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FileViewerPathLinkForegroundRange {
+    line_index: usize,
+    start_index: usize,
+    end_index: usize,
 }
 
 /// One Remote directory listing request (ADR-0198). Either an explicit host
@@ -394,6 +404,9 @@ fn path_link_params(body: FileViewerPathLinkRequest) -> Result<Value, &'static s
         (_, None) => None,
     };
 
+    let foreground_ranges = body
+        .foreground_ranges
+        .filter(|value| valid_foreground_ranges(value, &body.lines));
     let mut params = json!({
         "terminalId": terminal_id,
         "mode": body.mode,
@@ -404,7 +417,47 @@ fn path_link_params(body: FileViewerPathLinkRequest) -> Result<Value, &'static s
     if let Some(caret) = caret {
         params["caret"] = caret;
     }
+    if let Some(foreground_ranges) = foreground_ranges {
+        params["foregroundRanges"] = foreground_ranges;
+    }
     Ok(params)
+}
+
+fn valid_foreground_ranges(value: &Value, lines: &[String]) -> bool {
+    let Some(ranges) = value.as_array() else {
+        return false;
+    };
+    if ranges.len() > MAX_PATH_LINK_CANDIDATES {
+        return false;
+    }
+    let utf16: Vec<Vec<u16>> = lines
+        .iter()
+        .map(|line| line.encode_utf16().collect())
+        .collect();
+    let mut previous_end = (0, 0);
+    for value in ranges {
+        let Ok(range) = FileViewerPathLinkForegroundRange::deserialize(value) else {
+            return false;
+        };
+        let Some(line) = utf16.get(range.line_index) else {
+            return false;
+        };
+        let is_boundary = |index: usize| {
+            index == line.len()
+                || line
+                    .get(index)
+                    .is_some_and(|unit| !(0xdc00..=0xdfff).contains(unit))
+        };
+        if (range.line_index, range.start_index) < previous_end
+            || range.start_index >= range.end_index
+            || !is_boundary(range.start_index)
+            || !is_boundary(range.end_index)
+        {
+            return false;
+        }
+        previous_end = (range.line_index, range.end_index);
+    }
+    true
 }
 
 async fn file_viewer_bridge_response(
@@ -507,6 +560,43 @@ mod tests {
         path_link_mode_request(terminal_id, "selection", vec![selection.to_owned()], None)
     }
 
+    #[test]
+    fn path_link_foreground_ranges_use_bounded_utf16_offsets_and_fallback() {
+        let request = |ranges| {
+            serde_json::from_value::<FileViewerPathLinkRequest>(json!({
+                "terminalId": "terminal-1",
+                "mode": "screen",
+                "lines": ["😀 a b.md", "C:/Program Files (x86)"],
+                "foregroundRanges": ranges,
+            }))
+            .expect("foregroundRanges must not break request decoding")
+        };
+        let valid = json!([
+            {"lineIndex": 0, "startIndex": 3, "endIndex": 9},
+            {"lineIndex": 1, "startIndex": 0, "endIndex": 22}
+        ]);
+        let params = path_link_params(request(valid.clone())).unwrap();
+        assert_eq!(params["foregroundRanges"], valid);
+
+        let split_surrogate = json!([{"lineIndex": 0, "startIndex": 1, "endIndex": 9}]);
+        let wrong_line = json!([{"lineIndex": 2, "startIndex": 0, "endIndex": 2}]);
+        let overlap = json!([
+            {"lineIndex": 0, "startIndex": 0, "endIndex": 4},
+            {"lineIndex": 0, "startIndex": 3, "endIndex": 9}
+        ]);
+        for malformed in [
+            json!("invalid"),
+            split_surrogate,
+            wrong_line,
+            overlap,
+            json!(vec![json!({}); 65]),
+        ] {
+            let params = path_link_params(request(malformed)).unwrap();
+            assert!(params.get("foregroundRanges").is_none());
+            assert_eq!(params["mode"], "screen");
+        }
+    }
+
     fn path_link_mode_request(
         terminal_id: &str,
         mode: &str,
@@ -518,6 +608,7 @@ mod tests {
             mode: mode.into(),
             lines,
             caret: caret.map(|(line_index, index)| FileViewerPathLinkCaret { line_index, index }),
+            foreground_ranges: None,
             lease_id: None,
         }
     }

@@ -47,6 +47,7 @@ const lines = [
   `Worktrees-SHA256: ${["remote/remote-worktrees.js", "lib/worktree-presentation.ts", "lib/worktree-display.ts"].map((file) => `${file}=${fileHash(path.resolve(SCRIPT_DIR, "../src", file))}`).join(" ")}`,
   `View-instance-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/lib/view-instance-id.ts"))}`,
   `I18n-SHA256: ${["remote/remote-i18n.js", "remote/remote-messages.json", "i18n/resolve-language.ts", "lib/lifecycle-progress.ts"].map((file) => `${file}=${fileHash(path.resolve(SCRIPT_DIR, "../src", file))}`).join(" ")}`,
+  `Path-link-detect-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/lib/path-link-detect.ts"))}`,
   "Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts",
 ];
 

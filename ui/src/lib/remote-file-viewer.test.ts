@@ -92,6 +92,44 @@ describe("Remote FileViewer path-link bridge", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["point", "selection", "screen"])(
+    "%s에서 색 경계의 전체 Windows 경로를 우선한다",
+    async (mode) => {
+      registerTerminal("C:\\work");
+      const token = "docs\\Release Notes.md";
+      const path = `C:\\work\\${token}`;
+      vi.mocked(statPaths).mockImplementation(async (paths) =>
+        paths.map((candidate) => ({
+          exists: [path, "C:\\work\\docs\\Release", "C:\\work\\Notes.md"].includes(candidate),
+          isDirectory: false,
+        })),
+      );
+
+      const result = await handleRemoteFileViewerRequest("pathLink", {
+        terminalId: "terminal-1",
+        mode,
+        lines: [`See ${token} next`],
+        foregroundRanges: [{ lineIndex: 0, startIndex: 4, endIndex: 4 + token.length }],
+        ...(mode === "point" ? { caret: { lineIndex: 0, index: 4 + token.indexOf(" ") } } : {}),
+      });
+
+      expect(statPaths).toHaveBeenCalledTimes(1);
+      expect(result.data).toEqual({
+        valid: true,
+        matches: [
+          {
+            token,
+            path,
+            kind: "file",
+            lineIndex: 0,
+            startIndex: 4,
+            endIndex: 4 + token.length,
+          },
+        ],
+      });
+    },
+  );
+
   it("desktop parser로 선택을 정리하고 terminal CWD와 조합한 파일만 검증한다", async () => {
     registerTerminal("C:\\work");
     vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);

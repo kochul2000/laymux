@@ -50,6 +50,15 @@ export const PATH_LINK_MAX_SPACE_EXTENSIONS = 8;
  */
 export const PATH_LINK_MAX_STAT_BATCH = 64;
 
+export interface PathLinkForegroundSpan {
+  startIndex: number;
+  endIndex: number;
+}
+
+export interface PathLinkForegroundRange extends PathLinkForegroundSpan {
+  lineIndex: number;
+}
+
 export interface PathSelectionCandidate {
   /** 장식과 `:line:col`을 제거한 경로 원문. */
   text: string;
@@ -59,6 +68,8 @@ export interface PathSelectionCandidate {
   startIndex: number;
   /** 해당 선택 줄 안의 UTF-16 끝 offset(exclusive). */
   endIndex: number;
+  /** 색 경계 원문(2), 장식을 덜어낸 색 경계(1), 평문(생략). */
+  foregroundPriority?: 1 | 2;
 }
 
 export interface PathSelectionLimits {
@@ -331,6 +342,85 @@ function looksLikeStrongPath(text: string): boolean {
   return isAbsolutePath(text) || /[\\/]/.test(text) || FILE_EXTENSION_RE.test(text);
 }
 
+function foregroundCandidates(
+  line: string,
+  range: PathLinkForegroundRange,
+  maxPathLength: number,
+): PathSelectionCandidate[] {
+  if (range.startIndex < 0 || range.endIndex > line.length || range.startIndex >= range.endIndex) {
+    return [];
+  }
+  const raw = line.slice(range.startIndex, range.endIndex);
+  if (/[\x00-\x1f\x7f]/.test(raw)) return [];
+  let text = raw.trim();
+  let startIndex = range.startIndex + raw.indexOf(text);
+  const lineSuffix = /:\d+(?::\d+)?$/;
+  const candidates: PathSelectionCandidate[] = [];
+  const add = (text: string, startIndex: number, foregroundPriority: 1 | 2) => {
+    if (SLASH_PREFIXED_WINDOWS_DRIVE_RE.test(text)) {
+      startIndex++;
+      text = text.slice(1);
+    }
+    if (
+      text.length > maxPathLength ||
+      !text.includes(" ") ||
+      !looksLikeStrongPath(text) ||
+      /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ||
+      /\s(?:[a-zA-Z]:[\\/]|[\\/]|~[\\/])/.test(text)
+    )
+      return;
+    candidates.push({
+      text,
+      lineIndex: range.lineIndex,
+      startIndex,
+      endIndex: startIndex + text.length,
+      foregroundPriority,
+    });
+  };
+  const original = text;
+  text = text.replace(lineSuffix, "");
+  // 괄호와 작은따옴표는 실제 이름일 수 있다. Windows의 큰따옴표와
+  // 숫자 행 위치 표기는 장식으로 해석한다.
+  if (text === original && !/^".*"$/.test(text)) add(text, startIndex, 2);
+  if (/^(["'`]).*\1$/.test(text) || (text.startsWith("(") && text.endsWith(")"))) {
+    startIndex++;
+    text = text.slice(1, -1);
+  }
+  text = text.replace(lineSuffix, "");
+  if (text !== original) add(text, startIndex, 1);
+  return candidates;
+}
+
+function addForegroundCandidates(
+  candidates: PathSelectionCandidate[],
+  lines: readonly string[],
+  ranges: readonly PathLinkForegroundRange[],
+  maxPathLength: number,
+  cap: number,
+  offset?: number,
+): PathSelectionCandidate[] {
+  for (const range of ranges) {
+    const line = lines[range.lineIndex];
+    if (
+      line === undefined ||
+      (offset !== undefined && (offset < range.startIndex || offset >= range.endIndex))
+    ) {
+      continue;
+    }
+    for (const candidate of foregroundCandidates(line, range, maxPathLength)) {
+      const oldIndex = candidates.findIndex(
+        (old) =>
+          old.lineIndex === candidate.lineIndex &&
+          old.startIndex === candidate.startIndex &&
+          old.endIndex === candidate.endIndex,
+      );
+      if (oldIndex >= 0) candidates[oldIndex] = candidate;
+      else if (candidates.length < cap) candidates.push(candidate);
+    }
+  }
+  return candidates;
+}
+
 /**
  * 선택 영역을 왼쪽부터 maximal-munch로 소비해 서로 겹치지 않는 경로 후보를 찾는다.
  *
@@ -348,6 +438,7 @@ function looksLikeStrongPath(text: string): boolean {
 export function extractPathCandidatesFromSelection(
   selection: string,
   limits: PathSelectionLimits,
+  foregroundRanges: readonly PathLinkForegroundRange[] = [],
 ): PathSelectionCandidate[] {
   if (
     !selection ||
@@ -361,6 +452,14 @@ export function extractPathCandidatesFromSelection(
 
   const lines = selection.split(/\r?\n/);
   if (lines.length > limits.maxLines) return [];
+  const finish = (candidates: PathSelectionCandidate[]) =>
+    addForegroundCandidates(
+      candidates,
+      lines,
+      foregroundRanges,
+      limits.maxPathLength,
+      PATH_LINK_MAX_STAT_BATCH,
+    );
 
   const maximalTokens = lines.flatMap((line, lineIndex) => readMaximalTokens(line, lineIndex));
 
@@ -385,7 +484,7 @@ export function extractPathCandidatesFromSelection(
     const variant = hangulTailVariant(token);
     if (!variant || variant.text.length > limits.maxPathLength) continue;
     if (!exactSingleToken && !variant.strong) continue;
-    if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return candidates;
+    if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return finish(candidates);
     candidates.push(candidateOf(variant));
   }
 
@@ -398,7 +497,7 @@ export function extractPathCandidatesFromSelection(
       lineIndex,
       limits.maxPathLength,
     )) {
-      if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return candidates;
+      if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return finish(candidates);
       candidates.push({
         text: extension.text,
         lineIndex: extension.lineIndex,
@@ -407,7 +506,7 @@ export function extractPathCandidatesFromSelection(
       });
     }
   }
-  return candidates;
+  return finish(candidates);
 }
 
 type MaximalToken = PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number };
@@ -525,22 +624,25 @@ function spaceExtensionCandidates(
 
 /**
  * 존재 검증을 통과한 후보들 사이에서 같은 줄의 겹치는 범위를 정리한다
- * (ADR-0191 longest-existing-wins). 긴 것부터 greedy 로 채택하고, 이미 채택된
- * 범위와 겹치는 짧은 후보는 버린다. 겹치지 않는 후보는 모두 남고, 반환 순서는
+ * (ADR-0385). 색 경계 우선순위 순으로 채택하고 같은 우선순위에서는 긴 것을
+ * 먼저 채택한다(ADR-0191). 겹치지 않는 후보는 모두 남고, 반환 순서는
  * 입력 순서를 유지한다.
  */
 export function resolveOverlappingRanges<T>(
   items: T[],
-  rangeOf: (item: T) => { line: number; start: number; end: number },
+  rangeOf: (item: T) => { line: number; start: number; end: number; priority?: number },
 ): T[] {
   if (items.length <= 1) return items;
   const indexed = items.map((item, index) => ({ item, index, range: rangeOf(item) }));
-  const byLength = [...indexed].sort(
-    (a, b) => b.range.end - b.range.start - (a.range.end - a.range.start) || a.index - b.index,
+  const byPriorityAndLength = [...indexed].sort(
+    (a, b) =>
+      (b.range.priority ?? 0) - (a.range.priority ?? 0) ||
+      b.range.end - b.range.start - (a.range.end - a.range.start) ||
+      a.index - b.index,
   );
   const kept: Array<{ line: number; start: number; end: number }> = [];
   const keptIndexes = new Set<number>();
-  for (const entry of byLength) {
+  for (const entry of byPriorityAndLength) {
     const clashes = kept.some(
       (range) =>
         range.line === entry.range.line &&
@@ -576,6 +678,7 @@ export function extractPathCandidatesAtOffset(
   line: string,
   offset: number,
   limits: PathPointLimits,
+  foregroundRanges: readonly PathLinkForegroundRange[] = [],
 ): PathSelectionCandidate[] {
   if (!line || !Number.isFinite(offset) || offset < 0 || offset >= line.length) return [];
   if (limits.maxPathLength < 1) return [];
@@ -603,7 +706,14 @@ export function extractPathCandidatesAtOffset(
     if (results.length >= PATH_LINK_MAX_STAT_BATCH) break;
     results.push(candidateOf(candidate));
   }
-  return results;
+  return addForegroundCandidates(
+    results,
+    [line],
+    foregroundRanges,
+    limits.maxPathLength,
+    PATH_LINK_MAX_STAT_BATCH,
+    offset,
+  );
 }
 
 /**
@@ -620,6 +730,7 @@ export function extractPathCandidatesAtOffset(
 export function extractPathCandidatesFromScreen(
   lines: string[],
   limits: PathScreenLimits,
+  foregroundRanges: readonly PathLinkForegroundRange[] = [],
 ): PathSelectionCandidate[] {
   if (
     lines.length === 0 ||
@@ -632,18 +743,28 @@ export function extractPathCandidatesFromScreen(
   }
 
   const candidates: PathSelectionCandidate[] = [];
+  const finish = (lineCount: number) =>
+    addForegroundCandidates(
+      candidates,
+      lines.slice(0, lineCount),
+      foregroundRanges,
+      limits.maxPathLength,
+      Math.min(limits.maxCandidates, PATH_LINK_MAX_STAT_BATCH),
+    );
   let chars = 0;
   const scanned = Math.min(lines.length, limits.maxLines);
+  let lineCount = 0;
   for (let lineIndex = 0; lineIndex < scanned; lineIndex++) {
     const line = lines[lineIndex];
     chars += line.length;
     if (chars > limits.maxChars) break;
+    lineCount = lineIndex + 1;
     for (const token of readMaximalTokens(line, lineIndex)) {
       // ADR-0288: 한글 조사를 떼야 strong 이 되는 토큰(`report.docx입니다`)도 있다.
       for (const candidate of [token, hangulTailVariant(token)]) {
         if (!candidate?.strong || candidate.text.length > limits.maxPathLength) continue;
         candidates.push(candidateOf(candidate));
-        if (candidates.length >= limits.maxCandidates) return candidates;
+        if (candidates.length >= limits.maxCandidates) return finish(lineCount);
       }
     }
     // ADR-0191: 공백 확장 후보도 같은 상한 안에서 읽기 순서대로 센다 — 상한
@@ -655,10 +776,10 @@ export function extractPathCandidatesFromScreen(
         startIndex: extension.startIndex,
         endIndex: extension.endIndex,
       });
-      if (candidates.length >= limits.maxCandidates) return candidates;
+      if (candidates.length >= limits.maxCandidates) return finish(lineCount);
     }
   }
-  return candidates;
+  return finish(lineCount);
 }
 
 /**

@@ -1305,14 +1305,14 @@ mod tests {
         // Output can repaint a row in place: stable frames re-check the stored
         // token, while an in-progress DEC 2026 frame keeps the rendered link.
         assert!(html.contains("function revalidatePathLinkScopes()"));
-        assert!(html.contains("function pathLinkEntryStillOnScreen(entry)"));
+        assert!(html.contains("function pathLinkEntryStillOnScreen(entry, frame)"));
         assert!(html.contains("term.modes?.synchronizedOutputMode === true"));
         assert!(html.contains("term.modes?.synchronizedOutputMode !== true"));
         // Equal links keep their live marker/decoration DOM identity.
         assert!(html.contains("function samePathLinkEntry(entry, right)"));
         assert!(html.contains("entry.decoration.isDisposed !== true"));
         assert!(html.contains("reusableEntry.selection = selection;"));
-        assert!(html.contains("if (!pathLinkPartsCurrent(term.buffer.active, parts)) { clearPathLinkScope(scope); return; }"));
+        assert!(html.contains("if (!pathLinkPartsCurrent(term.buffer.active, parts, 0, frame)) { clearPathLinkScope(scope); return; }"));
         assert!(html.contains("if (!setVerifiedPathLinks(scope, selections))"));
         assert!(html.contains(
             "if (term.hasSelection?.()) {\n            if (pathLinkScreenContextDirty) clearPathLinkScope(\"screen\");"
