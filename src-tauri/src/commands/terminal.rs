@@ -606,9 +606,12 @@ pub(crate) async fn create_terminal_session_inner(
             (data, live)
         };
         if data.is_empty() {
-            callback_osc_pass.submit(&missed, &data);
+            callback_osc_pass.submit(&missed, &data, None);
             return pty::PtyOutputControl::Continue;
         }
+        // Capture permission before waiting for desktop output credit. A pane
+        // gaining focus during that wait cannot authorize earlier bytes.
+        let clipboard_epoch = callback_osc_pass.live_clipboard_epoch();
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
             tracing::info!(
@@ -723,7 +726,7 @@ pub(crate) async fn create_terminal_session_inner(
             );
         }
 
-        callback_osc_pass.submit(&missed, &data);
+        callback_osc_pass.submit(&missed, &data, clipboard_epoch);
 
         // Claude Code status message is updated in two places:
         // 1. Working title → strip spinner prefix → claude_message (in OSC title handler below)
@@ -1985,8 +1988,13 @@ struct OscOutputGate {
     pending: Mutex<Option<Vec<PendingOscOutput>>>,
 }
 
-/// Output held for the OSC pass, and whether it is missed output.
-type PendingOscOutput = (Vec<u8>, bool);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OscOutputSource {
+    Missed,
+    Live(Option<u64>),
+}
+
+type PendingOscOutput = (Vec<u8>, OscOutputSource);
 
 impl OscOutputGate {
     fn new(closed: bool) -> Self {
@@ -1996,24 +2004,33 @@ impl OscOutputGate {
     }
 
     /// Missed output first: it precedes `live` in the stream.
-    fn submit(&self, missed: &[u8], live: &[u8], mut pass: impl FnMut(&[u8], bool)) {
+    fn submit(
+        &self,
+        missed: &[u8],
+        live: &[u8],
+        clipboard_epoch: Option<u64>,
+        mut pass: impl FnMut(&[u8], OscOutputSource),
+    ) {
         let Ok(mut pending) = self.pending.lock_or_err() else {
             return;
         };
-        let segments = [(missed, true), (live, false)];
+        let segments = [
+            (missed, OscOutputSource::Missed),
+            (live, OscOutputSource::Live(clipboard_epoch)),
+        ];
         if let Some(queue) = pending.as_mut() {
             queue.extend(
                 segments
                     .into_iter()
                     .filter(|(data, _)| !data.is_empty())
-                    .map(|(data, missed)| (data.to_vec(), missed)),
+                    .map(|(data, source)| (data.to_vec(), source)),
             );
             return;
         }
         // Under the lock, so nothing overtakes what `open` is still draining.
-        for (data, missed) in segments {
+        for (data, source) in segments {
             if !data.is_empty() {
-                pass(data, missed);
+                pass(data, source);
             }
         }
     }
@@ -2023,18 +2040,18 @@ impl OscOutputGate {
     fn prepend_missed(&self, data: Vec<u8>) {
         if let Ok(mut pending) = self.pending.lock_or_err() {
             if let Some(queue) = pending.as_mut() {
-                queue.insert(0, (data, true));
+                queue.insert(0, (data, OscOutputSource::Missed));
             }
         }
     }
 
     /// Run what waited, then pass output through.
-    fn open(&self, mut pass: impl FnMut(&[u8], bool)) {
+    fn open(&self, mut pass: impl FnMut(&[u8], OscOutputSource)) {
         let Ok(mut pending) = self.pending.lock_or_err() else {
             return;
         };
-        for (data, missed) in pending.take().unwrap_or_default() {
-            pass(&data, missed);
+        for (data, source) in pending.take().unwrap_or_default() {
+            pass(&data, source);
         }
     }
 }
@@ -2062,19 +2079,32 @@ struct TerminalOscPass {
 }
 
 impl TerminalOscPass {
-    fn submit(&self, missed: &[u8], live: &[u8]) {
+    fn live_clipboard_epoch(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            self.state
+                .terminal_clipboard_focus
+                .epoch_for(&self.terminal_id, self.terminal_generation)
+        }
+        #[cfg(not(windows))]
+        None
+    }
+
+    fn submit(&self, missed: &[u8], live: &[u8], clipboard_epoch: Option<u64>) {
         self.gate
-            .submit(missed, live, |data, missed| self.process(data, missed));
+            .submit(missed, live, clipboard_epoch, |data, source| {
+                self.process(data, source)
+            });
     }
 
     /// The terminal is registered: the facts it waited for can land.
     fn open(&self) {
-        self.gate.open(|data, missed| self.process(data, missed));
+        self.gate.open(|data, source| self.process(data, source));
     }
 
-    /// Missed output takes every fact except `SyncCwd`, which would type
-    /// `cd` into the other terminals of the group for a change long past.
-    fn process(&self, data: &[u8], missed: bool) {
+    /// Missed output can reconstruct facts but has no clipboard authority.
+    /// It also suppresses SyncCwd, which would type cd into other terminals.
+    fn process(&self, data: &[u8], source: OscOutputSource) {
         if data.is_empty() {
             return;
         }
@@ -2084,6 +2114,10 @@ impl TerminalOscPass {
         let terminal_generation = self.terminal_generation;
         let pty_cb_state = &self.callback_state;
         let presets = &self.presets;
+        let (missed, epoch) = match source {
+            OscOutputSource::Missed => (true, None),
+            OscOutputSource::Live(epoch) => (false, epoch),
+        };
         let mut missed_ring = self.missed_ring.lock_or_err().ok();
         if !missed {
             // Live output has begun; no missed output follows it.
@@ -2113,16 +2147,6 @@ impl TerminalOscPass {
             }
         };
 
-        #[cfg(windows)]
-        let epoch = (!missed)
-            .then(|| {
-                self.state
-                    .terminal_clipboard_focus
-                    .epoch_for(&self.terminal_id, self.terminal_generation)
-            })
-            .flatten();
-        #[cfg(not(windows))]
-        let epoch = None;
         let mut events = Vec::new();
         if let Ok(mut stream) = self.stream.lock_or_err() {
             stream.push(data, epoch, |event, epoch| events.push((event, epoch)));
@@ -2755,25 +2779,25 @@ mod tests {
     fn a_closed_osc_gate_keeps_stream_order_until_it_opens() {
         let gate = OscOutputGate::new(true);
         let mut seen = Vec::new();
-        gate.submit(b"missed-1", b"", |data, missed| {
-            seen.push((data.to_vec(), missed))
+        gate.submit(b"missed-1", b"", None, |data, source| {
+            seen.push((data.to_vec(), source))
         });
-        gate.submit(b"missed-2", b"live-1", |data, missed| {
-            seen.push((data.to_vec(), missed))
+        gate.submit(b"missed-2", b"live-1", Some(4), |data, source| {
+            seen.push((data.to_vec(), source))
         });
         assert!(
             seen.is_empty(),
             "nothing passes before the terminal is registered"
         );
-        gate.open(|data, missed| seen.push((data.to_vec(), missed)));
-        gate.submit(b"", b"live-2", |data, missed| {
-            seen.push((data.to_vec(), missed))
+        gate.open(|data, source| seen.push((data.to_vec(), source)));
+        gate.submit(b"", b"live-2", Some(5), |data, source| {
+            seen.push((data.to_vec(), source))
         });
-        let expected: Vec<(Vec<u8>, bool)> = vec![
-            (b"missed-1".to_vec(), true),
-            (b"missed-2".to_vec(), true),
-            (b"live-1".to_vec(), false),
-            (b"live-2".to_vec(), false),
+        let expected = vec![
+            (b"missed-1".to_vec(), OscOutputSource::Missed),
+            (b"missed-2".to_vec(), OscOutputSource::Missed),
+            (b"live-1".to_vec(), OscOutputSource::Live(Some(4))),
+            (b"live-2".to_vec(), OscOutputSource::Live(Some(5))),
         ];
         assert_eq!(seen, expected);
     }
@@ -2782,17 +2806,17 @@ mod tests {
     fn a_handed_title_goes_ahead_of_output_the_gate_already_holds() {
         let gate = OscOutputGate::new(true);
         let mut seen = Vec::new();
-        gate.submit(b"missed", b"live", |data, missed| {
-            seen.push((data.to_vec(), missed))
+        gate.submit(b"missed", b"live", None, |data, source| {
+            seen.push((data.to_vec(), source))
         });
         gate.prepend_missed(b"title".to_vec());
-        gate.open(|data, missed| seen.push((data.to_vec(), missed)));
+        gate.open(|data, source| seen.push((data.to_vec(), source)));
         // Once open, nothing can go ahead of output that already passed.
         gate.prepend_missed(b"late".to_vec());
-        let expected: Vec<(Vec<u8>, bool)> = vec![
-            (b"title".to_vec(), true),
-            (b"missed".to_vec(), true),
-            (b"live".to_vec(), false),
+        let expected = vec![
+            (b"title".to_vec(), OscOutputSource::Missed),
+            (b"missed".to_vec(), OscOutputSource::Missed),
+            (b"live".to_vec(), OscOutputSource::Live(None)),
         ];
         assert_eq!(seen, expected);
     }
@@ -2801,10 +2825,10 @@ mod tests {
     fn an_open_osc_gate_passes_output_straight_through() {
         let gate = OscOutputGate::new(false);
         let mut seen = Vec::new();
-        gate.submit(b"", b"live", |data, missed| {
-            seen.push((data.to_vec(), missed))
+        gate.submit(b"", b"live", None, |data, source| {
+            seen.push((data.to_vec(), source))
         });
-        assert_eq!(seen, vec![(b"live".to_vec(), false)]);
+        assert_eq!(seen, vec![(b"live".to_vec(), OscOutputSource::Live(None))]);
     }
 
     struct SharedTestWriter(Arc<Mutex<Vec<u8>>>);

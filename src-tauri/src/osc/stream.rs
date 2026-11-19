@@ -13,8 +13,8 @@ enum Phase {
     ControlStringEscape,
 }
 
-/// Incremental OSC framing for one PTY generation. DCS, SOS, PM and APC
-/// strings cannot introduce nested clipboard requests.
+/// Incremental OSC framing for one PTY generation. The escape that ends
+/// another control string cannot also authorize a clipboard write.
 #[derive(Default)]
 pub(crate) struct OscStream {
     phase: Phase,
@@ -61,17 +61,19 @@ impl OscStream {
                     Phase::Ground
                 }
                 (Phase::Osc, 0x1b) => Phase::OscEscape,
-                (Phase::OscEscape, b']') => {
+                (Phase::OscEscape | Phase::ControlStringEscape, b']') => {
                     self.payload.clear();
                     self.oversized = false;
                     self.clipboard_epoch = None;
                     Phase::Osc
                 }
-                (Phase::OscEscape, b'P' | b'X' | b'^' | b'_') => Phase::ControlString,
+                (Phase::OscEscape | Phase::ControlStringEscape, b'P' | b'X' | b'^' | b'_')
+                | (Phase::ControlStringEscape, 0x1b) => Phase::ControlString,
                 (Phase::Osc, 0x18 | 0x1a)
-                | (Phase::ControlString | Phase::ControlStringEscape, 0x18 | 0x1a)
-                | (Phase::ControlStringEscape, b'\\')
-                | (Phase::OscEscape | Phase::Escape, _) => Phase::Ground,
+                | (Phase::ControlString, 0x18 | 0x1a)
+                | (Phase::OscEscape | Phase::Escape | Phase::ControlStringEscape, _) => {
+                    Phase::Ground
+                }
                 (Phase::Osc, _) => {
                     if self.payload.len() < MAX_OSC_FRAME_BYTES {
                         self.payload.push(byte);
@@ -81,7 +83,7 @@ impl OscStream {
                     Phase::Osc
                 }
                 (Phase::ControlString, 0x1b) => Phase::ControlStringEscape,
-                (Phase::ControlString | Phase::ControlStringEscape, _) => Phase::ControlString,
+                (Phase::ControlString, _) => Phase::ControlString,
                 (Phase::Ground, _) => unreachable!(),
             };
         }
@@ -161,5 +163,17 @@ mod tests {
         assert_eq!(events[0].code, 133);
         assert_eq!(events[0].param.as_deref(), Some("D"));
         assert_eq!(events[0].data, "0");
+    }
+
+    #[test]
+    fn recovers_after_an_escape_cancels_a_control_string() {
+        let mut events = Vec::new();
+        let mut stream = OscStream::default();
+        stream.push(
+            b"\x1bPqfixture\x1b[0m\x1b]133;D;0\x07\x1bPqfixture\x1b]52;c;YWJj\x07\x1b]52;c;YWJj\x07",
+            Some(5),
+            |event, epoch| events.push((event.code, epoch)),
+        );
+        assert_eq!(events, [(133, Some(5)), (52, None), (52, Some(5))]);
     }
 }

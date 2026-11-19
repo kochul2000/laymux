@@ -91,9 +91,30 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(windows)]
+    let builder = builder
+        .on_page_load(|webview, payload| {
+            if webview.label() == constants::MAIN_WINDOW_LABEL
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                if let Some(state) = webview.try_state::<Arc<state::AppState>>() {
+                    state.terminal_clipboard_focus.clear();
+                }
+            }
+        })
+        .on_window_event(|window, event| {
+            if window.label() == constants::MAIN_WINDOW_LABEL
+                && matches!(event, tauri::WindowEvent::Focused(false))
+            {
+                if let Some(state) = window.try_state::<Arc<state::AppState>>() {
+                    state.terminal_clipboard_focus.clear();
+                }
+            }
+        });
+    builder
         .setup(|app| {
             let app_state = Arc::new(state::AppState::new());
             // Titles a previous GUI handed to this launch (ADR-0319).

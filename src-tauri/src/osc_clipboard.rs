@@ -48,6 +48,12 @@ mod windows {
     pub(crate) struct ClipboardFocus(Mutex<FocusState>);
 
     impl ClipboardFocus {
+        pub(crate) fn clear(&self) {
+            if let Err(error) = self.update(0, None, None) {
+                tracing::warn!(%error, "Could not revoke terminal clipboard focus");
+            }
+        }
+
         pub(crate) fn update(
             &self,
             window_handle: usize,
@@ -56,6 +62,7 @@ mod windows {
         ) -> Result<(), crate::error::AppError> {
             let target = terminal_id
                 .zip(generation)
+                .filter(|_| window_handle == unsafe { GetForegroundWindow() } as usize)
                 .map(|(terminal_id, generation)| Target {
                     window_handle,
                     terminal_id,
