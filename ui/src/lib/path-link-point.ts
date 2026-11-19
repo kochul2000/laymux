@@ -146,7 +146,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         line.text,
         offset,
         pathPointLimits(settings.maxPathLength),
-        pathLinkForegroundRanges([line]),
+        pathLinkForegroundRanges([line], { lineIndex: 0, index: offset }),
       );
       if (candidates.length === 0) {
         clearPoint();

@@ -21,6 +21,25 @@ import {
 } from "./path-link-detect";
 
 describe("색 경계의 공백 경로", () => {
+  it("괄호가 실제 이름일 수 있는 경우 원문과 장식 제거 후보를 함께 낸다", () => {
+    const text = "(notes\\my file.txt)";
+    const candidates = extractPathCandidatesAtOffset(
+      text,
+      text.indexOf(" "),
+      pathPointLimits(256),
+      [
+        {
+          lineIndex: 0,
+          startIndex: 0,
+          endIndex: text.length,
+        },
+      ],
+    );
+    expect(candidates.map(({ text, foregroundPriority }) => [text, foregroundPriority])).toEqual([
+      [text, 2],
+      [text.slice(1, -1), 1],
+    ]);
+  });
   it.each([
     ['"Release Notes.md"', "Release Notes.md"],
     ["Release Notes.md:12:3", "Release Notes.md"],

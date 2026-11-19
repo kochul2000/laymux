@@ -342,52 +342,53 @@ function looksLikeStrongPath(text: string): boolean {
   return isAbsolutePath(text) || /[\\/]/.test(text) || FILE_EXTENSION_RE.test(text);
 }
 
-function foregroundCandidate(
+function foregroundCandidates(
   line: string,
   range: PathLinkForegroundRange,
   maxPathLength: number,
-): PathSelectionCandidate | null {
+): PathSelectionCandidate[] {
   if (range.startIndex < 0 || range.endIndex > line.length || range.startIndex >= range.endIndex) {
-    return null;
+    return [];
   }
   const raw = line.slice(range.startIndex, range.endIndex);
-  if (/[\x00-\x1f\x7f]/.test(raw)) return null;
+  if (/[\x00-\x1f\x7f]/.test(raw)) return [];
   let text = raw.trim();
   let startIndex = range.startIndex + raw.indexOf(text);
-  let foregroundPriority: 1 | 2 = 2;
-  // 행 위치 표기는 경로가 사용하는 콜론(예: C:)과 별개다.
   const lineSuffix = /:\d+(?::\d+)?$/;
-  const withoutOuterLocation = text.replace(lineSuffix, "");
-  if (withoutOuterLocation !== text) foregroundPriority = 1;
-  text = withoutOuterLocation;
+  const candidates: PathSelectionCandidate[] = [];
+  const add = (text: string, startIndex: number, foregroundPriority: 1 | 2) => {
+    if (SLASH_PREFIXED_WINDOWS_DRIVE_RE.test(text)) {
+      startIndex++;
+      text = text.slice(1);
+    }
+    if (
+      text.length > maxPathLength ||
+      !text.includes(" ") ||
+      !looksLikeStrongPath(text) ||
+      /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ||
+      /\s(?:[a-zA-Z]:[\\/]|[\\/]|~[\\/])/.test(text)
+    )
+      return;
+    candidates.push({
+      text,
+      lineIndex: range.lineIndex,
+      startIndex,
+      endIndex: startIndex + text.length,
+      foregroundPriority,
+    });
+  };
+  const original = text;
+  text = text.replace(lineSuffix, "");
+  // 괄호와 작은따옴표는 실제 이름일 수 있다. Windows의 큰따옴표와
+  // 숫자 행 위치 표기는 장식으로 해석한다.
+  if (text === original && !/^".*"$/.test(text)) add(text, startIndex, 2);
   if (/^(["'`]).*\1$/.test(text) || (text.startsWith("(") && text.endsWith(")"))) {
     startIndex++;
     text = text.slice(1, -1);
-    foregroundPriority = 1;
   }
-  const withoutInnerLocation = text.replace(lineSuffix, "");
-  if (withoutInnerLocation !== text) foregroundPriority = 1;
-  text = withoutInnerLocation;
-  if (SLASH_PREFIXED_WINDOWS_DRIVE_RE.test(text)) {
-    startIndex++;
-    text = text.slice(1);
-  }
-  if (
-    text.length > maxPathLength ||
-    !text.includes(" ") ||
-    !looksLikeStrongPath(text) ||
-    /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ||
-    /\s(?:[a-zA-Z]:[\\/]|[\\/]|~[\\/])/.test(text)
-  ) {
-    return null;
-  }
-  return {
-    text,
-    lineIndex: range.lineIndex,
-    startIndex,
-    endIndex: startIndex + text.length,
-    foregroundPriority,
-  };
+  text = text.replace(lineSuffix, "");
+  if (text !== original) add(text, startIndex, 1);
+  return candidates;
 }
 
 function addForegroundCandidates(
@@ -406,16 +407,16 @@ function addForegroundCandidates(
     ) {
       continue;
     }
-    const candidate = foregroundCandidate(line, range, maxPathLength);
-    if (!candidate) continue;
-    const oldIndex = candidates.findIndex(
-      (old) =>
-        old.lineIndex === candidate.lineIndex &&
-        old.startIndex === candidate.startIndex &&
-        old.endIndex === candidate.endIndex,
-    );
-    if (oldIndex >= 0) candidates[oldIndex] = candidate;
-    else if (candidates.length < cap) candidates.push(candidate);
+    for (const candidate of foregroundCandidates(line, range, maxPathLength)) {
+      const oldIndex = candidates.findIndex(
+        (old) =>
+          old.lineIndex === candidate.lineIndex &&
+          old.startIndex === candidate.startIndex &&
+          old.endIndex === candidate.endIndex,
+      );
+      if (oldIndex >= 0) candidates[oldIndex] = candidate;
+      else if (candidates.length < cap) candidates.push(candidate);
+    }
   }
   return candidates;
 }
@@ -623,8 +624,8 @@ function spaceExtensionCandidates(
 
 /**
  * 존재 검증을 통과한 후보들 사이에서 같은 줄의 겹치는 범위를 정리한다
- * (ADR-0191 longest-existing-wins). 긴 것부터 greedy 로 채택하고, 이미 채택된
- * 범위와 겹치는 짧은 후보는 버린다. 겹치지 않는 후보는 모두 남고, 반환 순서는
+ * (ADR-0385). 색 경계 우선순위 순으로 채택하고 같은 우선순위에서는 긴 것을
+ * 먼저 채택한다(ADR-0191). 겹치지 않는 후보는 모두 남고, 반환 순서는
  * 입력 순서를 유지한다.
  */
 export function resolveOverlappingRanges<T>(

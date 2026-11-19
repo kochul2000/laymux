@@ -3186,7 +3186,7 @@ import {
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
           const lines = logicalLines.map((line) => line.text);
           const body = { terminalId: requestTerminalId, mode: scope, lines };
-          const foregroundRanges = pathLinkForegroundRanges(logicalLines);
+          const foregroundRanges = pathLinkForegroundRanges(logicalLines, caret);
           if (foregroundRanges.length) body.foregroundRanges = foregroundRanges;
           if (caret) body.caret = caret;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;

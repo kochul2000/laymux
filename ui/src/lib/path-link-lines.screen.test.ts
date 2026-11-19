@@ -263,6 +263,31 @@ it("색 계약은 동일한 경계의 RGB 변경을 허용하고 경계가 이�
   expect(pathLinkPartsCurrent(buffer, parts)).toBe(false);
 });
 
+it("복원 상한을 넘긴 논리 줄에서도 명시적으로 선택한 평문 경로는 살아 있다", async () => {
+  const s = createScreenTerminal({ cols: 16, rows: 12, scrollback: 100 });
+  screens.push(s);
+  await s.write("x".repeat(16 * 70) + "foo.txt");
+  const buffer = s.terminal.buffer.active;
+  const [line] = readPathLinkLines(buffer, 70, 71, {
+    start: { x: 0, y: 70 },
+    end: { x: 7, y: 70 },
+  });
+  const parts = mapPathLinkParts(line, { text: "foo.txt", startIndex: 0, endIndex: 7 });
+  expect(parts).toHaveLength(1);
+  expect(pathLinkPartsCurrent(buffer, parts)).toBe(true);
+});
+
+it("포인터의 색 구간은 앞선 강조 구간 수와 무관하게 발견한다", async () => {
+  const prefix = "\x1b[31ma b\x1b[39m ".repeat(64);
+  const path = "docs\\My File.txt";
+  const s = await setup(`${prefix}\x1b[36m${path}\x1b[39m next`, 320);
+  const lines = readPathLinkLines(s.terminal.buffer.active, 0, 4);
+  expect(pathLinkForegroundRanges(lines)).toHaveLength(64);
+  expect(pathLinkForegroundRanges(lines, { lineIndex: 0, index: 256 + path.indexOf(" ") })).toEqual(
+    [{ lineIndex: 0, startIndex: 256, endIndex: 256 + path.length }],
+  );
+});
+
 it("완성된 상대경로 목록과 URL은 hard wrap으로 결합하지 않는다", async () => {
   for (const first of ["12345678901234/a.txt", "https://host/aaaaaaa"]) {
     const s = await setup(first + "\r\nrelative/b.txt", 19);

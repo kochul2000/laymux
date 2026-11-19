@@ -185,7 +185,7 @@ export function readPathLinkLines(
     const offset =
       full?.points.findIndex((point) => point.row === first.row && point.col === first.col) ?? -1;
     if (!full || offset < 0 || full.text.slice(offset, offset + line.text.length) !== line.text) {
-      line.foregroundRanges = [];
+      line.foregroundRanges = undefined;
       continue;
     }
     line.foregroundRanges = full.foregroundRanges
@@ -230,11 +230,15 @@ export function readPathLinkLineAt(
 /** 선택에 걸친 구간은 수명 확인에만 쓰고 후보 입력에는 완전한 구간만 전달한다. */
 export function pathLinkForegroundRanges(
   lines: readonly PathLinkLine[],
+  caret?: { lineIndex: number; index: number },
 ): PathLinkForegroundRange[] {
   const ranges: PathLinkForegroundRange[] = [];
   for (const [lineIndex, line] of lines.entries()) {
+    if (caret && caret.lineIndex !== lineIndex) continue;
     for (const range of line.foregroundRanges ?? []) {
       if (range.startIndex < 0 || range.endIndex > line.text.length) continue;
+      if (caret && (caret.index < range.startIndex || caret.index >= range.endIndex)) continue;
+      if (!line.text.slice(range.startIndex, range.endIndex).includes(" ")) continue;
       if (ranges.length === PATH_LINK_MAX_STAT_BATCH) return ranges;
       ranges.push({ lineIndex, ...range });
     }
