@@ -1,6 +1,6 @@
 # 0385. PC와 Remote의 터미널 경로 링크는 셀 전경색 경계를 후보 추출에 사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-19
 - Source: 공백이 포함된 Windows 파일 경로 인식에 관한 사용자 요청, [현재 링크 흐름](../architecture/data-flow.md#86-링크-활성화-평문--osc-8--tui-우회)
 - Extends: [ADR-0191](0191-path-link-space-extended-candidates.md), [ADR-0235](0235-wrapped-path-link-logical-lines.md)
