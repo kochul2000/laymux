@@ -16,7 +16,70 @@ import {
   isHomeRelativePath,
   PATH_LINK_MAX_SPACE_EXTENSIONS,
   PATH_LINK_MAX_STAT_BATCH,
+  pathScreenLimits,
+  pathPointLimits,
 } from "./path-link-detect";
+
+describe("색 경계의 공백 경로", () => {
+  it.each([
+    ['"Release Notes.md"', "Release Notes.md"],
+    ["Release Notes.md:12:3", "Release Notes.md"],
+    ['"C:\\Program Files (x86)"', "C:\\Program Files (x86)"],
+  ])("장식과 실제 경로 문자를 구분한다 (%s)", (display, expected) => {
+    const line = `See ${display} next`;
+    const candidates = extractPathCandidatesAtOffset(
+      line,
+      line.indexOf(" ", 4),
+      pathPointLimits(256),
+      [
+        {
+          lineIndex: 0,
+          startIndex: 4,
+          endIndex: 4 + display.length,
+        },
+      ],
+    );
+    expect(candidates).toContainEqual({
+      text: expected,
+      lineIndex: 0,
+      startIndex: line.indexOf(expected),
+      endIndex: line.indexOf(expected) + expected.length,
+      foregroundPriority: 1,
+    });
+  });
+
+  it("화면 후보가 포화되면 색 후보가 기존 평문 후보를 밀어내지 않는다", () => {
+    const prefix = Array.from({ length: 62 }, (_, index) => `missing${index}.txt`).join(" ");
+    const text = "docs\\Release Note";
+    const lines = [`${prefix} ${text} ok.txt`];
+    const limits = pathScreenLimits(256);
+    expect(
+      extractPathCandidatesFromScreen(lines, limits, [
+        {
+          lineIndex: 0,
+          startIndex: prefix.length + 1,
+          endIndex: prefix.length + 1 + text.length,
+        },
+      ]),
+    ).toEqual(extractPathCandidatesFromScreen(lines, limits));
+  });
+
+  it.each(["https://example.test/a file.md", "C:/A File.txt D:/B File.txt"])(
+    "URL과 여러 절대경로가 있는 색 구간을 새 후보로 추가하지 않는다 (%s)",
+    (text) => {
+      const limits = pathScreenLimits(256);
+      expect(
+        extractPathCandidatesFromScreen([text], limits, [
+          {
+            lineIndex: 0,
+            startIndex: 0,
+            endIndex: text.length,
+          },
+        ]),
+      ).toEqual(extractPathCandidatesFromScreen([text], limits));
+    },
+  );
+});
 
 describe("isPathLinkCwdCurrent", () => {
   it("stat 대기 중 CWD가 바뀐 요청만 stale로 판정한다", () => {

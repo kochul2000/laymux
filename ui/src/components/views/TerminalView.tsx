@@ -74,6 +74,8 @@ import {
   readPathLinkSelection,
   mapPathLinkParts,
   pathLinkPartsCurrent,
+  pathLinkForegroundRanges,
+  pathLinkLineSignature,
 } from "@/lib/path-link-lines";
 import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -1632,6 +1634,7 @@ export function TerminalView({
       },
     });
     pathLinkControllerRef.current = pathLink;
+    const pathLinkFrameStable = () => terminal.modes?.synchronizedOutputMode !== true;
 
     // ADR-0224 액션 칩. `chip` 모드에서 클릭은 링크를 열지 않고 이 칩을 띄우며,
     // 칩의 버튼을 눌러야 실행된다. 칩은 surface-local UI 상태이므로 스토어에도
@@ -1700,6 +1703,9 @@ export function TerminalView({
       view: linkChipView,
       labelFor: (action, kind) => i18n.t(linkChipLabelKey(action, kind), { ns: "common" }),
       isTokenAlive: (target) => readChipRangeText(target) === target.token,
+      canRun: (target) =>
+        !target.selection?.pathParts ||
+        (pathLinkFrameStable() && readChipRangeText(target) === target.token),
       // 칩이 사라지면 그 줄을 따라가던 마커도 함께 거둔다(교체·실행 포함).
       onDismiss: (target) => target.marker?.dispose(),
       run: (target, action) => {
@@ -1883,6 +1889,7 @@ export function TerminalView({
       },
       statPaths,
       isVerifiedAt: (clientX, clientY) => pathLink.getHit(clientX, clientY) !== null,
+      isFrameStable: pathLinkFrameStable,
       apply: (selections) => {
         pathLink.setVerifiedSelections("point", selections);
         // 밑줄이 켜졌으면 포인터는 (dwell 이든 클릭이든) 그 위에 있다. 커서를
@@ -1942,7 +1949,7 @@ export function TerminalView({
         return;
       }
       const t = terminalRef.current;
-      if (!t) return;
+      if (!t || !pathLinkFrameStable()) return;
       const selection = t.getSelection();
       const pos = t.getSelectionPosition();
       if (!pos) {
@@ -1961,7 +1968,8 @@ export function TerminalView({
       const lines = readPathLinkSelection(t.buffer.active, pos, selection);
       const candidates = extractPathCandidatesFromSelection(
         lines.map((line) => line.text).join("\n"),
-        pathSelectionLimits(settings.pathLinkMaxLength),
+        limits,
+        pathLinkForegroundRanges(lines),
       );
       if (candidates.length === 0) {
         clearPathLinkSelection();
@@ -1982,13 +1990,16 @@ export function TerminalView({
               clearPathLinkSelection();
               return;
             }
-            if (t.getSelection() !== selection) return;
+            if (!pathLinkFrameStable() || t.getSelection() !== selection) return;
             const livePosition = t.getSelectionPosition();
             if (!livePosition) return;
             const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
             if (
-              JSON.stringify(liveLines.map((l) => l.text)) !==
-              JSON.stringify(lines.map((l) => l.text))
+              liveLines.length !== lines.length ||
+              liveLines.some(
+                (line, index) =>
+                  pathLinkLineSignature(line) !== pathLinkLineSignature(lines[index]),
+              )
             )
               return;
             const existing = pending.flatMap((item) => {
@@ -2003,15 +2014,15 @@ export function TerminalView({
                 },
               ];
             });
-            // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
-            // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+            const frame = new Map();
             const verified = resolveOverlappingRanges(existing, ({ candidate }) => ({
               line: candidate.lineIndex,
               start: candidate.startIndex,
               end: candidate.endIndex,
+              priority: candidate.foregroundPriority,
             })).flatMap<VerifiedPathSelection>(({ candidate, absPath, isDirectory }) => {
               const parts = mapPathLinkParts(liveLines[candidate.lineIndex], candidate);
-              if (!pathLinkPartsCurrent(t.buffer.active, parts)) return [];
+              if (!pathLinkPartsCurrent(t.buffer.active, parts, 0, frame)) return [];
               return parts.map(({ bufferLine, startCol, endCol, token }) => ({
                 bufferLine,
                 startCol,
@@ -2019,7 +2030,9 @@ export function TerminalView({
                 token,
                 absPath,
                 isDirectory,
-                ...(parts.length > 1 ? { pathParts: parts } : {}),
+                ...(parts.length > 1 || parts[0].foreground !== undefined
+                  ? { pathParts: parts }
+                  : {}),
               }));
             });
             if (verified.length === 0) {
@@ -3517,6 +3530,9 @@ export function TerminalView({
     // 스토어·i18n·터미널 포커스만 주입해 배선한다.
     const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
       getSelectionAt: (x, y) => pathLink.getHit(x, y)?.selection ?? null,
+      isTargetCurrent: (sel) =>
+        !sel.pathParts ||
+        (pathLinkFrameStable() && pathLinkPartsCurrent(terminal.buffer.active, sel.pathParts)),
       getSettings: readPathLinkClickSettings,
       confirm: confirmOsHandoff,
       activate: (sel, action) => pathLink.activate(sel, action),

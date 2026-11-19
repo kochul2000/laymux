@@ -26,6 +26,9 @@ import {
   readPathLinkLines,
   mapPathLinkParts,
   pathLinkPartsCurrent,
+  pathLinkForegroundRanges,
+  pathLinkLineSignature,
+  readPathLinkLineAt,
   PATH_LINK_CONTEXT_ROWS,
   type PathLinkBuffer,
 } from "./path-link-lines";
@@ -51,6 +54,7 @@ export interface PathLinkPointDeps {
   statPaths: (paths: string[]) => Promise<Array<{ exists: boolean; isDirectory: boolean }>>;
   /** 이미 검증된 밑줄 위인지 — 그러면 재평가하지 않는다. */
   isVerifiedAt: (clientX: number, clientY: number) => boolean;
+  isFrameStable?: () => boolean;
   /** `point` scope 밑줄 교체(빈 배열이면 해제). */
   apply: (selections: VerifiedPathSelection[]) => void;
 }
@@ -109,6 +113,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
     },
     forget,
     evaluateAt: async (clientX: number, clientY: number) => {
+      if (deps.isFrameStable?.() === false) return;
       const settings = deps.getSettings();
       if (!settings.enabled) {
         clearPoint();
@@ -141,6 +146,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         line.text,
         offset,
         pathPointLimits(settings.maxPathLength),
+        pathLinkForegroundRanges([line]),
       );
       if (candidates.length === 0) {
         clearPoint();
@@ -162,7 +168,8 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         return;
       }
 
-      const key = `${cwd ?? ""}\u0000${cell.absoluteLine}\u0000${pending
+      const signature = pathLinkLineSignature(line);
+      const key = `${cwd ?? ""}\u0000${cell.absoluteLine}\u0000${signature}\u0000${pending
         .map(({ candidate }) => `${candidate.startIndex}\u0000${candidate.text}`)
         .join("\u0001")}`;
       // 구분자는 반드시 \u0000/\u0001 **이스케이프**로 쓴다 — 생 제어 바이트를
@@ -189,7 +196,10 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
       // 출력·선택 같은 사건이 끼면 이 결과는 화면과 맞지 않는다. cwd 가 바뀌면
       // 조합했던 절대 경로 자체가 다른 pane 맥락의 것이 된다(선택 경로의
       // `isPathLinkCwdCurrent` 가드와 같은 이유).
-      if (seq !== revision || deps.getCwd() !== cwd) return;
+      if (seq !== revision || deps.getCwd() !== cwd || deps.isFrameStable?.() === false) return;
+      const frame = new Map();
+      const liveLine = readPathLinkLineAt(buffer, cell.absoluteLine, frame);
+      if (!liveLine || pathLinkLineSignature(liveLine) !== signature) return;
 
       // 성공이든 실패든 이 지점은 평가가 끝났다 — 같은 지점 재조회를 막는다.
       evaluatedKey = key;
@@ -205,6 +215,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         line: candidate.lineIndex,
         start: candidate.startIndex,
         end: candidate.endIndex,
+        priority: candidate.foregroundPriority,
       }));
       if (resolved.length === 0) {
         deps.apply([]);
@@ -212,8 +223,8 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
       }
       deps.apply(
         resolved.flatMap(({ candidate, absPath, isDirectory }) => {
-          const parts = mapPathLinkParts(line, candidate);
-          if (!pathLinkPartsCurrent(buffer, parts)) return [];
+          const parts = mapPathLinkParts(liveLine, candidate);
+          if (!pathLinkPartsCurrent(buffer, parts, 0, frame)) return [];
           return parts.map(({ bufferLine, startCol, endCol, token }) => ({
             bufferLine,
             startCol,
@@ -221,7 +232,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
             token,
             absPath,
             isDirectory,
-            ...(parts.length > 1 ? { pathParts: parts } : {}),
+            ...(parts.length > 1 || parts[0].foreground !== undefined ? { pathParts: parts } : {}),
           }));
         }),
       );

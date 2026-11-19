@@ -54,6 +54,7 @@ export interface PathLinkClickSettings {
 export interface PathLinkClickDeps<T extends PathLinkClickTarget> {
   /** 뷰포트 좌표 아래의 검증된 선택(없으면 null). */
   getSelectionAt: (clientX: number, clientY: number) => T | null;
+  isTargetCurrent?: (target: T) => boolean;
   /** 클릭 시점의 설정 스냅샷. */
   getSettings: () => PathLinkClickSettings;
   /** 확인 대화상자. 계속하면 true. */
@@ -183,7 +184,7 @@ export function createPathLinkClickHandlers<T extends PathLinkClickTarget>(
       const moved =
         Math.abs(e.clientX - current.x) > PATH_LINK_CLICK_SLOP ||
         Math.abs(e.clientY - current.y) > PATH_LINK_CLICK_SLOP;
-      if (moved) {
+      if (moved || deps.isTargetCurrent?.(current.target) === false) {
         // 드래그 → 열지 않음(재선택 의도). 다만 mousedown 을 preventDefault 한
         // 조합이면 포커스가 이동하지 않았으므로 여기서도 되돌려 준다.
         if (ownsEvent(current.result)) deps.onOsHandoffSettled?.();

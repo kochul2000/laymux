@@ -18,7 +18,7 @@ import { createPaneLinkProvider, installPaneLinkUnderlines } from "../../../../u
 import { remotePaneLinkDependencies } from "../../../../ui/src/remote/remote-pane-links.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { getPaneInstanceId } from "../../../../ui/src/lib/view-instance-id.ts";
-import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
+import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, movePathLinkCapture, pathLinkPartsCurrent, pathLinkForegroundRanges, pathLinkLineSignature, readPathLinkLineAt, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
   fileKindIconName,
@@ -3069,6 +3069,7 @@ import {
           disposePathLinkScope("selection");
           updatePathLinkClickableState();
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
+          if (term.modes?.synchronizedOutputMode === true) return;
 
           const selection = term.getSelection();
           if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
@@ -3077,6 +3078,7 @@ import {
           const logicalLines = readPathLinkSelection(term.buffer.active, position, selection);
           const selectionLines = logicalLines.map((line) => line.text);
           if (!selectionLines.length || selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          const foregroundRanges = pathLinkForegroundRanges(logicalLines);
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts.selection = abortController;
 
@@ -3089,6 +3091,7 @@ import {
               terminalId: requestTerminalId,
               mode: "selection",
               lines: selectionLines,
+              ...(foregroundRanges.length ? { foregroundRanges } : {}),
             },
           })
             .then((data) => {
@@ -3099,6 +3102,7 @@ import {
                 leaseId !== requestLeaseId ||
                 fileViewerToken !== requestFileViewerToken ||
                 terminal !== term ||
+                term.modes?.synchronizedOutputMode === true ||
                 term.getSelection() !== selection ||
                 !currentPosition
               ) {
@@ -3123,10 +3127,12 @@ import {
               // selection while the bridge performs its filesystem stat. Use
               // the live xterm coordinates, never the pre-request snapshot.
               const liveLines = readPathLinkSelection(term.buffer.active, currentPosition, selection);
-              if (JSON.stringify(liveLines.map((line) => line.text)) !== JSON.stringify(selectionLines)) return;
+              if (liveLines.length !== logicalLines.length || liveLines.some((line, index) =>
+                pathLinkLineSignature(line) !== pathLinkLineSignature(logicalLines[index]))) return;
+              const frame = new Map();
               const selections = matches.flatMap((match) => {
                 const parts = mapPathLinkParts(liveLines[match.lineIndex], { ...match, text: match.token });
-                if (!pathLinkPartsCurrent(term.buffer.active, parts)) return [];
+                if (!pathLinkPartsCurrent(term.buffer.active, parts, 0, frame)) return [];
                 return parts.map((part) => ({
                   ...part, pathParts: parts,
                   terminalId: requestTerminalId, leaseId: requestLeaseId,
@@ -3180,6 +3186,8 @@ import {
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
           const lines = logicalLines.map((line) => line.text);
           const body = { terminalId: requestTerminalId, mode: scope, lines };
+          const foregroundRanges = pathLinkForegroundRanges(logicalLines);
+          if (foregroundRanges.length) body.foregroundRanges = foregroundRanges;
           if (caret) body.caret = caret;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts[scope] = abortController;
@@ -3197,7 +3205,8 @@ import {
                 activeTerminalId !== requestTerminalId ||
                 leaseId !== requestLeaseId ||
                 fileViewerToken !== requestFileViewerToken ||
-                terminal !== term
+                terminal !== term ||
+                term.modes?.synchronizedOutputMode === true
               ) {
                 return;
               }
@@ -3211,10 +3220,17 @@ import {
                 return;
               }
               const selections = [];
+              const frame = new Map();
               for (const match of data.matches) {
                 if (!isValidPathLinkMatch(match, lines)) { clearPathLinkScope(scope); return; }
-                const parts = mapPathLinkParts(logicalLines[match.lineIndex], { ...match, text: match.token });
-                if (!pathLinkPartsCurrent(term.buffer.active, parts)) { clearPathLinkScope(scope); return; }
+                const requestedLine = logicalLines[match.lineIndex];
+                const liveLine = readPathLinkLineAt(term.buffer.active, requestedLine.points[0].row, frame);
+                if (!liveLine || pathLinkLineSignature(liveLine) !== pathLinkLineSignature(requestedLine)) {
+                  clearPathLinkScope(scope);
+                  return;
+                }
+                const parts = mapPathLinkParts(requestedLine, { ...match, text: match.token });
+                if (!pathLinkPartsCurrent(term.buffer.active, parts, 0, frame)) { clearPathLinkScope(scope); return; }
                 selections.push(...parts.map((part) => ({
                   ...part, pathParts: parts,
                   terminalId: requestTerminalId, leaseId: requestLeaseId,
@@ -3250,6 +3266,7 @@ import {
           clearPathLinkScope("point");
           const term = terminal;
           if (!term || !activeTerminalId || !leaseId || !fileViewerToken) return;
+          if (term.modes?.synchronizedOutputMode === true) return;
           // A live selection owns discovery. A double-click's second release
           // arrives after the word selection exists, and two underlines over
           // one cell is what scope ownership forbids (ADR-0188).
@@ -3344,11 +3361,12 @@ import {
           if (!PATH_LINK_SCOPES.some((scope) => pathLinkScopes[scope].length > 0)) return;
           if (!terminal) return;
           let dropped = 0;
+          const frame = new Map();
           for (const scope of PATH_LINK_SCOPES) {
             const kept = [];
             let scopeDropped = 0;
             for (const entry of pathLinkScopes[scope]) {
-              if (pathLinkEntryStillOnScreen(entry)) {
+              if (pathLinkEntryStillOnScreen(entry, frame)) {
                 kept.push(entry);
                 continue;
               }
@@ -3374,11 +3392,11 @@ import {
          * The marker is the live line number (xterm moves it as the scrollback
          * trims), so it wins over the line the range was created from.
          */
-        function pathLinkEntryStillOnScreen(entry) {
+        function pathLinkEntryStillOnScreen(entry, frame) {
           const bufferLine = livePathLinkBufferLine(entry);
           if (bufferLine === null) return false;
           if (entry.selection.pathParts) return pathLinkPartsCurrent(terminal.buffer.active,
-            entry.selection.pathParts, bufferLine - entry.selection.bufferLine);
+            entry.selection.pathParts, bufferLine - entry.selection.bufferLine, frame);
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -3391,13 +3409,15 @@ import {
           for (const entry of pathLinkEntries()) {
             const element = entry.decoration?.element;
             if (!element || !element.isConnected) continue;
+            const bufferLine = livePathLinkBufferLine(entry);
+            if (bufferLine === null) continue;
             const rect = element.getBoundingClientRect();
             if (
               clientX >= rect.left &&
               clientX <= rect.right &&
               clientY >= rect.top &&
               clientY <= rect.bottom
-            ) return entry.selection;
+            ) return movePathLinkCapture(entry.selection, bufferLine);
           }
           return null;
         }
@@ -3445,7 +3465,9 @@ import {
           if (
             activeTerminalId !== press.terminalId ||
             leaseId !== press.leaseId ||
-            fileViewerToken !== press.fileViewerToken
+            fileViewerToken !== press.fileViewerToken ||
+            terminal?.modes?.synchronizedOutputMode === true ||
+            (press.pathParts && !pathLinkPartsCurrent(terminal.buffer.active, press.pathParts))
           ) {
             return;
           }
@@ -3611,8 +3633,11 @@ import {
 
         function runLinkChipAction(action) {
           const target = linkChipTarget;
-          dismissLinkChip();
           if (!target || !action) return;
+          if (target.pathParts && terminal?.modes?.synchronizedOutputMode === true) return;
+          const current = !target.pathParts || linkChipTokenStillOnScreen(target);
+          dismissLinkChip();
+          if (!current) return;
           if (action === "copy") {
             writeClipboardText(target.value).catch((err) =>
               setStatus(tr`Copy failed: ${err.message || err}`, true)

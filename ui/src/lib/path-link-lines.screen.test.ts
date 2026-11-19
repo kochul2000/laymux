@@ -5,6 +5,7 @@ import {
   readPathLinkSelection,
   mapPathLinkParts,
   pathLinkPartsCurrent,
+  pathLinkForegroundRanges,
 } from "./path-link-lines";
 import { extractPathCandidatesFromScreen, pathScreenLimits } from "./path-link-detect";
 import { createPathLinkPointEvaluator } from "./path-link-point";
@@ -197,6 +198,69 @@ it("wrap 경계의 실제 공백은 파일명에서 보존한다", async () => {
   const path = "D:/12345678901234567 name/file.md";
   const s = await setup(path);
   expect(readPathLinkLines(s.terminal.buffer.active, 0, 5)[0].text).toBe(path);
+});
+
+it("팔레트·전각 문자·이모지와 자동 wrap을 같은 색 구간으로 복원한다", async () => {
+  const path = "docs/한글 😀 Release Notes.md";
+  const s = await setup(`See \x1b[36mdocs/한글 \x1b[38;5;6m😀 Release Notes.md\x1b[39m next`, 18);
+  const lines = readPathLinkLines(s.terminal.buffer.active, 0, 8);
+  const ranges = pathLinkForegroundRanges(lines);
+  expect(ranges).toEqual([{ lineIndex: 0, startIndex: 4, endIndex: 4 + path.length }]);
+  const candidates = extractPathCandidatesFromScreen(
+    lines.map((line) => line.text),
+    pathScreenLimits(256),
+    ranges,
+  );
+  const full = candidates.find((candidate) => candidate.text === path)!;
+  expect(full.foregroundPriority).toBe(2);
+  const parts = mapPathLinkParts(lines[0], full);
+  expect(parts.map((part) => part.token).join("")).toBe(path);
+  expect(parts.length).toBeGreaterThan(1);
+  expect(pathLinkPartsCurrent(s.terminal.buffer.active, parts)).toBe(true);
+});
+
+it("완전한 단색 행과 선택에 의해 잘린 색 구간에는 색 경계를 쓰지 않는다", async () => {
+  const s = await setup(
+    "\x1b[36mSee docs/a file.md\x1b[39m\r\nSee \x1b[36mdocs/a file.md\x1b[39m next",
+    40,
+  );
+  const buffer = s.terminal.buffer.active;
+  expect(pathLinkForegroundRanges(readPathLinkLines(buffer, 0, 1))).toEqual([]);
+  expect(
+    pathLinkForegroundRanges(
+      readPathLinkLines(buffer, 1, 2, {
+        start: { y: 1, x: 9 },
+        end: { y: 1, x: 18 },
+      }),
+    ),
+  ).toEqual([]);
+  expect(
+    pathLinkForegroundRanges(
+      readPathLinkLines(buffer, 1, 2, {
+        start: { y: 1, x: 4 },
+        end: { y: 1, x: 18 },
+      }),
+    ),
+  ).toEqual([{ lineIndex: 0, startIndex: 0, endIndex: 14 }]);
+});
+
+it("명시적 wrap의 경로 색상 안에 실제로 출력된 공백을 보존한다", async () => {
+  const s = await setup("\x1b[36mC:\\My \r\nDocs\\f.txt\x1b[39m!", 6);
+  const lines = readPathLinkLines(s.terminal.buffer.active, 0, 8);
+  expect(lines[0].text).toBe("C:\\My Docs\\f.txt!");
+  expect(pathLinkForegroundRanges(lines)).toEqual([{ lineIndex: 0, startIndex: 0, endIndex: 16 }]);
+});
+
+it("색 계약은 동일한 경계의 RGB 변경을 허용하고 경계가 이동한 링크 전체를 폐기한다", async () => {
+  const s = await setup("See \x1b[36mdocs/Release Notes.md\x1b[39m next", 44);
+  const buffer = s.terminal.buffer.active;
+  const [line] = readPathLinkLines(buffer, 0, 4);
+  const text = "docs/Release Notes.md";
+  const parts = mapPathLinkParts(line, { text, startIndex: 4, endIndex: 4 + text.length });
+  await s.write("\x1b[1;5H\x1b[38;2;20;40;60mdocs/Release Notes.md\x1b[39m");
+  expect(pathLinkPartsCurrent(buffer, parts)).toBe(true);
+  await s.write("\x1b[1;5H\x1b[39mdocs/Release \x1b[36mNotes.md\x1b[39m");
+  expect(pathLinkPartsCurrent(buffer, parts)).toBe(false);
 });
 
 it("완성된 상대경로 목록과 URL은 hard wrap으로 결합하지 않는다", async () => {

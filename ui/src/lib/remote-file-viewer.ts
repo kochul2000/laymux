@@ -20,6 +20,7 @@ import {
   pathSelectionLimits,
   planPathLinkStat,
   resolveOverlappingRanges,
+  type PathLinkForegroundRange,
   type PathSelectionCandidate,
 } from "./path-link-detect";
 import {
@@ -194,9 +195,14 @@ function resolveRemotePathLinkCandidates(
   lines: string[],
   caret: unknown,
   maxPathLength: number,
+  foregroundRanges: readonly PathLinkForegroundRange[],
 ): PathSelectionCandidate[] {
   if (mode === "screen") {
-    return extractPathCandidatesFromScreen(lines, pathScreenLimits(maxPathLength));
+    return extractPathCandidatesFromScreen(
+      lines,
+      pathScreenLimits(maxPathLength),
+      foregroundRanges,
+    );
   }
   if (mode === "point") {
     const position = caret as { lineIndex?: unknown; index?: unknown } | null;
@@ -205,11 +211,18 @@ function resolveRemotePathLinkCandidates(
     if (!Number.isSafeInteger(lineIndex) || !Number.isSafeInteger(index)) return [];
     const line = lines[lineIndex as number];
     if (line === undefined) return [];
-    return extractPathCandidatesAtOffset(line, index as number, pathPointLimits(maxPathLength)).map(
-      (candidate) => ({ ...candidate, lineIndex: lineIndex as number }),
-    );
+    return extractPathCandidatesAtOffset(
+      line,
+      index as number,
+      pathPointLimits(maxPathLength),
+      foregroundRanges,
+    ).map((candidate) => ({ ...candidate, lineIndex: lineIndex as number }));
   }
-  return extractPathCandidatesFromSelection(lines.join("\n"), pathSelectionLimits(maxPathLength));
+  return extractPathCandidatesFromSelection(
+    lines.join("\n"),
+    pathSelectionLimits(maxPathLength),
+    foregroundRanges,
+  );
 }
 
 /** Resolve Remote FileViewer queries against the desktop store and safe renderer. */
@@ -246,6 +259,8 @@ export async function handleRemoteFileViewerRequest(
       lines,
       params.caret,
       settings.pathLinkMaxLength,
+      // Rust has already validated the optional ranges against these lines.
+      Array.isArray(params.foregroundRanges) ? params.foregroundRanges : [],
     );
     if (candidates.length === 0) return ok({ valid: false });
 
@@ -276,12 +291,11 @@ export async function handleRemoteFileViewerRequest(
         const info = infos[statIndex];
         return Boolean(info) && decidePathLinkAction(info) !== "none";
       });
-      // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은 줄의
-      // 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
       const matches = resolveOverlappingRanges(linkable, ({ candidate }) => ({
         line: candidate.lineIndex,
         start: candidate.startIndex,
         end: candidate.endIndex,
+        priority: candidate.foregroundPriority,
       })).map(({ candidate, absPath, statIndex }) => ({
         token: candidate.text,
         path: absPath,

@@ -67,6 +67,7 @@ export interface LinkChipSessionDeps<T extends LinkChipTargetShape> {
   labelFor: (action: LinkChipAction, kind: LinkTargetKind) => string;
   /** 선택된 액션을 실행한다. 확인 게이트는 여기(호출부)가 소유한다. */
   run: (target: T, action: LinkChipAction) => void;
+  canRun?: (target: T) => boolean;
   /**
    * 캡처한 원문이 캡처한 자리에 아직 있는지. `revalidate()` 가 이 값으로만
    * 판정한다 — 안정 프레임 여부는 호출부(ADR-0220 소유자)가 정한다.
@@ -158,6 +159,7 @@ export function createLinkChipSession<T extends LinkChipTargetShape>(
 
   deps.view.onSelect((action) => {
     const target = current;
+    if (target && deps.canRun?.(target) === false) return;
     if (!target) return;
     // 실행 전에 칩을 거둔다 — 확인 대화상자가 뜨는 액션에서 칩이 대화상자 뒤에
     // 남아 있으면, 취소 후에도 같은 칩이 살아 있는 것처럼 보인다.
