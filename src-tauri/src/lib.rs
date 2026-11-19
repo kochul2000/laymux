@@ -32,6 +32,8 @@ pub mod local_state;
 pub mod lock_ext;
 pub mod lx_endpoint;
 pub mod osc;
+#[cfg(any(windows, test))]
+mod osc_clipboard;
 pub mod osc_hooks;
 pub mod output_buffer;
 pub mod path_utils;
@@ -381,6 +383,7 @@ pub fn run() {
             commands::mark_notifications_read,
             commands::smart_paste,
             commands::clipboard_write_text,
+            commands::set_terminal_clipboard_focus,
             commands::set_terminal_cwd_send,
             commands::set_terminal_cwd_receive,
             commands::propagate_cwd_once,

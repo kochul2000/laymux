@@ -6,6 +6,19 @@ use std::time::SystemTime;
 #[cfg(target_os = "windows")]
 use crate::path_utils::windows_to_wsl_path;
 
+pub(crate) fn write_text(text: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        clipboard_win::set_clipboard(clipboard_win::formats::Unicode, text)
+            .map_err(|e| format!("Clipboard write failed: {e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = text;
+        Err("Clipboard write not implemented on this platform".into())
+    }
+}
+
 /// Result of a smart paste operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

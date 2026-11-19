@@ -122,6 +122,10 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 `export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
 버리지 않고 제거 대상 항목만 정리한다.
 
+### 터미널 프로그램의 클립보드 쓰기
+
+`terminal.allowOsc52ClipboardWrite`는 기본값이 `false`인 Boolean 설정이다. Windows의 설정 → 터미널 → 복사·스크롤에서 편집하며 적용 시점은 `live`다. 메인 WebView의 `set_terminal_clipboard_focus(terminalId, generation)`는 허용 상태에서 실제 xterm 입력 요소에 포커스된 세션을 전달한다. 허용 해제나 입력 포커스 이탈 시 두 값을 비운다. Rust는 메인 창의 전경 여부와 PTY generation을 확인한 후 실시간 OSC 52 텍스트 쓰기를 적용한다. [ADR-0384](../adr/0384-desktop-osc52-clipboard-write.md)
+
 ### 출력 활동 감지 임계
 
 ```jsonc

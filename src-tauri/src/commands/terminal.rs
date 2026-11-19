@@ -568,6 +568,9 @@ pub(crate) async fn create_terminal_session_inner(
         callback_state: Arc::clone(&pty_cb_state),
         presets: osc_hooks::default_presets(),
         gate: OscOutputGate::new(missed_output.is_some()),
+        stream: Mutex::new(osc::OscStream::default()),
+        #[cfg(windows)]
+        output_session: Arc::clone(&output_session),
         missed_ring: Mutex::new(
             missed_output
                 .is_some()
@@ -2047,6 +2050,9 @@ struct TerminalOscPass {
     callback_state: Arc<activity::PtyCallbackState>,
     presets: Vec<osc_hooks::OscHookDef>,
     gate: OscOutputGate,
+    stream: Mutex<osc::OscStream>,
+    #[cfg(windows)]
+    output_session: Arc<terminal_output::TerminalOutputSession>,
     /// The missed output so far, as the live ring would hold it: what the
     /// state the missed facts depend on (CWD gate, interactive app, a
     /// finished task's message) is judged by, since missed output never
@@ -2107,7 +2113,35 @@ impl TerminalOscPass {
             }
         };
 
-        for event in osc::iter_osc_events(data) {
+        #[cfg(windows)]
+        let epoch = (!missed)
+            .then(|| {
+                self.state
+                    .terminal_clipboard_focus
+                    .epoch_for(&self.terminal_id, self.terminal_generation)
+            })
+            .flatten();
+        #[cfg(not(windows))]
+        let epoch = None;
+        let mut events = Vec::new();
+        if let Ok(mut stream) = self.stream.lock_or_err() {
+            stream.push(data, epoch, |event, epoch| events.push((event, epoch)));
+        }
+        for (event, clipboard_epoch) in events {
+            if event.code == osc::OSC_CLIPBOARD_CODE {
+                #[cfg(windows)]
+                if let Some(epoch) = clipboard_epoch {
+                    self.state.terminal_clipboard_focus.write(
+                        &self.terminal_id,
+                        &self.output_session,
+                        epoch,
+                        &event.data,
+                    );
+                }
+                #[cfg(not(windows))]
+                let _ = clipboard_epoch;
+                continue;
+            }
             if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                 if let Some(session) = terms.get_mut(&terminal_id) {
                     if session
