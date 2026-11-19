@@ -7132,6 +7132,7 @@ export function TerminalView({
       <div
         ref={wrapperRef}
         data-testid={`terminal-view-${instanceId}`}
+        data-clipboard-terminal-id={instanceId}
         className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
         style={wrapperStyle}
         onFocusCapture={(event) => {

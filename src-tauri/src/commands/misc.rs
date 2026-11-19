@@ -924,18 +924,29 @@ pub fn smart_paste(
 /// Tauri command: write text to the system clipboard.
 #[tauri::command]
 pub fn clipboard_write_text(text: String) -> Result<(), String> {
-    clipboard_write_text_platform(&text)
+    crate::clipboard::write_text(&text)
 }
 
-#[cfg(target_os = "windows")]
-fn clipboard_write_text_platform(text: &str) -> Result<(), String> {
-    clipboard_win::set_clipboard(clipboard_win::formats::Unicode, text)
-        .map_err(|e| format!("Clipboard write failed: {e}"))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
-    Err("Clipboard write not implemented on this platform".into())
+#[tauri::command]
+pub fn set_terminal_clipboard_focus(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, std::sync::Arc<crate::state::AppState>>,
+    terminal_id: Option<String>,
+    generation: Option<u64>,
+) -> Result<(), String> {
+    if window.label() != crate::constants::MAIN_WINDOW_LABEL {
+        return Err("Terminal clipboard focus belongs to the main window".into());
+    }
+    #[cfg(windows)]
+    {
+        let handle = window.hwnd().map_err(|error| error.to_string())?;
+        state
+            .terminal_clipboard_focus
+            .update(handle.0 as usize, terminal_id, generation)?;
+    }
+    #[cfg(not(windows))]
+    let _ = (state, terminal_id, generation);
+    Ok(())
 }
 
 fn sanitize_filename(s: &str) -> String {

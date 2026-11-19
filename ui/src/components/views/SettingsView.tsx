@@ -1622,6 +1622,15 @@ function TerminalSection() {
           checked={terminal.copyOnSelect}
           onChange={(v) => update({ copyOnSelect: v })}
         />
+        {navigator.userAgent.includes("Windows") && (
+          <SettingsToggleField
+            label={t("terminal.allowOsc52ClipboardWrite")}
+            desc={t("terminal.allowOsc52ClipboardWriteDesc")}
+            testId="osc52-clipboard-write-toggle"
+            checked={terminal.allowOsc52ClipboardWrite}
+            onChange={(v) => update({ allowOsc52ClipboardWrite: v })}
+          />
+        )}
 
         <SettingsField
           label={t("terminal.scrollSensitivity")}

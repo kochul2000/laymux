@@ -2,6 +2,10 @@
 //!
 //! Extracts CWD, titles, and shell integration markers from PTY output data.
 
+mod stream;
+pub(crate) use stream::OscStream;
+pub(crate) const OSC_CLIPBOARD_CODE: u16 = 52;
+
 /// A parsed OSC event extracted from terminal output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OscEvent {

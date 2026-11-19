@@ -491,6 +491,8 @@
       "composerStarredEntriesEmpty": "별표 입력이 없습니다.",
       "copyOnSelect": "선택 시 복사",
       "copyOnSelectDesc": "터미널에서 텍스트 선택 시 자동으로 클립보드에 복사",
+      "allowOsc52ClipboardWrite": "터미널 프로그램의 클립보드 쓰기 허용",
+      "allowOsc52ClipboardWriteDesc": "포커스된 터미널의 프로그램이 OSC 52를 통해 Windows 클립보드의 텍스트를 바꿀 수 있습니다.",
       "pathLinkGroup": "파일 경로 링크",
       "pathLink": "선택 경로 링크",
       "pathLinkDesc": "선택한 파일/폴더 경로에 밑줄을 긋고, 클릭하면 파일은 뷰어로 열고 폴더는 디렉토리를 이동합니다.",
