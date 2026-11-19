@@ -243,6 +243,8 @@ pub struct AppState {
     pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
     /// Leaf lifecycle claims: serialize output reconnect with explicit close.
     pub(crate) terminal_output_reconnects: crate::commands::TerminalOutputReconnectClaims,
+    #[cfg(windows)]
+    pub(crate) terminal_clipboard_focus: crate::osc_clipboard::ClipboardFocus,
     /// Set while an update (ADR-0308) or a WebView recovery restart
     /// (ADR-0336) replaces this GUI: its PTY daemon sessions are left running
     /// for the next GUI to adopt instead of being ended.
@@ -447,6 +449,8 @@ impl AppState {
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             terminal_output_reconnects: crate::commands::TerminalOutputReconnectClaims::default(),
+            #[cfg(windows)]
+            terminal_clipboard_focus: crate::osc_clipboard::ClipboardFocus::default(),
             pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
             wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache::default(),

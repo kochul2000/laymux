@@ -253,6 +253,8 @@ OSC 이스케이프 시퀀스는 **Rust PTY 콜백에서 단일 패스로 처리
 [UI 반영]
 ```
 
+Windows 데스크톱의 OSC 52는 [ADR-0384](../adr/0384-desktop-osc52-clipboard-write.md)를 따른다. Rust의 세션별 스트림 파서가 청크를 이어 OSC 프레임을 완성한다. WebView는 실제 xterm 입력 포커스만 Rust에 전달하며, Rust는 전경 전환과 페이지 로드 시작에서 권한을 회수한다. PTY 콜백 입구에서 확인한 포커스 권한을 실제 쓰기 시점에 다시 확인하여, 동일 포커스 구간에 받은 실시간 출력만 기존 Windows 클립보드 쓰기 함수로 전달한다. 재결합 누락 출력과 렌더러 재생은 쓰기를 일으키지 않는다.
+
 #### 새 OSC 동작 추가 시
 
 1. `osc_hooks.rs`에 `OscAction` variant 추가

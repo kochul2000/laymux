@@ -1455,6 +1455,13 @@ export async function clipboardWriteText(text: string): Promise<void> {
   return invoke("clipboard_write_text", { text });
 }
 
+export async function setTerminalClipboardFocus(
+  terminalId: string | null,
+  generation: number | null,
+): Promise<void> {
+  return invoke("set_terminal_clipboard_focus", { terminalId, generation });
+}
+
 /** A single directory entry returned by the Rust backend. */
 export interface DirEntry {
   name: string;
