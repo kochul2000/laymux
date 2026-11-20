@@ -26,6 +26,18 @@ describe("settings-store", () => {
     });
     expect(useSettingsStore.getState().terminal.paneLinkEnabled).toBe(false);
   });
+  it("OSC 52 쓰기는 기본 켬이며 누락된 설정을 보완하고 저장된 끔을 보존한다", () => {
+    const store = useSettingsStore.getState();
+    expect(store.terminal.allowOsc52ClipboardWrite).toBe(true);
+
+    const legacy: Partial<TerminalSettings> = { ...store.terminal };
+    delete legacy.allowOsc52ClipboardWrite;
+    store.loadFromSettings({ terminal: legacy as TerminalSettings });
+    expect(useSettingsStore.getState().terminal.allowOsc52ClipboardWrite).toBe(true);
+
+    store.loadFromSettings({ terminal: { ...store.terminal, allowOsc52ClipboardWrite: false } });
+    expect(useSettingsStore.getState().terminal.allowOsc52ClipboardWrite).toBe(false);
+  });
   it("워크트리의 원본 CWD 선택은 기본 true이고 false를 보존한다", () => {
     expect(useSettingsStore.getState().terminal.useMainWorktreeCwdOnSplit).toBe(true);
     useSettingsStore.getState().loadFromSettings({

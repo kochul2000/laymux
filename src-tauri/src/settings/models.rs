@@ -1015,7 +1015,7 @@ pub struct TerminalSettings {
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
     /// Allow OSC 52 clipboard text writes from the focused Windows terminal.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub allow_osc52_clipboard_write: bool,
     /// Enable selection-based file/directory path links.
     #[serde(default = "default_true")]
@@ -1090,7 +1090,7 @@ impl Default for TerminalSettings {
             parser_admission: ParserAdmissionSettings::default(),
             advertise_true_color: true,
             copy_on_select: true,
-            allow_osc52_clipboard_write: false,
+            allow_osc52_clipboard_write: true,
             path_link_enabled: true,
             path_link_max_length: default_path_link_max_length(),
             path_link_os_open_enabled: true,

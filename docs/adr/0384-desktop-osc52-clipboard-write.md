@@ -1,6 +1,6 @@
 # 0384. Windows 터미널의 OSC 52 클립보드 쓰기는 사용자가 허용한다
 
-- Status: Accepted
+- Status: Superseded by [0386](0386-osc52-clipboard-write-default-on.md)
 - Date: 2026-11-19
 - Source: Claude Code 백그라운드 화면의 복사 실패 재현, [ADR-0001](0001-osc-rust-single-pass.md), [data-flow §8.3](../architecture/data-flow.md#83-osc-처리-파이프라인)
 
