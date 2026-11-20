@@ -850,7 +850,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   ptyDaemonGraceMinutes: 10,
   advertiseTrueColor: true,
   copyOnSelect: true,
-  allowOsc52ClipboardWrite: false,
+  allowOsc52ClipboardWrite: true,
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
   pathLinkOsOpenEnabled: true,

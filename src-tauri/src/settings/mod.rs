@@ -1425,6 +1425,23 @@ mod tests {
     }
 
     #[test]
+    fn osc52_clipboard_write_defaults_on_and_preserves_opt_out() {
+        let missing: models::TerminalSettings =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(missing.allow_osc52_clipboard_write);
+        assert!(models::TerminalSettings::default().allow_osc52_clipboard_write);
+
+        let disabled: models::TerminalSettings =
+            serde_json::from_value(serde_json::json!({ "allowOsc52ClipboardWrite": false }))
+                .unwrap();
+        assert!(!disabled.allow_osc52_clipboard_write);
+        assert_eq!(
+            serde_json::to_value(disabled).unwrap()["allowOsc52ClipboardWrite"],
+            false
+        );
+    }
+
+    #[test]
     fn pane_link_defaults_round_trip_and_description() {
         let missing: models::TerminalSettings =
             serde_json::from_value(serde_json::json!({})).unwrap();
