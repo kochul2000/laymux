@@ -1,6 +1,6 @@
 # 0386. Windows 터미널의 OSC 52 클립보드 쓰기는 기본으로 허용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-20
 - Source: 사용자 요청, [ADR-0384](0384-desktop-osc52-clipboard-write.md), [Settings 계약](../architecture/api-contracts.md#터미널-프로그램의-클립보드-쓰기)
 
