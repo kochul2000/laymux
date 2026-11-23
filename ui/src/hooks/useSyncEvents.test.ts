@@ -40,6 +40,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onLxNotify: (...args: unknown[]) => mockOnLxNotify(...args),
   onSetTabTitle: (...args: unknown[]) => mockOnSetTabTitle(...args),
   onCommandStatus: (...args: unknown[]) => mockOnCommandStatus(...args),
+  onTerminalDisplayCleared: vi.fn().mockResolvedValue(() => {}),
   onClaudeTerminalDetected: (...args: unknown[]) => mockOnClaudeTerminalDetected(...args),
   onClaudeMessageChanged: (...args: unknown[]) => mockOnClaudeMessageChanged(...args),
   onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),

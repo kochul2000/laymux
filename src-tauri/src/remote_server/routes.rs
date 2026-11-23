@@ -15,7 +15,9 @@ use uuid::Uuid;
 
 use crate::android_e2e::AndroidE2eRequestContext;
 use crate::automation_server::ServerState;
-use crate::commands::{resize_terminal_inner, write_terminal_input_inner, write_to_terminal_inner};
+use crate::commands::{
+    resize_terminal_inner, write_remote_terminal_raw, write_terminal_input_inner,
+};
 use crate::constants::{
     ANDROID_E2E_RPC_PATH, REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS,
 };
@@ -959,11 +961,12 @@ async fn remote_terminal_write(
         return json_error(StatusCode::CONFLICT, "remote controller lease is required");
     };
 
-    terminal_control_response(write_to_terminal_inner(
+    terminal_control_response(write_remote_terminal_raw(
+        &server.app_handle,
         &server.app_state,
         &id,
         body.data.as_bytes(),
-        HumanControlOrigin::Remote { lease_id },
+        lease_id,
     ))
 }
 

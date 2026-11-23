@@ -29,6 +29,7 @@ pub const EVENT_CLAUDE_TERMINAL_DETECTED: &str = "claude-terminal-detected";
 pub const EVENT_AUTOMATION_REQUEST: &str = "automation-request";
 pub const EVENT_TERMINAL_CWD_CHANGED: &str = "terminal-cwd-changed";
 pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
+pub const EVENT_TERMINAL_DISPLAY_CLEARED: &str = "terminal-display-cleared";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";

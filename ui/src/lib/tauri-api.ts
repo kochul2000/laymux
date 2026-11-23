@@ -1763,6 +1763,23 @@ export function onSetTabTitle(
   });
 }
 
+export interface TerminalDisplayClearedEvent {
+  terminalId: string;
+  generation: number;
+  submittedAt: number;
+  discardDraft: boolean;
+}
+
+export function onTerminalDisplayCleared(
+  callback: (data: TerminalDisplayClearedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalDisplayClearedEvent>(
+    "terminal-display-cleared",
+    (event) => callback(event.payload),
+    { target: "main" },
+  );
+}
+
 /** Command metadata and generation-scoped OSC 133 A/C/D task boundaries. */
 export function onCommandStatus(
   callback: (data: {

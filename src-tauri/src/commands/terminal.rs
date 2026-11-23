@@ -1318,6 +1318,32 @@ pub fn write_to_terminal_inner(
     data: &[u8],
     origin: HumanControlOrigin,
 ) -> Result<(), String> {
+    write_raw_terminal_inner(state, id, data, origin, None)
+}
+
+pub(crate) fn write_remote_terminal_raw(
+    app_handle: &AppHandle,
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    lease_id: String,
+) -> Result<(), String> {
+    write_raw_terminal_inner(
+        state,
+        id,
+        data,
+        HumanControlOrigin::Remote { lease_id },
+        Some(app_handle),
+    )
+}
+
+fn write_raw_terminal_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    origin: HumanControlOrigin,
+    display_observer: Option<&AppHandle>,
+) -> Result<(), String> {
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
@@ -1329,7 +1355,7 @@ pub fn write_to_terminal_inner(
         );
     }
 
-    write_human_terminal_bytes_inner(state, id, data, origin, None)
+    write_human_terminal_bytes_inner(state, id, data, origin, None, display_observer)
 }
 
 pub fn write_terminal_binary_input_inner(
@@ -1353,7 +1379,7 @@ pub fn write_terminal_binary_input_inner(
         );
     }
 
-    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation))
+    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation), None)
 }
 
 fn validate_xterm_default_mouse_binary_input(data: &[u8]) -> Result<(), String> {
@@ -1383,6 +1409,7 @@ fn write_human_terminal_bytes_inner(
     data: &[u8],
     origin: HumanControlOrigin,
     expected_generation: Option<u64>,
+    display_observer: Option<&AppHandle>,
 ) -> Result<(), String> {
     let permit = begin_human_control_operation(state, origin, id)?;
     let handle = state
@@ -1401,9 +1428,38 @@ fn write_human_terminal_bytes_inner(
     }
 
     let deadline = permit.deadline();
-    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, false, deadline))?;
+    let (pending, clear_observation) = permit.enqueue_pty_job(|| {
+        if let Some(app_handle) = display_observer.filter(|_| !data.is_empty()) {
+            let submitted_at = std::time::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let (pending, revision) = handle.enqueue_observed_remote_write(data, deadline)?;
+            Ok((pending, Some((app_handle, revision, submitted_at))))
+        } else {
+            let pending = handle.enqueue_write(data, false, deadline)?;
+            Ok((pending, None))
+        }
+    })?;
     let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
-    finish_human_control_io(permit, &handle, result)
+    finish_human_control_io(permit, &handle, result)?;
+    if let Some((app_handle, revision, submitted_at)) = clear_observation {
+        if let Some(discard_draft) = handle.observe_remote_clear(revision, data) {
+            if let Err(error) = app_handle.emit_to(
+                MAIN_WINDOW_LABEL,
+                EVENT_TERMINAL_DISPLAY_CLEARED,
+                serde_json::json!({
+                    "terminalId": id,
+                    "generation": handle.terminal_generation(),
+                    "submittedAt": submitted_at,
+                    "discardDraft": discard_draft,
+                }),
+            ) {
+                tracing::warn!(%error, terminal_id = %id, "Remote clear display event failed");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
