@@ -3,6 +3,8 @@ import { getTerminalPtyInspector, type TerminalBufferDump } from "./terminal-ser
 type Provider = "Claude" | "Codex" | "Grok";
 const POLL_MS = 60;
 const MAX_ROUNDS = 32;
+const CODEX_STATUS_ROW = /^\s{2,}(?:gpt-\d\S*(?:\s|$)|(?:.* · )?(?:Context )?\d+% left\b)/i;
+const CODEX_SHORTCUT_HINT = /^\s{2,}(?:← for agents\s*·\s*)?\? for shortcuts$/i;
 const pending = new Set<string>();
 
 /** Only the current viewport may authorize a destructive slash command. */
@@ -40,18 +42,29 @@ export function agentClearComposer(
       (last, line, index) => (/^›(?:\s|$)/.test(line) ? index : last),
       -1,
     );
-    const footer = lines.reduce(
+    let footerStart = lines.reduce(
       (last, line, index) =>
         // A fresh session has no context usage yet. Custom status lines can
         // therefore contain only the model/effort (and be width-truncated).
-        index > prompt && /^\s{2,}(?:.*(?:Context|% left|shortcuts)|gpt-\d\S*(?:\s|$))/i.test(line)
+        index > prompt &&
+        (CODEX_STATUS_ROW.test(line) || /^\s{2,}.*(?:Context|% left|shortcuts)/i.test(line))
           ? index
           : last,
       -1,
     );
-    if (prompt < 0 || footer < 0 || unsupportedChrome(lines.slice(footer))) return "unsupported";
+    if (prompt < 0 || footerStart < 0) return "unsupported";
+    // 입력란과 상태줄 사이는 한 줄 비고, 단축키 안내가 화면의 마지막 줄에 붙는다.
+    if (
+      lines[footerStart - 2] === "" &&
+      CODEX_SHORTCUT_HINT.test(lines[footerStart]) &&
+      CODEX_STATUS_ROW.test(lines[footerStart - 1]) &&
+      lines.slice(footerStart + 1).every((line) => line === "")
+    ) {
+      footerStart--;
+    }
+    if (unsupportedChrome(lines.slice(footerStart))) return "unsupported";
     return /^(?:›\s*|› Ask Codex to do anything)$/.test(lines[prompt]) &&
-      lines.slice(prompt + 1, footer).every((l) => !l.trim())
+      lines.slice(prompt + 1, footerStart).every((l) => !l.trim())
       ? "empty"
       : "draft";
   }

@@ -39,6 +39,62 @@ describe("실제 xterm 입력창 clear 판독", () => {
     }
   });
 
+  it.each([
+    [48, "  GPT-6.2-Astra max · Context 94% left · Ask fo…"],
+    [95, "  GPT-6.2-Astra max · Context 94% left · Ask for approval"],
+  ] as const)(
+    "Codex %i열에서 초안을 지워 두 줄 상태 표시가 나타나면 빈 입력창이다",
+    async (cols, status) => {
+      const surface = createScreenTerminal({ cols, rows: 12 });
+      const hint = "  ← for agents · ? for shortcuts";
+      try {
+        await surface.write(`› LAYMUX-DIAG-X\r\n\r\n${status}`);
+        expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+        await surface.write(`\x1b[H\x1b[2J› Ask Codex to do anything\r\n\r\n${status}\r\n${hint}`);
+        expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("empty");
+      } finally {
+        surface.dispose();
+      }
+    },
+  );
+
+  it("Codex 상태줄처럼 보이는 여러 줄 초안과 상태 표시의 중단 안내를 보호한다", async () => {
+    const surface = createScreenTerminal({ cols: 95, rows: 12 });
+    const status = "  GPT-6.2-Astra max · Context 94% left";
+    const hint = "  ? for shortcuts";
+    try {
+      await surface.write(
+        `›\r\n\r\n  Context in a draft\r\n${status}\r\n${hint}\r\n\r\n${status}\r\n${hint}`,
+      );
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(`\x1b[H\x1b[2J›\r\n\r\n  Context in a draft\r\n${hint}`);
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(
+        `\x1b[H\x1b[2J›\r\n\r\n${status}\r\n${hint}\r\n  아직 남은 초안\r\n\r\n  main`,
+      );
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(`\x1b[H\x1b[2J›\r\n${status}\r\n${hint}`);
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(`\x1b[H\x1b[2J›\r\n\r\n${status} · esc to interrupt\r\n${hint}`);
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("unsupported");
+    } finally {
+      surface.dispose();
+    }
+  });
+
+  it.each(["  Context 94% left", "  GPT-6.2-Astra max · …"])(
+    "Codex 상태줄 '%s' 아래에 단축키 안내만 있어도 입력란을 찾는다",
+    async (status) => {
+      const surface = createScreenTerminal({ cols: 48, rows: 8 });
+      try {
+        await surface.write(`›\r\n\r\n${status}\r\n  ? for shortcuts`);
+        expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("empty");
+      } finally {
+        surface.dispose();
+      }
+    },
+  );
+
   it("Grok의 테두리 입력창은 초안·여러 줄·빈 입력과 메뉴를 구분한다", async () => {
     const surface = createScreenTerminal({ cols: 96, rows: 12 });
     const frame = (text: string) =>
