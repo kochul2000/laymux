@@ -1115,13 +1115,13 @@ pub fn resize_terminal_inner(
 /// Finish one owner-checked physical operation without publishing a false
 /// cancellation acknowledgement. A platform call that outlives bounded PTY
 /// teardown transfers its worker completion token into the owner barrier.
-pub(super) fn finish_human_control_io(
+pub(super) fn finish_human_control_io<T>(
     permit: HumanControlPermit<'_>,
     handle: &pty::PtyHandle,
-    result: Result<(), String>,
-) -> Result<(), String> {
+    result: Result<T, String>,
+) -> Result<T, String> {
     match result {
-        Ok(()) => permit.finish(),
+        Ok(outcome) => permit.finish().map(|()| outcome),
         Err(error) => {
             if let Some(completion) = handle.pending_control_completion() {
                 permit
@@ -1428,35 +1428,31 @@ fn write_human_terminal_bytes_inner(
     }
 
     let deadline = permit.deadline();
-    let (pending, clear_observation) = permit.enqueue_pty_job(|| {
-        if let Some(app_handle) = display_observer.filter(|_| !data.is_empty()) {
-            let submitted_at = std::time::UNIX_EPOCH
+    let (pending, submitted_at) = permit.enqueue_pty_job(|| {
+        let submitted_at = display_observer.map(|_| {
+            std::time::UNIX_EPOCH
                 .elapsed()
                 .unwrap_or_default()
-                .as_millis() as u64;
-            let (pending, revision) = handle.enqueue_observed_remote_write(data, deadline)?;
-            Ok((pending, Some((app_handle, revision, submitted_at))))
-        } else {
-            let pending = handle.enqueue_write(data, false, deadline)?;
-            Ok((pending, None))
-        }
+                .as_millis() as u64
+        });
+        Ok((handle.enqueue_write(data, false, deadline)?, submitted_at))
     })?;
-    let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
-    finish_human_control_io(permit, &handle, result)?;
-    if let Some((app_handle, revision, submitted_at)) = clear_observation {
-        if let Some(discard_draft) = handle.observe_remote_clear(revision, data) {
-            if let Err(error) = app_handle.emit_to(
-                MAIN_WINDOW_LABEL,
-                EVENT_TERMINAL_DISPLAY_CLEARED,
-                serde_json::json!({
-                    "terminalId": id,
-                    "generation": handle.terminal_generation(),
-                    "submittedAt": submitted_at,
-                    "discardDraft": discard_draft,
-                }),
-            ) {
-                tracing::warn!(%error, terminal_id = %id, "Remote clear display event failed");
-            }
+    let result = handle.await_write_display_clear(pending, deadline, || permit.is_current());
+    let clear = finish_human_control_io(permit, &handle, result)?;
+    if let (Some(app_handle), Some(submitted_at), Some(clear)) =
+        (display_observer, submitted_at, clear)
+    {
+        if let Err(error) = app_handle.emit_to(
+            MAIN_WINDOW_LABEL,
+            EVENT_TERMINAL_DISPLAY_CLEARED,
+            serde_json::json!({
+                "terminalId": id,
+                "generation": handle.terminal_generation(),
+                "submittedAt": submitted_at,
+                "discardDraft": clear == pty::remote_clear_input::DisplayClear::Command,
+            }),
+        ) {
+            tracing::warn!(%error, terminal_id = %id, "Remote clear display event failed");
         }
     }
     Ok(())

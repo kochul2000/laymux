@@ -1,6 +1,6 @@
 # 0387. Remote 직접 입력의 clear가 마지막 입력 표시를 초기화한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-20
 - Source: 사용자 요구(Remote에서 Codex에 직접 `/clear`를 보내면 이전 워크스페이스 메시지가 남음), [ADR-0373](0373-submitted-shell-input-and-clear-history.md)
 
@@ -12,7 +12,7 @@ Remote Direct 키 입력은 데스크톱의 xterm 입력 조립기를 거치지 
 
 **호스트가 성공한 Remote raw 쓰기에서 명시적인 clear 입력을 관측하면 현재 PTY의 공통 표시 이력을 초기화한다.**
 
-- 호스트는 PTY 입력 revision을 기준으로 같은 PTY의 분할 쓰기를 이어 붙인다. 중간 쓰기를 확인할 수 없거나 해석할 수 없는 편집 제어를 받으면, 조립을 신뢰할 수 있는 다음 입력 경계까지 clear 제출 판정을 보류한다.
+- PTY 쓰기 워커는 PC와 Remote가 쓴 바이트를 실제 쓰기 순서로 조립한다. 붙여넣기 안의 개행과 작성기의 Ctrl+J는 제출로 세지 않고, 붙여넣기 밖의 Enter에서 명시적인 clear를 판정한다. 세션 재연결 직후나 해석할 수 없는 편집 뒤에는 확인된 입력 경계까지 판정을 보류한다.
 - 데스크톱 표시 소유자에게 PTY 세대, 입력 시각, 초안 초기화 여부만 전달한다. Remote에서 입력한 본문은 이 이벤트에 포함하지 않는다.
 - 표시 소유자는 현재 세대와 더 최근의 표시를 보호하며 ADR-0373의 삭제 경계를 사용한다. 서버는 기존 Remote lease와 PTY 쓰기 성공 여부를 사용한다.
 
