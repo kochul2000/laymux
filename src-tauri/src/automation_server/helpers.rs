@@ -17,6 +17,8 @@ use super::ServerState;
 /// `LONGEST_HANDLER_WAIT` + render slack turns slow-but-successful handlers into
 /// `504 Frontend response timeout`.
 const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+// 회수의 drain(최대 16초), checkpoint(최대 20초), PTY 종료를 기다리는 발행 전 예산.
+const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(45);
 
 async fn wait_for_frontend_response_until<T>(
     deadline: tokio::time::Instant,
@@ -34,19 +36,29 @@ async fn wait_for_frontend_response_until<T>(
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
 
-pub(crate) fn admit_bridge_mutation(
+pub(crate) async fn admit_bridge_mutation(
     runtime: &crate::session_checkpoint::SessionCheckpointRuntime,
     request_id: &str,
     category: &str,
     target: &str,
     method: &str,
+    cancelled: impl std::future::Future<Output = ()>,
 ) -> Result<bool, String> {
     if category != "action" {
         return Ok(false);
     }
     // Exact allowlist: future structural/write actions keep the session fence.
     // Navigation is still tracked for updater drain through its frontend ACK.
-    if matches!(
+    if target == "panes" && matches!(method, "split" | "stack") {
+        let admission =
+            runtime.begin_pane_creation_after_eviction(request_id, PANE_CREATION_ADMISSION_TIMEOUT);
+        // 취소는 발행 전에만 적용한다. 전달된 action은 늦은 응답까지 추적한다.
+        tokio::select! {
+            biased;
+            () = cancelled => return Err("Pane creation cancelled before dispatch".into()),
+            result = admission => result?,
+        }
+    } else if matches!(
         (target, method),
         ("terminals", "setFocus")
             | ("workspaces", "switchActive")
@@ -72,6 +84,25 @@ pub async fn bridge_request(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
+    bridge_request_with_cancel(
+        state,
+        category,
+        target,
+        method,
+        params,
+        std::future::pending(),
+    )
+    .await
+}
+
+pub(super) async fn bridge_request_with_cancel(
+    state: &ServerState,
+    category: &str,
+    target: &str,
+    method: &str,
+    params: serde_json::Value,
+    cancelled: impl std::future::Future<Output = ()>,
+) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let tracks_mutation = admit_bridge_mutation(
         &state.app_state.session_checkpoint,
@@ -79,7 +110,9 @@ pub async fn bridge_request(
         category,
         target,
         method,
+        cancelled,
     )
+    .await
     .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();

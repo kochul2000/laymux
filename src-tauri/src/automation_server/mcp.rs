@@ -28,7 +28,7 @@ use crate::settings::contract::{
     settings_revision,
 };
 
-use super::helpers::bridge_request;
+use super::helpers::{bridge_request, bridge_request_with_cancel};
 use super::mcp_resources::{
     self, bridge_read_failed, new_peer_id, read_result_json, read_result_text, resource_not_found,
     resource_templates, static_resources, PeerId, ResourceUri, SharedSubscriptionRegistry,
@@ -1221,16 +1221,43 @@ impl McpHandler {
         method: &str,
         params: Value,
     ) -> Result<Value, CallToolResult> {
-        let data = bridge_request(&self.state, category, target, method, params)
-            .await
-            .map_err(|(_status, axum::Json(body))| {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                CallToolResult::error(vec![Content::text(msg)])
-            })?;
+        Self::decode_bridge_response(
+            bridge_request(&self.state, category, target, method, params).await,
+        )
+    }
+
+    fn decode_bridge_response(
+        response: Result<Value, (axum::http::StatusCode, Json<Value>)>,
+    ) -> Result<Value, CallToolResult> {
+        let data = response.map_err(|(_status, Json(body))| {
+            let msg = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Bridge request failed");
+            CallToolResult::error(vec![Content::text(msg)])
+        })?;
         Self::require_bridge_success(data)
+    }
+
+    async fn create_bridge_pane(
+        &self,
+        method: &str,
+        params: Value,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let response = bridge_request_with_cancel(
+            &self.state,
+            "action",
+            "panes",
+            method,
+            params,
+            context.ct.cancelled(),
+        )
+        .await;
+        Ok(match Self::decode_bridge_response(response) {
+            Ok(data) => json_result(&data),
+            Err(error) => error,
+        })
     }
 
     fn require_bridge_success(data: Value) -> Result<Value, CallToolResult> {
@@ -2711,6 +2738,7 @@ impl McpHandler {
     async fn split_pane(
         &self,
         Parameters(p): Parameters<SplitPaneParam>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut params = json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id, "direction": p.direction.to_string() });
         if let Some(profile) = p.profile {
@@ -2719,7 +2747,7 @@ impl McpHandler {
         if let Some(cwd) = p.cwd {
             params["cwd"] = json!(cwd);
         }
-        self.bridge("action", "panes", "split", params).await
+        self.create_bridge_pane("split", params, context).await
     }
 
     /// Stack a background layer in any workspace (pane_id or workspace_id + pane_index).
@@ -2733,6 +2761,7 @@ impl McpHandler {
     async fn stack_pane(
         &self,
         Parameters(p): Parameters<StackPaneParam>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut params = json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id });
         if let Some(view_type) = p.view_type {
@@ -2744,7 +2773,7 @@ impl McpHandler {
         if let Some(cwd) = p.cwd {
             params["cwd"] = json!(cwd);
         }
-        self.bridge("action", "panes", "stack", params).await
+        self.create_bridge_pane("stack", params, context).await
     }
 
     /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.

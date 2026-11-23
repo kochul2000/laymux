@@ -37,6 +37,7 @@ impl Drop for EvictionGuard<'_> {
             .lock_or_recover_for_discard("releasing hidden eviction")
             .targets
             .clear();
+        self.runtime.admission_changed.notify_waiters();
     }
 }
 
@@ -47,10 +48,10 @@ impl SessionCheckpointRuntime {
     ) -> Result<TerminalMutationPermit<'_>, String> {
         let mut admission = self.eviction.lock_or_err()?;
         if self.finalizing.load(Ordering::Acquire) {
-            return Err("destructive session finalization is in progress".into());
+            return Err(AppError::SessionFinalizing.into());
         }
         if admission.targets.contains(terminal_id) {
-            return Err("hidden terminal eviction is in progress".into());
+            return Err(AppError::HiddenTerminalEviction.into());
         }
         *admission.active.entry(terminal_id.to_owned()).or_default() += 1;
         Ok(TerminalMutationPermit {

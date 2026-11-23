@@ -6,6 +6,10 @@ pub enum AppError {
     Lock(String),
     #[error("Session '{0}' not found")]
     SessionNotFound(String),
+    #[error("hidden terminal eviction is in progress")]
+    HiddenTerminalEviction,
+    #[error("destructive session finalization is in progress")]
+    SessionFinalizing,
     #[error("IO: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
