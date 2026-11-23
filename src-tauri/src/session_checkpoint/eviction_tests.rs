@@ -1,7 +1,90 @@
 use super::*;
-use crate::automation_server::helpers::admit_bridge_mutation;
+use crate::automation_server::helpers;
 use crate::remote_server::HumanControlOrigin;
-use std::future::pending;
+use std::future::{pending, Future};
+
+async fn admit(
+    state: &AppState,
+    request_id: &str,
+    category: &str,
+    target: &str,
+    method: &str,
+    cancelled: impl Future<Output = ()>,
+) -> Result<bool, String> {
+    let interrupted = helpers::bridge_interruption(state, category, target, method, cancelled);
+    helpers::admit_bridge_mutation(
+        &state.session_checkpoint,
+        request_id,
+        category,
+        target,
+        method,
+        interrupted,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn pane_creation_rejects_window_close_even_without_a_codex_checkpoint() {
+    let state = AppState::new();
+    let runtime = &state.session_checkpoint;
+    let eviction = runtime
+        .begin_eviction_and_drain(&state, &["hidden".into()])
+        .await
+        .unwrap();
+    let mut create = std::pin::pin!(admit(
+        &state,
+        "close",
+        "action",
+        "panes",
+        "stack",
+        pending()
+    ));
+    assert!(futures_util::poll!(&mut create).is_pending());
+    state.claim_app_close().unwrap();
+    let result_during_close = futures_util::poll!(&mut create);
+    assert!(matches!(
+        result_during_close,
+        std::task::Poll::Ready(Err(_))
+    ));
+    assert!(state.app_update.cancel_close());
+    drop(eviction);
+    assert!(!runtime.finish_detached_mutation("close").unwrap());
+    assert!(admit(&state, "new", "action", "panes", "stack", pending())
+        .await
+        .unwrap());
+    assert!(runtime.finish_detached_mutation("new").unwrap());
+}
+
+#[tokio::test]
+async fn pane_creation_waiting_before_a_cancelled_finalization_stays_rejected() {
+    let state = AppState::new();
+    let runtime = &state.session_checkpoint;
+    let eviction = runtime
+        .begin_eviction_and_drain(&state, &["hidden".into()])
+        .await
+        .unwrap();
+    let mut create = std::pin::pin!(admit(&state, "old", "action", "panes", "stack", pending()));
+    assert!(futures_util::poll!(&mut create).is_pending());
+    runtime.begin_finalization().unwrap();
+    runtime.cancel_finalization();
+    drop(eviction);
+    assert_eq!(
+        create.await.unwrap_err(),
+        "destructive session finalization is in progress"
+    );
+    assert!(!runtime.finish_detached_mutation("old").unwrap());
+}
+
+#[tokio::test(start_paused = true)]
+async fn pane_creation_cannot_register_after_its_deadline_even_if_the_gate_is_open() {
+    let state = AppState::new();
+    let runtime = &state.session_checkpoint;
+    let result = runtime
+        .begin_pane_creation_after_eviction("late", Duration::ZERO)
+        .await;
+    assert!(result.unwrap_err().contains("timed out"));
+    assert!(!runtime.finish_detached_mutation("late").unwrap());
+}
 
 #[tokio::test]
 async fn pane_creation_waits_for_hidden_eviction_before_dispatch() {
@@ -12,8 +95,7 @@ async fn pane_creation_waits_for_hidden_eviction_before_dispatch() {
         .begin_eviction_and_drain(&state, &targets)
         .await
         .unwrap();
-    let admit =
-        |method| admit_bridge_mutation(runtime, method, "action", "panes", method, pending());
+    let admit = |method| admit(&state, method, "action", "panes", method, pending());
     let mut stack = std::pin::pin!(admit("stack"));
     let mut split = std::pin::pin!(admit("split"));
     assert_eq!(futures_util::poll!(&mut stack), std::task::Poll::Pending);
@@ -57,8 +139,8 @@ async fn pane_creation_waiting_for_eviction_rejects_finalization() {
         .begin_eviction_and_drain(&state, &["hidden".into()])
         .await
         .unwrap();
-    let mut create = std::pin::pin!(admit_bridge_mutation(
-        runtime,
+    let mut create = std::pin::pin!(admit(
+        &state,
         "review",
         "action",
         "panes",
@@ -85,8 +167,8 @@ async fn cancelled_pane_creation_is_not_dispatched_when_eviction_ends() {
         .await
         .unwrap();
     let (cancel, cancelled) = tokio::sync::oneshot::channel();
-    let mut create = std::pin::pin!(admit_bridge_mutation(
-        runtime,
+    let mut create = std::pin::pin!(admit(
+        &state,
         "cancelled",
         "action",
         "panes",
@@ -112,8 +194,8 @@ async fn pane_creation_expires_after_ten_seconds_without_registering_a_late_acti
         .await
         .unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut split = std::pin::pin!(admit_bridge_mutation(
-        runtime,
+    let mut split = std::pin::pin!(admit(
+        &state,
         "split-at-deadline",
         "action",
         "panes",
@@ -121,8 +203,8 @@ async fn pane_creation_expires_after_ten_seconds_without_registering_a_late_acti
         pending()
     ));
     assert!(futures_util::poll!(&mut split).is_pending());
-    let mut create = std::pin::pin!(admit_bridge_mutation(
-        runtime,
+    let mut create = std::pin::pin!(admit(
+        &state,
         "expired",
         "action",
         "panes",
@@ -172,16 +254,9 @@ async fn hidden_eviction_does_not_reject_remote_navigation() {
     {
         let request_id = format!("remote-navigation-{index}");
         assert!(
-            admit_bridge_mutation(
-                &state.session_checkpoint,
-                &request_id,
-                "action",
-                target,
-                method,
-                pending(),
-            )
-            .await
-            .unwrap(),
+            admit(&state, &request_id, "action", target, method, pending(),)
+                .await
+                .unwrap(),
             "{target}.{method}"
         );
         assert!(state
@@ -198,8 +273,8 @@ async fn hidden_eviction_does_not_reject_remote_navigation() {
         ("navigation", "unknownFutureMutation"),
     ] {
         assert!(
-            admit_bridge_mutation(
-                &state.session_checkpoint,
+            admit(
+                &state,
                 "structural-action",
                 "action",
                 target,
@@ -217,8 +292,8 @@ async fn hidden_eviction_does_not_reject_remote_navigation() {
 #[tokio::test]
 async fn remote_navigation_remains_tracked_for_update_but_does_not_delay_eviction() {
     let state = std::sync::Arc::new(AppState::new());
-    admit_bridge_mutation(
-        &state.session_checkpoint,
+    admit(
+        &state,
         "pending-focus",
         "action",
         "terminals",
@@ -261,8 +336,8 @@ async fn remote_navigation_remains_tracked_for_update_but_does_not_delay_evictio
     .await
     .unwrap();
     assert!(!drain.is_finished());
-    assert!(admit_bridge_mutation(
-        &state.session_checkpoint,
+    assert!(admit(
+        &state,
         "late-focus",
         "action",
         "terminals",

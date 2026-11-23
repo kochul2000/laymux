@@ -8,6 +8,10 @@ pub enum AppError {
     SessionNotFound(String),
     #[error("hidden terminal eviction is in progress")]
     HiddenTerminalEviction,
+    #[error("timed out waiting for hidden terminal eviction before pane creation")]
+    PaneCreationTimeout,
+    #[error("Pane creation cancelled before dispatch")]
+    PaneCreationCancelled,
     #[error("destructive session finalization is in progress")]
     SessionFinalizing,
     #[error("IO: {0}")]

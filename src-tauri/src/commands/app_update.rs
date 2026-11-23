@@ -13,7 +13,7 @@ pub fn get_app_update_status(state: State<'_, Arc<AppState>>) -> Result<UpdateSt
 
 #[tauri::command]
 pub fn begin_app_close(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.app_update.claim_close()
+    state.claim_app_close()
 }
 
 #[tauri::command]

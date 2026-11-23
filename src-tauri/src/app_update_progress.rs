@@ -24,12 +24,26 @@ pub struct ExitProgress {
     pub warning: Option<String>,
 }
 
+impl AppState {
+    pub(crate) fn claim_app_close(&self) -> Result<(), String> {
+        self.app_update.claim_close()?;
+        self.session_checkpoint
+            .pane_creation_stopped
+            .notify_waiters();
+        Ok(())
+    }
+}
+
 impl UpdateManager {
+    pub(crate) fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::Acquire)
+    }
+
     pub fn cancel_close(&self) -> bool {
         self.closing.swap(false, Ordering::AcqRel)
     }
 
-    pub fn claim_close(&self) -> Result<(), String> {
+    pub(super) fn claim_close(&self) -> Result<(), String> {
         let status = self.status.lock_or_err()?;
         if matches!(
             status.operation,

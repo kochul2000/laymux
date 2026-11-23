@@ -64,6 +64,7 @@ pub struct SessionCheckpointRuntime {
     close_checkpoint_committed: AtomicBool,
     eviction: Mutex<eviction::EvictionAdmission>,
     admission_changed: tokio::sync::Notify,
+    pub(crate) pane_creation_stopped: tokio::sync::Notify,
     active_mutations: AtomicUsize,
     active_navigation: AtomicUsize,
     detached_mutations: Mutex<HashMap<String, DetachedMutationKind>>,
@@ -88,6 +89,7 @@ impl Default for SessionCheckpointRuntime {
             close_checkpoint_committed: AtomicBool::new(false),
             eviction: Mutex::new(eviction::EvictionAdmission::default()),
             admission_changed: tokio::sync::Notify::new(),
+            pane_creation_stopped: tokio::sync::Notify::new(),
             active_mutations: AtomicUsize::new(0),
             active_navigation: AtomicUsize::new(0),
             detached_mutations: Mutex::new(HashMap::new()),
@@ -142,7 +144,7 @@ impl SessionCheckpointRuntime {
         self.finalizing
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "destructive session finalization is already in progress")?;
-        self.admission_changed.notify_waiters();
+        self.pane_creation_stopped.notify_waiters();
         Ok(())
     }
 

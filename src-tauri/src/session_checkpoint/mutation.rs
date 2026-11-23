@@ -48,11 +48,16 @@ impl SessionCheckpointRuntime {
             // 승인 시도 전에 구독해야 검사 도중 끝난 회수의 알림도 받는다.
             let changed = self.admission_changed.notified();
             match self.begin_detached(request_id, DetachedMutationKind::Session) {
+                // 등록 락을 기다리는 사이 기한이 지났으면 발행 전에 등록을 철회한다.
+                Ok(()) if tokio::time::Instant::now() >= deadline.deadline() => {
+                    self.finish_detached_mutation(request_id)?;
+                    return Err(AppError::PaneCreationTimeout.into());
+                }
                 Err(AppError::HiddenTerminalEviction) => tokio::select! {
                     biased;
                     // 회수 해제와 기한 만료를 함께 관측하면 새 pane을 만들지 않는다.
                     _ = &mut deadline => {
-                        return Err("timed out waiting for hidden terminal eviction before pane creation".into());
+                        return Err(AppError::PaneCreationTimeout.into());
                     }
                     _ = changed => {}
                 },

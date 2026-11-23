@@ -10,6 +10,9 @@ use crate::lock_ext::MutexExt;
 use super::types::AutomationRequest;
 use super::ServerState;
 
+mod dispatch;
+pub(crate) use dispatch::{admit_bridge_mutation, bridge_interruption};
+
 /// How long a bridge request waits for the frontend to answer.
 ///
 /// This is the ceiling every async bridge handler shares, including the waits a
@@ -17,8 +20,6 @@ use super::ServerState;
 /// `LONGEST_HANDLER_WAIT` + render slack turns slow-but-successful handlers into
 /// `504 Frontend response timeout`.
 const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
-// 승인 대기와 전달 후 응답을 합친 예산은 최대 15초다 (ADR-0388).
-const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn wait_for_frontend_response_until<T>(
     deadline: tokio::time::Instant,
@@ -35,46 +36,6 @@ async fn wait_for_frontend_response_until<T>(
 /// `BRIDGE_REQUEST_BUDGET_MS` mirrors this budget on that side.
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
-
-pub(crate) async fn admit_bridge_mutation(
-    runtime: &crate::session_checkpoint::SessionCheckpointRuntime,
-    request_id: &str,
-    category: &str,
-    target: &str,
-    method: &str,
-    cancelled: impl std::future::Future<Output = ()>,
-) -> Result<bool, String> {
-    if category != "action" {
-        return Ok(false);
-    }
-    // Exact allowlist: future structural/write actions keep the session fence.
-    // Navigation is still tracked for updater drain through its frontend ACK.
-    if target == "panes" && matches!(method, "split" | "stack") {
-        let admission =
-            runtime.begin_pane_creation_after_eviction(request_id, PANE_CREATION_ADMISSION_TIMEOUT);
-        // 취소는 발행 전에만 적용한다. 전달된 action은 늦은 응답까지 추적한다.
-        tokio::select! {
-            biased;
-            () = cancelled => return Err("Pane creation cancelled before dispatch".into()),
-            result = admission => result?,
-        }
-    } else if matches!(
-        (target, method),
-        ("terminals", "setFocus")
-            | ("workspaces", "switchActive")
-            | ("grid", "focusPane")
-            | (
-                "navigation",
-                "spatialStep" | "directionStep" | "notificationStep"
-            )
-            | ("notifications", "markRead" | "markTerminalRead")
-    ) {
-        runtime.begin_detached_navigation(request_id)?;
-    } else {
-        runtime.begin_detached_mutation(request_id)?;
-    }
-    Ok(true)
-}
 
 /// Send a request to the frontend via Tauri event and wait for the response.
 pub async fn bridge_request(
@@ -104,13 +65,15 @@ pub(super) async fn bridge_request_with_cancel(
     cancelled: impl std::future::Future<Output = ()>,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
     let request_id = uuid::Uuid::new_v4().to_string();
+    let interrupted = bridge_interruption(&state.app_state, category, target, method, cancelled);
+    tokio::pin!(interrupted);
     let tracks_mutation = admit_bridge_mutation(
         &state.app_state.session_checkpoint,
         &request_id,
         category,
         target,
         method,
-        cancelled,
+        interrupted.as_mut(),
     )
     .await
     .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
@@ -158,24 +121,13 @@ pub(super) async fn bridge_request_with_cancel(
         deadline_ms: emitted_at_ms.saturating_add(FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64),
     };
 
-    if let Err(error) = state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request) {
-        // The action was never delivered, so both wait registrations can be
-        // retired immediately. Delivered actions stay admitted until their
-        // frontend response even when this HTTP waiter times out.
-        if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
-            channels.remove(&request_id);
-        }
-        if tracks_mutation {
-            let _ = state
-                .app_state
-                .session_checkpoint
-                .finish_detached_mutation(&request_id);
-        }
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(err_json(&format!("Event emit error: {error}"))),
-        ));
-    }
+    dispatch::emit_admitted_request(
+        &state.app_state,
+        &request_id,
+        tracks_mutation,
+        interrupted,
+        || state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request),
+    )?;
     state.app_state.frontend_health.note_request_emitted();
 
     // Wait only through the absolute deadline captured before emit. Starting a
