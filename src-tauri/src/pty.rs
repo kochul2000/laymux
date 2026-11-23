@@ -14,6 +14,7 @@ use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWork
 use crate::pty_reader::PtyReaderLifecycle;
 use crate::terminal::{NativeWindowsCodexColorProbeGuard, TerminalBootstrapDaReplyGuard};
 
+pub(crate) mod remote_clear_input;
 mod spawn;
 pub(crate) use spawn::spawn_pty_on_with_startup_colors;
 pub(crate) use spawn::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
@@ -277,7 +278,7 @@ impl PtyHandle {
     pub(crate) fn write_protocol_reply(&self, data: &[u8]) -> Result<(), String> {
         self.ensure_input_healthy()?;
         let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS);
-        let pending = self.control.submit_write(data, false, deadline)?;
+        let pending = self.control.submit_protocol_reply(data, deadline)?;
         self.await_enqueued_control_job(pending, deadline, || true)
     }
 
@@ -290,12 +291,12 @@ impl PtyHandle {
         deadline: Instant,
     ) -> Result<(), String> {
         self.ensure_input_healthy()?;
-        let pending = self.control.submit_write(data, false, deadline)?;
+        let pending = self.control.submit_protocol_reply(data, deadline)?;
         match pending
             .result
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         {
-            Ok(result) => result,
+            Ok(result) => result.map(|_| ()),
             Err(RecvTimeoutError::Disconnected) => {
                 Err("PTY control worker stopped unexpectedly".into())
             }
@@ -334,7 +335,7 @@ impl PtyHandle {
             checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             input_enqueue_gate: Arc::new(Mutex::new(())),
             session_restore: None,
-            control: PtyControlWorker::spawn(writer, Arc::clone(&master))
+            control: PtyControlWorker::spawn(writer, Arc::clone(&master), false)
                 .expect("test PTY control worker"),
             master,
             child_killer: Arc::new(Mutex::new(None)),
@@ -662,8 +663,18 @@ impl PtyHandle {
         &self,
         pending: PendingControlJob,
         deadline: Instant,
-        mut is_current_owner: impl FnMut() -> bool,
+        is_current_owner: impl FnMut() -> bool,
     ) -> Result<(), String> {
+        self.await_write_display_clear(pending, deadline, is_current_owner)
+            .map(|_| ())
+    }
+
+    pub(crate) fn await_write_display_clear(
+        &self,
+        pending: PendingControlJob,
+        deadline: Instant,
+        mut is_current_owner: impl FnMut() -> bool,
+    ) -> Result<Option<remote_clear_input::DisplayClear>, String> {
         let poll = Duration::from_millis(PTY_CONTROL_WAIT_POLL_MS);
         let cancel_grace = Duration::from_millis(PTY_CONTROL_CANCEL_GRACE_MS);
         let mut cancelled_at: Option<Instant> = None;

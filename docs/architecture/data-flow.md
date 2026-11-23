@@ -1267,6 +1267,8 @@ Claude 세션 기록의 슬래시 명령 envelope는 `command-name`과 선택적
 
 명시적인 Ctrl+L·clear/cls/Clear-Host·/clear 제출과 기존 pane/workspace clear의 성공 경로는 활동 종류와 독립적으로 마지막 입력 표시를 지운다. 실패/skip은 유지한다. 작업 상태·결과는 유지하며 활동별 clear 권한 정책도 유지한다. `lastInputClearedAt` 삭제 경계를 데몬/로컬 표시 checkpoint에 보존하고 이전 입력·명령을 숨겨 복원 시 재등장을 막는다. 새 입력은 경계 이후 시각을 갖고, clear 이전/이전 generation의 늦은 입력 완료는 버린다. clear 도중 관측한 새 사용자 입력은 유지한다. PTY 출력의 ED/redraw는 삭제 신호로 쓰지 않는다.
 
+[ADR-0387](../adr/0387-remote-direct-clear-display-history.md)에 따라 PTY 쓰기 워커는 PC와 Remote 입력을 실제 쓰기 순서로 조립하고, 프로토콜 응답은 건너뛴다. 붙여넣기의 시작·끝은 요청 경계를 넘어 추적하고 Ctrl+J는 작성기 개행으로 처리한다. Remote Direct에서 명시적인 clear를 제출하거나 Ctrl+L을 보내면 호스트는 성공한 해당 쓰기의 PTY 세대·시각과 초안 폐기 여부를 데스크톱에 전달한다. Remote 탐색도 같은 표시를 읽는다. 재연결 전에 작성 중이던 줄과 미확인 키 편집은 다음 입력 경계까지 제출 판정에서 제외한다.
+
 
 #### 출력 기반 메시지 추출 (Codex 대화 · Claude recap)
 

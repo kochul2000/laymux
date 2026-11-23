@@ -1115,13 +1115,13 @@ pub fn resize_terminal_inner(
 /// Finish one owner-checked physical operation without publishing a false
 /// cancellation acknowledgement. A platform call that outlives bounded PTY
 /// teardown transfers its worker completion token into the owner barrier.
-pub(super) fn finish_human_control_io(
+pub(super) fn finish_human_control_io<T>(
     permit: HumanControlPermit<'_>,
     handle: &pty::PtyHandle,
-    result: Result<(), String>,
-) -> Result<(), String> {
+    result: Result<T, String>,
+) -> Result<T, String> {
     match result {
-        Ok(()) => permit.finish(),
+        Ok(outcome) => permit.finish().map(|()| outcome),
         Err(error) => {
             if let Some(completion) = handle.pending_control_completion() {
                 permit
@@ -1318,6 +1318,32 @@ pub fn write_to_terminal_inner(
     data: &[u8],
     origin: HumanControlOrigin,
 ) -> Result<(), String> {
+    write_raw_terminal_inner(state, id, data, origin, None)
+}
+
+pub(crate) fn write_remote_terminal_raw(
+    app_handle: &AppHandle,
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    lease_id: String,
+) -> Result<(), String> {
+    write_raw_terminal_inner(
+        state,
+        id,
+        data,
+        HumanControlOrigin::Remote { lease_id },
+        Some(app_handle),
+    )
+}
+
+fn write_raw_terminal_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    origin: HumanControlOrigin,
+    display_observer: Option<&AppHandle>,
+) -> Result<(), String> {
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
@@ -1329,7 +1355,7 @@ pub fn write_to_terminal_inner(
         );
     }
 
-    write_human_terminal_bytes_inner(state, id, data, origin, None)
+    write_human_terminal_bytes_inner(state, id, data, origin, None, display_observer)
 }
 
 pub fn write_terminal_binary_input_inner(
@@ -1353,7 +1379,7 @@ pub fn write_terminal_binary_input_inner(
         );
     }
 
-    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation))
+    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation), None)
 }
 
 fn validate_xterm_default_mouse_binary_input(data: &[u8]) -> Result<(), String> {
@@ -1383,6 +1409,7 @@ fn write_human_terminal_bytes_inner(
     data: &[u8],
     origin: HumanControlOrigin,
     expected_generation: Option<u64>,
+    display_observer: Option<&AppHandle>,
 ) -> Result<(), String> {
     let permit = begin_human_control_operation(state, origin, id)?;
     let handle = state
@@ -1401,9 +1428,34 @@ fn write_human_terminal_bytes_inner(
     }
 
     let deadline = permit.deadline();
-    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, false, deadline))?;
-    let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
-    finish_human_control_io(permit, &handle, result)
+    let (pending, submitted_at) = permit.enqueue_pty_job(|| {
+        let submitted_at = display_observer.map(|_| {
+            std::time::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_millis() as u64
+        });
+        Ok((handle.enqueue_write(data, false, deadline)?, submitted_at))
+    })?;
+    let result = handle.await_write_display_clear(pending, deadline, || permit.is_current());
+    let clear = finish_human_control_io(permit, &handle, result)?;
+    if let (Some(app_handle), Some(submitted_at), Some(clear)) =
+        (display_observer, submitted_at, clear)
+    {
+        if let Err(error) = app_handle.emit_to(
+            MAIN_WINDOW_LABEL,
+            EVENT_TERMINAL_DISPLAY_CLEARED,
+            serde_json::json!({
+                "terminalId": id,
+                "generation": handle.terminal_generation(),
+                "submittedAt": submitted_at,
+                "discardDraft": clear == pty::remote_clear_input::DisplayClear::Command,
+            }),
+        ) {
+            tracing::warn!(%error, terminal_id = %id, "Remote clear display event failed");
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

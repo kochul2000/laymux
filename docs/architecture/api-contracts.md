@@ -2634,6 +2634,8 @@ dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"
 
 표시 문맥 version 1에는 선택적 `lastInputClearedAt: number`를 포함한다. 기존 데몬 opaque 문맥과 로컬 SQLite checkpoint를 그대로 사용하며 마지막 입력 계산은 이 경계 이하 시각의 `lastUserInput`/`lastCommand`를 제외한다. 복원 병합은 큰 경계를 보존하고 새 제출은 경계보다 큰 시각을 기록한다. 명시적 Ctrl+L·clear/cls/Clear-Host·/clear 제출과 기존 pane/workspace clear의 성공 경로가 공통 표시 초기화를 수행한다. 실패/skip·일반 PTY 화면 지우기는 초기화하지 않는다. 활동별 실제 clear 입력과 권한·busy 정책, REST/Remote 응답 shape는 유지한다. 셸 명령 본문 없는 시작/종료 이벤트는 기존 본문의 제출 시각을 갱신하지 않는다. 임의 TUI 자동완성은 관측 계약이 없어 정확성을 보장하지 않는다.
 
+[ADR-0387](../adr/0387-remote-direct-clear-display-history.md)의 Remote raw 쓰기가 명시적 clear를 관측하면 호스트는 main WebView에 내부 `terminal-display-cleared` 이벤트를 보낸다. payload는 `{terminalId, generation, submittedAt, discardDraft}`이며 입력 시각은 호스트 Unix 밀리초다. 데스크톱은 같은 PTY 세대의 더 오래된 표시만 지운다.
+
 
 **에이전트 제출 본문 보정(ADR-0373).** 기존 `get_agent_session_states`는 선택적 `inputTerminalIds`를 받아 해당 Claude/Grok 응답에 `submittedInput?: {text:string,timestamp:string}`을 포함한다. 사용자 제출 뒤 15초 동안만 요청하며 이미 귀속된 파일의 마지막 1 MiB를 읽고 텍스트 앞 2048 code point를 반환한다. Claude는 실제 user의 문자열/텍스트 블록을, Grok은 같은 promptIndex의 user_message_chunk를 사용한다. tool_result·메타·sidechain·요약·미완성/손상/불일치는 제외한다. `get_codex_turn_states`도 같은 선택적 본문을 기존 증분 reader의 user_message 또는 item_completed/UserMessage에서 얻는다. 새 OS/WSL probe는 없다. 프론트는 generation·task/input/clear 경계를 확인하고 제출 이전·clear 이전·미래 5초 초과 기록을 거절한다. 실제 제출 문자열만 보정하며 제출 시각·작업 권위·상태를 바꾸지 않는다. 입력 보정 때문에 추가된 조회에는 기존 상태 적용 권한을 부여하지 않아 확정된 제목 작업을 오래된 idle 기록으로 종료하지 않는다. 본문은 로그에 남기지 않는다. 기록을 읽을 수 없거나 지원하지 않는 TUI는 기존 입력 조립을 유지한다.
 

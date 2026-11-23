@@ -18,8 +18,9 @@ use crate::constants::{
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::chunked_write_to_guarded;
+use crate::pty::remote_clear_input::{DisplayClear, ObservedInputWriter, RemoteClearInput};
 
-type ControlResult = Result<(), String>;
+type ControlResult = Result<Option<DisplayClear>, String>;
 
 enum ControlJob {
     Write {
@@ -28,6 +29,7 @@ enum ControlJob {
         /// Append a submit CR after the body, gapped by [`ENTER_SUBMIT_CR_DELAY_MS`],
         /// within this same job so the pair stays atomic on the FIFO (#490).
         submit: bool,
+        protocol_reply: bool,
         cancelled: Arc<AtomicBool>,
         deadline: Instant,
         result: mpsc::Sender<ControlResult>,
@@ -95,6 +97,7 @@ impl PtyControlWorker {
     pub(crate) fn spawn(
         writer: Box<dyn Write + Send>,
         master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
+        adopted: bool,
     ) -> Result<Arc<Self>, String> {
         let (sender, receiver) = mpsc::sync_channel(PTY_CONTROL_QUEUE_CAPACITY);
         let state = Arc::new(WorkerState::default());
@@ -106,7 +109,15 @@ impl PtyControlWorker {
 
         thread::Builder::new()
             .name("laymux-pty-control".into())
-            .spawn(move || run_worker(receiver, writer, master, state))
+            .spawn(move || {
+                run_worker(
+                    receiver,
+                    writer,
+                    master,
+                    state,
+                    RemoteClearInput::new(adopted),
+                )
+            })
             .map_err(|error| format!("failed to spawn PTY control worker: {error}"))?;
         Ok(worker)
     }
@@ -117,6 +128,24 @@ impl PtyControlWorker {
         submit: bool,
         deadline: Instant,
     ) -> Result<PendingControlJob, String> {
+        self.queue_write(data, submit, false, deadline)
+    }
+
+    pub(crate) fn submit_protocol_reply(
+        &self,
+        data: &[u8],
+        deadline: Instant,
+    ) -> Result<PendingControlJob, String> {
+        self.queue_write(data, false, true, deadline)
+    }
+
+    fn queue_write(
+        &self,
+        data: &[u8],
+        submit: bool,
+        protocol_reply: bool,
+        deadline: Instant,
+    ) -> Result<PendingControlJob, String> {
         let id = self.next_id();
         let cancelled = Arc::new(AtomicBool::new(false));
         let (result_tx, result_rx) = mpsc::channel();
@@ -124,6 +153,7 @@ impl PtyControlWorker {
             id,
             data: data.to_vec(),
             submit,
+            protocol_reply,
             cancelled: Arc::clone(&cancelled),
             deadline,
             result: result_tx,
@@ -223,6 +253,7 @@ fn run_worker(
     mut writer: Box<dyn Write + Send>,
     master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
     state: Arc<WorkerState>,
+    mut input: RemoteClearInput,
 ) {
     install_platform_thread_handle(&state);
     while let Ok(job) = receiver.recv() {
@@ -238,7 +269,7 @@ fn run_worker(
         let result = if state.closed.load(Ordering::Acquire) {
             Err("PTY writer already closed".into())
         } else {
-            execute_job(job, writer.as_mut(), &master)
+            execute_job(job, writer.as_mut(), &master, &mut input)
         };
 
         if let Ok(mut active) = state.active.lock_or_err() {
@@ -256,15 +287,27 @@ fn execute_job(
     job: ControlJob,
     writer: &mut dyn Write,
     master: &Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
+    input: &mut RemoteClearInput,
 ) -> ControlResult {
     match job {
         ControlJob::Write {
             data,
             submit,
+            protocol_reply,
             cancelled,
             deadline,
             ..
         } => {
+            let mut observed = ObservedInputWriter {
+                writer,
+                input,
+                clear: None,
+            };
+            let writer: &mut dyn Write = if protocol_reply {
+                &mut *observed.writer
+            } else {
+                &mut observed
+            };
             if !data.is_empty() {
                 chunked_write_to_guarded(writer, &data, || {
                     !cancelled.load(Ordering::Acquire) && Instant::now() < deadline
@@ -288,7 +331,7 @@ fn execute_job(
                     !cancelled.load(Ordering::Acquire) && Instant::now() < deadline
                 })?;
             }
-            Ok(())
+            Ok(observed.clear)
         }
         ControlJob::Resize {
             cols,
@@ -311,7 +354,8 @@ fn execute_job(
                     pixel_height: 0,
                 })
                 .map_err(|error| format!("Resize error: {error}"))?;
-            ensure_job_current(&cancelled, deadline)
+            ensure_job_current(&cancelled, deadline)?;
+            Ok(None)
         }
     }
 }
@@ -321,7 +365,7 @@ fn execute_job(
 /// FIFO worker keeps the pair atomic against other writes on this terminal.
 /// Polled in small steps so an owner-epoch change or deadline aborts the CR
 /// (leaving the body typed) instead of waiting out the full gap.
-fn wait_before_submit_cr(cancelled: &AtomicBool, deadline: Instant) -> ControlResult {
+fn wait_before_submit_cr(cancelled: &AtomicBool, deadline: Instant) -> Result<(), String> {
     let poll = Duration::from_millis(PTY_CONTROL_WAIT_POLL_MS);
     let until = Instant::now() + Duration::from_millis(ENTER_SUBMIT_CR_DELAY_MS);
     while Instant::now() < until {

@@ -72,6 +72,7 @@ fn control_worker_preserves_fifo_job_order() {
             bytes: Arc::clone(&bytes),
         }),
         no_master(),
+        false,
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -83,8 +84,8 @@ fn control_worker_preserves_fifo_job_order() {
         .submit_write(b"-second", false, deadline)
         .expect("second job");
 
-    assert_eq!(first.result.recv().expect("first result"), Ok(()));
-    assert_eq!(second.result.recv().expect("second result"), Ok(()));
+    assert_eq!(first.result.recv().expect("first result"), Ok(None));
+    assert_eq!(second.result.recv().expect("second result"), Ok(None));
     assert_eq!(&*bytes.lock().expect("recorded bytes"), b"first-second");
     worker.close();
 }
@@ -103,6 +104,7 @@ fn submit_write_appends_gapped_cr_as_separate_write_before_next_job() {
             chunks: Arc::clone(&chunks),
         }),
         no_master(),
+        false,
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -112,8 +114,8 @@ fn submit_write_appends_gapped_cr_as_separate_write_before_next_job() {
         .submit_write(b"cmd", true, deadline)
         .expect("submit job");
     let raw = worker.submit_write(b"x", false, deadline).expect("raw job");
-    assert_eq!(submit.result.recv().expect("submit result"), Ok(()));
-    assert_eq!(raw.result.recv().expect("raw result"), Ok(()));
+    assert_eq!(submit.result.recv().expect("submit result"), Ok(None));
+    assert_eq!(raw.result.recv().expect("raw result"), Ok(None));
 
     // Body, CR, then the following raw write — three separate writes, in order.
     assert_eq!(
@@ -138,6 +140,7 @@ fn submit_write_with_empty_body_emits_only_cr() {
             chunks: Arc::clone(&chunks),
         }),
         no_master(),
+        false,
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -145,7 +148,7 @@ fn submit_write_with_empty_body_emits_only_cr() {
     let lone = worker
         .submit_write(b"", true, deadline)
         .expect("lone enter job");
-    assert_eq!(lone.result.recv().expect("lone result"), Ok(()));
+    assert_eq!(lone.result.recv().expect("lone result"), Ok(None));
     assert_eq!(&*chunks.lock().expect("chunks"), &[b"\r".to_vec()]);
     worker.close();
 }
@@ -162,6 +165,7 @@ fn cancelling_active_job_never_starts_its_later_chunk() {
             bytes: Arc::clone(&bytes),
         }),
         no_master(),
+        false,
     )
     .expect("spawn worker");
     let payload = vec![b'x'; crate::constants::PTY_WRITE_CHUNK_SIZE + 7];
@@ -203,6 +207,7 @@ fn queued_cancelled_job_is_rejected_without_writing() {
             bytes: Arc::clone(&bytes),
         }),
         no_master(),
+        false,
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -221,7 +226,7 @@ fn queued_cancelled_job_is_rejected_without_writing() {
     let (released, wake) = &*gate;
     *released.lock().expect("writer gate") = true;
     wake.notify_all();
-    assert_eq!(first.result.recv().expect("first result"), Ok(()));
+    assert_eq!(first.result.recv().expect("first result"), Ok(None));
     let error = second
         .result
         .recv_timeout(Duration::from_secs(1))

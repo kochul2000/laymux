@@ -198,6 +198,7 @@ where
                 start_spawned(
                     opened,
                     terminal_generation,
+                    true,
                     SpawnOptions {
                         wsl_backed,
                         kill_owner: ChildKillOwner::Backend,
@@ -293,6 +294,7 @@ where
             let handle = start_spawned(
                 opened,
                 terminal_generation,
+                metadata.is_some(),
                 SpawnOptions {
                     wsl_backed,
                     kill_owner,
@@ -411,7 +413,14 @@ where
     F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
     let spawned = open_and_spawn(pty_system, size, cmd)?;
-    start_spawned(spawned, terminal_generation, options, on_output, hooks)
+    start_spawned(
+        spawned,
+        terminal_generation,
+        false,
+        options,
+        on_output,
+        hooks,
+    )
 }
 
 /// A child running in a freshly opened PTY whose reader is not started yet.
@@ -468,6 +477,7 @@ pub(crate) fn open_and_spawn(
 pub(crate) fn start_spawned<F>(
     opened: OpenedPty,
     terminal_generation: u64,
+    adopted: bool,
     options: SpawnOptions,
     on_output: F,
     hooks: PtyLifecycleHooks,
@@ -529,7 +539,7 @@ where
     let reader_lifecycle = PtyReaderLifecycle::new(terminal_generation, reader_pair.control)?;
 
     let master = Arc::new(Mutex::new(Some(pair.master)));
-    let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
+    let control = PtyControlWorker::spawn(writer, Arc::clone(&master), adopted)?;
     let handle = PtyHandle {
         daemon_reconnect_control: None,
         display_context_owner: None,

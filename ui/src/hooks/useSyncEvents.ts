@@ -8,6 +8,7 @@ import {
   onLxNotify,
   onSetTabTitle,
   onCommandStatus,
+  onTerminalDisplayCleared,
   onClaudeTerminalDetected,
   onClaudeMessageChanged,
   onTerminalCwdChanged,
@@ -34,7 +35,11 @@ import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
 import { subscribeAgentHookStates } from "@/lib/agent-hook-state-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 import { subscribeTaskStateRecovery } from "@/lib/task-state-recovery";
-import { clearTerminalInputHistory, isInputHistoryClear } from "@/lib/terminal-input-history";
+import {
+  applyRemoteInputClear,
+  clearTerminalInputHistory,
+  isInputHistoryClear,
+} from "@/lib/terminal-input-history";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -137,6 +142,13 @@ export function useSyncEvents() {
       onComposerStarredEntriesChanged((entries) => {
         if (cancelled) return;
         useSettingsStore.getState().setTerminal({ composerStarredEntries: entries });
+      }),
+    );
+
+    trackListener(
+      onTerminalDisplayCleared(function applyClear(data): void {
+        if (deferGeneration(data.terminalId, data.generation, () => applyClear(data))) return;
+        applyRemoteInputClear(data);
       }),
     );
 

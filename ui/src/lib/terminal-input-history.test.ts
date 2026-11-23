@@ -2,6 +2,7 @@ import { beforeEach, expect, it } from "vitest";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { selectTerminalLastInput } from "./terminal-last-input";
 import {
+  applyRemoteInputClear,
   captureInputHistoryScope,
   clearTerminalInputHistory,
   recordTerminalInput,
@@ -39,6 +40,21 @@ it.each(["clear", " cls ", "Clear-Host", "/clear"])(
 it("records commands containing clear as ordinary text", () => {
   recordTerminalInput("t", "echo clear");
   expect(selectTerminalLastInput(current())).toBe("echo clear");
+});
+
+it("applies a successful remote clear only to the current display history", () => {
+  const event = { terminalId: "t", generation: 1, submittedAt: 20, discardDraft: true };
+  applyRemoteInputClear({ ...event, generation: 2 });
+  applyRemoteInputClear({ ...event, submittedAt: 9 });
+  expect(selectTerminalLastInput(current())).toBe("old command");
+
+  applyRemoteInputClear(event);
+  expect(selectTerminalLastInput(current())).toBeUndefined();
+  expect(current().inputDraftResetRevision).toBe(1);
+
+  recordTerminalInput("t", "new input");
+  applyRemoteInputClear({ ...event, submittedAt: current().lastUserInputAt! - 1 });
+  expect(selectTerminalLastInput(current())).toBe("new input");
 });
 
 it("rejects a late write completion from before clear or generation replacement", () => {

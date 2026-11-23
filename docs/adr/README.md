@@ -410,6 +410,7 @@ ADR 이 필요한 대표 기준:
 | [0384](0384-desktop-osc52-clipboard-write.md) | Windows 터미널의 OSC 52 클립보드 쓰기는 사용자가 허용한다 | Superseded by [0386](0386-osc52-clipboard-write-default-on.md) |
 | [0385](0385-terminal-path-link-foreground-boundaries.md) | PC와 Remote의 터미널 경로 링크는 셀 전경색 경계를 후보 추출에 사용한다 | Accepted |
 | [0386](0386-osc52-clipboard-write-default-on.md) | Windows 터미널의 OSC 52 클립보드 쓰기는 기본으로 허용한다 | Accepted |
+| [0387](0387-remote-direct-clear-display-history.md) | Remote 직접 입력의 clear가 마지막 입력 표시를 초기화한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

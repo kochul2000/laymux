@@ -1,5 +1,6 @@
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { normalizeSubmittedInput } from "./terminal-last-input";
+import type { TerminalDisplayClearedEvent } from "./tauri-api";
 
 export type InputHistoryScope = Pick<
   TerminalInstance,
@@ -66,6 +67,24 @@ export function clearTerminalInputHistory(
       (current.lastCommandAt ?? 0) + 1,
     ),
   });
+}
+
+export function applyRemoteInputClear(event: TerminalDisplayClearedEvent): void {
+  const current = captureInputHistoryScope(event.terminalId);
+  if (
+    !current ||
+    current.generation !== event.generation ||
+    event.submittedAt <=
+      Math.max(
+        current.lastInputClearedAt ?? 0,
+        current.lastInputSubmissionAt ?? 0,
+        current.lastUserInputAt ?? 0,
+        current.lastCommandAt ?? 0,
+      )
+  ) {
+    return;
+  }
+  clearTerminalInputHistory(event.terminalId, current, { discardDraft: event.discardDraft });
 }
 
 /** An Enter intent alone is not display text or task evidence. */
