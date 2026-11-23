@@ -1322,6 +1322,8 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `move_pane_to_workspace` | bridge_request | 컨트롤 바 → 워크스페이스 — 슬롯 통째를 다른 워크스페이스로 이동 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
+MCP `split_pane`·`stack_pane`과 대응하는 REST 요청은 숨김 터미널 회수 중 최대 10초 동안 승인을 기다린다. 승인 뒤 한 번 전달하며, 그때부터 프런트엔드 응답 기한 5초가 적용된다. 승인 대기 만료, 앱 종료·업데이트를 위한 finalization, 발행 전 MCP 요청 취소 시 pane을 생성하지 않는다. [ADR-0388](../adr/0388-pane-creation-waits-for-hidden-eviction.md)
+
 **화면과 독립적인 대상 지정 ([ADR-0350](../adr/0350-automation-targets-background-workspaces.md))**
 
 `split_pane`·`stack_pane`·`remove_pane`·`resize_pane`·dev의 `set_pane_view`는 `pane_id` 또는 `workspace_id` + `pane_index`를 받는다. `pane_id`는 슬롯 ID 또는 해당 슬롯의 레이어 ID이며 슬롯을 지정한다. 삭제할 특정 레이어는 기존 `layer_id`로 지정한다. 인덱스는 0부터 시작하며 공간 번호(`pane_number`)와 다르다. ID가 있으면 전역에서 소유 workspace를 찾고, 함께 준 workspace·인덱스는 반드시 같은 대상을 가리켜야 한다. 명시한 알 수 없는 workspace·ID·음수·소수·범위 밖 인덱스는 활성 workspace로 fallback하지 않는다. 지속 작업은 ID나 workspace를 명시한다.
@@ -2289,6 +2291,8 @@ activity bulk snapshot은 `terminals → output_buffers → per-ring → known a
 checkpoint runtime의 terminal permit·eviction guard `Drop`도 discard-only cleanup으로 승인 카운트 제거와 대상 집합 해제만 수행한다([ADR-0231](../adr/0231-hidden-eviction-target-scoped-input-admission.md)). poison은 유지하여 후속 admission은 계속 실패한다. admission mutex를 보유한 채 다른 AppState 락을 획득하지 않는다.
 
 Frontend bridge action은 `session_checkpoint/mutation.rs`가 요청 ID별 종류와 진행 수를 소유한다([ADR-0365](../adr/0365-navigation-admission-during-hidden-eviction.md)). `terminals.setFocus`, `workspaces.switchActive`, `grid.focusPane`, `navigation.spatialStep/directionStep/notificationStep`, `notifications.markRead/markTerminalRead`는 숨김 회수와 독립적으로 승인하는 탐색이다. 그 외 action은 기존 generic admission을 사용한다. 회수 drain은 탐색을 기다리지 않지만 업데이트 drain은 두 종류를 모두 기다리며 신규 요청을 거부한다. HTTP timeout만으로 진행 수를 해제하지 않고 늦은 `automation_response`도 해당 ID를 한 번만 해제한다. 탐색으로 회수 대상이 활성화되면 ACK 직전 적격성 검사 또는 close 후 즉시 remount 경로가 처리하며, PTY 입력·생성·종료 보호와 Remote lease는 유지한다.
+
+`panes.split`·`panes.stack`은 회수가 끝나면 같은 요청 ID로 승인을 다시 시도한다. 대기 요청은 회수가 기다리는 진행 수에 포함하지 않는다. 창 닫기 확정과 전역 finalization 시작은 발행 전 요청을 깨워 거절한다. 종료 시도가 취소돼도 기존 요청은 되살아나지 않는다. 발행 직전까지 도착한 MCP 취소나 종료는 응답 채널과 변경 등록을 함께 해제한다. [ADR-0388](../adr/0388-pane-creation-waits-for-hidden-eviction.md)
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 

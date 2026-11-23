@@ -10,6 +10,9 @@ use crate::lock_ext::MutexExt;
 use super::types::AutomationRequest;
 use super::ServerState;
 
+mod dispatch;
+pub(crate) use dispatch::{admit_bridge_mutation, bridge_interruption};
+
 /// How long a bridge request waits for the frontend to answer.
 ///
 /// This is the ceiling every async bridge handler shares, including the waits a
@@ -34,36 +37,6 @@ async fn wait_for_frontend_response_until<T>(
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
 
-pub(crate) fn admit_bridge_mutation(
-    runtime: &crate::session_checkpoint::SessionCheckpointRuntime,
-    request_id: &str,
-    category: &str,
-    target: &str,
-    method: &str,
-) -> Result<bool, String> {
-    if category != "action" {
-        return Ok(false);
-    }
-    // Exact allowlist: future structural/write actions keep the session fence.
-    // Navigation is still tracked for updater drain through its frontend ACK.
-    if matches!(
-        (target, method),
-        ("terminals", "setFocus")
-            | ("workspaces", "switchActive")
-            | ("grid", "focusPane")
-            | (
-                "navigation",
-                "spatialStep" | "directionStep" | "notificationStep"
-            )
-            | ("notifications", "markRead" | "markTerminalRead")
-    ) {
-        runtime.begin_detached_navigation(request_id)?;
-    } else {
-        runtime.begin_detached_mutation(request_id)?;
-    }
-    Ok(true)
-}
-
 /// Send a request to the frontend via Tauri event and wait for the response.
 pub async fn bridge_request(
     state: &ServerState,
@@ -72,14 +45,37 @@ pub async fn bridge_request(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
+    bridge_request_with_cancel(
+        state,
+        category,
+        target,
+        method,
+        params,
+        std::future::pending(),
+    )
+    .await
+}
+
+pub(super) async fn bridge_request_with_cancel(
+    state: &ServerState,
+    category: &str,
+    target: &str,
+    method: &str,
+    params: serde_json::Value,
+    cancelled: impl std::future::Future<Output = ()>,
+) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
     let request_id = uuid::Uuid::new_v4().to_string();
+    let interrupted = bridge_interruption(&state.app_state, category, target, method, cancelled);
+    tokio::pin!(interrupted);
     let tracks_mutation = admit_bridge_mutation(
         &state.app_state.session_checkpoint,
         &request_id,
         category,
         target,
         method,
+        interrupted.as_mut(),
     )
+    .await
     .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -125,24 +121,13 @@ pub async fn bridge_request(
         deadline_ms: emitted_at_ms.saturating_add(FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64),
     };
 
-    if let Err(error) = state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request) {
-        // The action was never delivered, so both wait registrations can be
-        // retired immediately. Delivered actions stay admitted until their
-        // frontend response even when this HTTP waiter times out.
-        if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
-            channels.remove(&request_id);
-        }
-        if tracks_mutation {
-            let _ = state
-                .app_state
-                .session_checkpoint
-                .finish_detached_mutation(&request_id);
-        }
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(err_json(&format!("Event emit error: {error}"))),
-        ));
-    }
+    dispatch::emit_admitted_request(
+        &state.app_state,
+        &request_id,
+        tracks_mutation,
+        interrupted,
+        || state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request),
+    )?;
     state.app_state.frontend_health.note_request_emitted();
 
     // Wait only through the absolute deadline captured before emit. Starting a

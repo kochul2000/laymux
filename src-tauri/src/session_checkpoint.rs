@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
@@ -62,6 +63,8 @@ pub struct SessionCheckpointRuntime {
     finalizing: AtomicBool,
     close_checkpoint_committed: AtomicBool,
     eviction: Mutex<eviction::EvictionAdmission>,
+    admission_changed: tokio::sync::Notify,
+    pub(crate) pane_creation_stopped: tokio::sync::Notify,
     active_mutations: AtomicUsize,
     active_navigation: AtomicUsize,
     detached_mutations: Mutex<HashMap<String, DetachedMutationKind>>,
@@ -85,6 +88,8 @@ impl Default for SessionCheckpointRuntime {
             finalizing: AtomicBool::new(false),
             close_checkpoint_committed: AtomicBool::new(false),
             eviction: Mutex::new(eviction::EvictionAdmission::default()),
+            admission_changed: tokio::sync::Notify::new(),
+            pane_creation_stopped: tokio::sync::Notify::new(),
             active_mutations: AtomicUsize::new(0),
             active_navigation: AtomicUsize::new(0),
             detached_mutations: Mutex::new(HashMap::new()),
@@ -122,10 +127,14 @@ impl SessionCheckpointRuntime {
         Ok(self.pending.lock_or_err()?.contains_key(&request_id))
     }
     pub fn ensure_mutations_allowed(&self) -> Result<(), String> {
-        if self.finalizing.load(Ordering::Acquire) {
-            Err("destructive session finalization is in progress".into())
+        self.check_mutation_admission().map_err(Into::into)
+    }
+
+    fn check_mutation_admission(&self) -> Result<(), AppError> {
+        if self.is_finalizing() {
+            Err(AppError::SessionFinalizing)
         } else if !self.eviction.lock_or_err()?.targets.is_empty() {
-            Err("hidden terminal eviction is in progress".into())
+            Err(AppError::HiddenTerminalEviction)
         } else {
             Ok(())
         }
@@ -134,8 +143,9 @@ impl SessionCheckpointRuntime {
     fn begin_finalization(&self) -> Result<(), String> {
         self.finalizing
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map(|_| ())
-            .map_err(|_| "destructive session finalization is already in progress".into())
+            .map_err(|_| "destructive session finalization is already in progress")?;
+        self.pane_creation_stopped.notify_waiters();
+        Ok(())
     }
 
     #[cfg(test)]
