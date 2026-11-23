@@ -45,6 +45,7 @@ describe("실제 xterm 입력창 clear 판독", () => {
   it.each([
     ["48열", 48, narrowStatus, shortcuts],
     ["95열", 95, wideStatus, shortcuts],
+    ["95열 브랜치 우선", 95, "  main · GPT-6.2-Astra max · Ask for approval", shortcuts],
     ["48열 경고", 48, narrowStatus, "  ← for agents         ⚠ 1 warning · f2 to view"],
     ["58열 경고", 58, wideStatus, shortcuts + " ⚠ 1 warning · f2 to view"],
     ["95열 경고", 95, wideStatus, shortcuts.padEnd(70) + "⚠ 1 warning · f2 to view"],
@@ -73,6 +74,8 @@ describe("실제 xterm 입력창 clear 판독", () => {
       );
       expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
       await surface.write(`\x1b[H\x1b[2J›\r\n\r\n  Context in a draft\r\n${hint}`);
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(`\x1b[H\x1b[2J›\r\n\r\n  main · my GPT-6 notes\r\n${hint}`);
       expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
       await surface.write(`\x1b[H\x1b[2J›\r\n\r\n${status}\r\n${hint} in my draft`);
       expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
