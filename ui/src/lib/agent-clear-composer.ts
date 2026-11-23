@@ -4,7 +4,7 @@ type Provider = "Claude" | "Codex" | "Grok";
 const POLL_MS = 60;
 const MAX_ROUNDS = 32;
 const CODEX_STATUS_ROW = /^\s{2,}(?:gpt-\d\S*(?:\s|$)|(?:.* · )?(?:Context )?\d+% left\b)/i;
-const CODEX_SHORTCUT_HINT = /^\s{2,}(?:← for agents\s*·\s*)?\? for shortcuts$/i;
+const CODEX_SHORTCUT_HINT = /^\s{2,}(?:← for agents\s*·\s*)?\? for shortcuts(?:\s+⚠.*)?$/i;
 const pending = new Set<string>();
 
 /** Only the current viewport may authorize a destructive slash command. */

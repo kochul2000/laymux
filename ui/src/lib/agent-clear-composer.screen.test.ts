@@ -39,14 +39,19 @@ describe("실제 xterm 입력창 clear 판독", () => {
     }
   });
 
+  const narrowStatus = "  GPT-6.2-Astra max · Context 94% left · Ask fo…";
+  const wideStatus = "  GPT-6.2-Astra max · Context 94% left · Ask for approval";
+  const shortcuts = "  ← for agents · ? for shortcuts";
   it.each([
-    [48, "  GPT-6.2-Astra max · Context 94% left · Ask fo…"],
-    [95, "  GPT-6.2-Astra max · Context 94% left · Ask for approval"],
+    ["48열", 48, narrowStatus, shortcuts],
+    ["95열", 95, wideStatus, shortcuts],
+    ["48열 경고", 48, narrowStatus, "  ← for agents         ⚠ 1 warning · f2 to view"],
+    ["58열 경고", 58, wideStatus, shortcuts + " ⚠ 1 warning · f2 to view"],
+    ["95열 경고", 95, wideStatus, shortcuts.padEnd(70) + "⚠ 1 warning · f2 to view"],
   ] as const)(
-    "Codex %i열에서 초안을 지워 두 줄 상태 표시가 나타나면 빈 입력창이다",
-    async (cols, status) => {
+    "Codex %s 화면에서 초안을 지워 두 줄 상태 표시가 나타나면 빈 입력창이다",
+    async (_name, cols, status, hint) => {
       const surface = createScreenTerminal({ cols, rows: 12 });
-      const hint = "  ← for agents · ? for shortcuts";
       try {
         await surface.write(`› LAYMUX-DIAG-X\r\n\r\n${status}`);
         expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
@@ -68,6 +73,8 @@ describe("실제 xterm 입력창 clear 판독", () => {
       );
       expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
       await surface.write(`\x1b[H\x1b[2J›\r\n\r\n  Context in a draft\r\n${hint}`);
+      expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
+      await surface.write(`\x1b[H\x1b[2J›\r\n\r\n${status}\r\n${hint} in my draft`);
       expect(agentClearComposer(dump(surface.terminal), "Codex")).toBe("draft");
       await surface.write(
         `\x1b[H\x1b[2J›\r\n\r\n${status}\r\n${hint}\r\n  아직 남은 초안\r\n\r\n  main`,
