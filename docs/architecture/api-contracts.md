@@ -1322,7 +1322,7 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `move_pane_to_workspace` | bridge_request | 컨트롤 바 → 워크스페이스 — 슬롯 통째를 다른 워크스페이스로 이동 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
-MCP `split_pane`·`stack_pane`과 대응하는 REST 요청은 숨김 터미널 회수 중 최대 45초 동안 승인을 기다린다. 승인 뒤 한 번 전달하며, 그때부터 프런트엔드 응답 기한 5초가 적용된다. 승인 대기 만료, 앱 종료·업데이트를 위한 finalization, 발행 전 MCP 요청 취소 시 pane을 생성하지 않는다. [ADR-0388](../adr/0388-pane-creation-waits-for-hidden-eviction.md)
+MCP `split_pane`·`stack_pane`과 대응하는 REST 요청은 숨김 터미널 회수 중 최대 10초 동안 승인을 기다린다. 승인 뒤 한 번 전달하며, 그때부터 프런트엔드 응답 기한 5초가 적용된다. 승인 대기 만료, 앱 종료·업데이트를 위한 finalization, 발행 전 MCP 요청 취소 시 pane을 생성하지 않는다. [ADR-0388](../adr/0388-pane-creation-waits-for-hidden-eviction.md)
 
 **화면과 독립적인 대상 지정 ([ADR-0350](../adr/0350-automation-targets-background-workspaces.md))**
 

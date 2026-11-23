@@ -42,18 +42,23 @@ impl SessionCheckpointRuntime {
         request_id: &str,
         wait_budget: Duration,
     ) -> Result<(), String> {
-        tokio::time::timeout(wait_budget, async {
-            loop {
-                // 승인 시도 전에 구독해야 검사 도중 끝난 회수의 알림도 받는다.
-                let changed = self.admission_changed.notified();
-                match self.begin_detached(request_id, DetachedMutationKind::Session) {
-                    Err(AppError::HiddenTerminalEviction) => changed.await,
-                    result => return result.map_err(String::from),
-                }
+        let deadline = tokio::time::sleep(wait_budget);
+        tokio::pin!(deadline);
+        loop {
+            // 승인 시도 전에 구독해야 검사 도중 끝난 회수의 알림도 받는다.
+            let changed = self.admission_changed.notified();
+            match self.begin_detached(request_id, DetachedMutationKind::Session) {
+                Err(AppError::HiddenTerminalEviction) => tokio::select! {
+                    biased;
+                    // 회수 해제와 기한 만료를 함께 관측하면 새 pane을 만들지 않는다.
+                    _ = &mut deadline => {
+                        return Err("timed out waiting for hidden terminal eviction before pane creation".into());
+                    }
+                    _ = changed => {}
+                },
+                result => return result.map_err(String::from),
             }
-        })
-        .await
-        .map_err(|_| "timed out waiting for hidden terminal eviction before pane creation")?
+        }
     }
 
     fn begin_detached(&self, request_id: &str, kind: DetachedMutationKind) -> Result<(), AppError> {

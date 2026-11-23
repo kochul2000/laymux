@@ -103,20 +103,47 @@ async fn cancelled_pane_creation_is_not_dispatched_when_eviction_ends() {
     assert!(!runtime.finish_detached_mutation("cancelled").unwrap());
 }
 
-#[tokio::test]
-async fn expired_pane_creation_does_not_register_a_late_action() {
+#[tokio::test(start_paused = true)]
+async fn pane_creation_expires_after_ten_seconds_without_registering_a_late_action() {
     let state = AppState::new();
     let runtime = &state.session_checkpoint;
     let eviction = runtime
         .begin_eviction_and_drain(&state, &["hidden".into()])
         .await
         .unwrap();
-    let error = runtime
-        .begin_pane_creation_after_eviction("expired", Duration::ZERO)
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut split = std::pin::pin!(admit_bridge_mutation(
+        runtime,
+        "split-at-deadline",
+        "action",
+        "panes",
+        "split",
+        pending()
+    ));
+    assert!(futures_util::poll!(&mut split).is_pending());
+    let mut create = std::pin::pin!(admit_bridge_mutation(
+        runtime,
+        "expired",
+        "action",
+        "panes",
+        "stack",
+        pending()
+    ));
+    assert!(
+        tokio::time::timeout_at(deadline - Duration::from_millis(1), &mut create)
+            .await
+            .is_err()
+    );
+    let error = tokio::time::timeout_at(deadline, create)
         .await
+        .expect("10초가 지나면 pane 생성 승인 대기가 끝나야 한다")
         .unwrap_err();
     assert!(error.contains("timed out"), "{error}");
     drop(eviction);
+    assert!(split.await.unwrap_err().contains("timed out"));
+    assert!(!runtime
+        .finish_detached_mutation("split-at-deadline")
+        .unwrap());
     assert!(!runtime.finish_detached_mutation("expired").unwrap());
     assert!(runtime.begin_detached_mutation("expired").is_ok());
     assert!(runtime.finish_detached_mutation("expired").unwrap());

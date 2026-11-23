@@ -17,8 +17,8 @@ use super::ServerState;
 /// `LONGEST_HANDLER_WAIT` + render slack turns slow-but-successful handlers into
 /// `504 Frontend response timeout`.
 const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
-// 회수의 drain(최대 16초), checkpoint(최대 20초), PTY 종료를 기다리는 발행 전 예산.
-const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(45);
+// 승인 대기와 전달 후 응답을 합친 예산은 최대 15초다 (ADR-0388).
+const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn wait_for_frontend_response_until<T>(
     deadline: tokio::time::Instant,
