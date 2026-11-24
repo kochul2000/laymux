@@ -14,16 +14,8 @@ pub struct TerminalMutationPermit<'a> {
 
 impl Drop for TerminalMutationPermit<'_> {
     fn drop(&mut self) {
-        let mut admission = self
-            .runtime
-            .eviction
-            .lock_or_recover_for_discard("releasing terminal mutation");
-        if let Some(count) = admission.active.get_mut(&self.terminal_id) {
-            *count -= 1;
-            if *count == 0 {
-                admission.active.remove(&self.terminal_id);
-            }
-        }
+        self.runtime
+            .release_terminal_mutations(std::iter::once(self.terminal_id.as_str()));
     }
 }
 
@@ -46,18 +38,55 @@ impl SessionCheckpointRuntime {
         &self,
         terminal_id: &str,
     ) -> Result<TerminalMutationPermit<'_>, String> {
-        let mut admission = self.eviction.lock_or_err()?;
-        if self.finalizing.load(Ordering::Acquire) {
-            return Err(AppError::SessionFinalizing.into());
-        }
-        if admission.targets.contains(terminal_id) {
-            return Err(AppError::HiddenTerminalEviction.into());
-        }
-        *admission.active.entry(terminal_id.to_owned()).or_default() += 1;
+        self.acquire_terminal_mutations(std::iter::once(terminal_id))?;
         Ok(TerminalMutationPermit {
             runtime: self,
             terminal_id: terminal_id.to_owned(),
         })
+    }
+
+    pub(super) fn acquire_terminal_mutations<'a>(
+        &self,
+        ids: impl Iterator<Item = &'a str> + Clone,
+    ) -> Result<(), AppError> {
+        let mut admission = self.eviction.lock_or_err()?;
+        if self.is_finalizing() {
+            return Err(AppError::SessionFinalizing);
+        }
+        if ids.clone().any(|id| admission.targets.contains(id)) {
+            return Err(AppError::HiddenTerminalEviction);
+        }
+        for id in ids {
+            *admission.active.entry(id.to_owned()).or_default() += 1;
+        }
+        Ok(())
+    }
+
+    pub(super) fn release_terminal_mutations<'a>(&self, ids: impl Iterator<Item = &'a str>) {
+        let mut admission = self
+            .eviction
+            .lock_or_recover_for_discard("releasing terminal mutation");
+        for id in ids {
+            if let Some(count) = admission.active.get_mut(id) {
+                *count -= 1;
+                if *count == 0 {
+                    admission.active.remove(id);
+                }
+            }
+        }
+    }
+
+    /// PTY startup can outlive its frontend caller, so it takes its own permit.
+    pub(crate) async fn begin_terminal_creation(
+        &self,
+        terminal_id: &str,
+    ) -> TerminalMutationPermit<'_> {
+        loop {
+            if let Ok(permit) = self.begin_terminal_mutation(terminal_id) {
+                return permit;
+            }
+            tokio::time::sleep(FINALIZATION_DRAIN_POLL).await;
+        }
     }
 
     pub(super) fn terminal_mutations_drained(&self) -> Result<bool, String> {

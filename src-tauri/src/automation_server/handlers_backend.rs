@@ -575,7 +575,10 @@ pub async fn terminal_write(
 
     match write_terminal_direct_from_state(&state.app_state, &id, body.data.as_bytes()) {
         Ok(()) => (StatusCode::OK, Json(ok_json("written"))),
-        Err(error) if error.contains("finalization") => {
+        Err(error)
+            if error.contains("finalization")
+                || error == crate::error::AppError::HiddenTerminalEviction.to_string() =>
+        {
             (StatusCode::CONFLICT, Json(err_json(&error)))
         }
         Err(error) if error.contains("not found") => {
@@ -593,10 +596,14 @@ fn write_terminal_direct_from_state(
     // If finalization started while a missing pane was prepared, admission at
     // this last side-effect boundary rejects the write. Once admitted, drain
     // waits until the PTY call returns.
-    let _mutation = state.session_checkpoint.begin_mutation()?;
-    let ptys = state.pty_handles.lock_or_err()?;
-    let handle = ptys
+    let _mutation = state
+        .session_checkpoint
+        .begin_terminal_mutation(terminal_id)?;
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
         .get(terminal_id)
+        .cloned()
         .ok_or_else(|| format!("Terminal '{terminal_id}' not found"))?;
     handle.write(data)
 }
@@ -784,6 +791,51 @@ pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
 mod tests {
     use super::*;
     use crate::automation_server::types::REGISTERED_ROUTES;
+
+    #[test]
+    fn direct_terminal_write_does_not_hold_the_pty_registry_while_writing() {
+        use std::sync::mpsc::{channel, Receiver, Sender};
+        use std::time::Duration;
+
+        struct PausedWriter {
+            started: Sender<()>,
+            resume: Receiver<()>,
+        }
+        impl std::io::Write for PausedWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.started.send(()).unwrap();
+                self.resume.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let state = crate::state::AppState::new();
+        let (started, writing) = channel();
+        let (resume, paused) = channel();
+        state.pty_handles.lock().unwrap().insert(
+            "terminal-1".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(PausedWriter {
+                started,
+                resume: paused,
+            })),
+        );
+        std::thread::scope(|scope| {
+            let writer =
+                scope.spawn(|| write_terminal_direct_from_state(&state, "terminal-1", b"hello"));
+            writing.recv_timeout(Duration::from_secs(2)).unwrap();
+            let registry_available = state.pty_handles.try_lock().is_ok();
+            resume.send(()).unwrap();
+            writer.join().unwrap().unwrap();
+            assert!(
+                registry_available,
+                "direct PTY write blocked unrelated registry access"
+            );
+        });
+    }
 
     #[test]
     fn direct_terminal_write_is_rejected_after_update_finalization_fence() {

@@ -7,10 +7,12 @@ use tauri::Emitter;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 
-use super::types::AutomationRequest;
+use super::types::{AutomationRequest, PaneCreationTarget};
 use super::ServerState;
 
 mod dispatch;
+#[cfg(test)]
+pub(crate) use dispatch::PANE_CREATION_ADMISSION_TIMEOUT;
 pub(crate) use dispatch::{admit_bridge_mutation, bridge_interruption};
 
 /// How long a bridge request waits for the frontend to answer.
@@ -64,19 +66,55 @@ pub(super) async fn bridge_request_with_cancel(
     params: serde_json::Value,
     cancelled: impl std::future::Future<Output = ()>,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
-    let request_id = uuid::Uuid::new_v4().to_string();
     let interrupted = bridge_interruption(&state.app_state, category, target, method, cancelled);
     tokio::pin!(interrupted);
+    let mut budget = dispatch::BridgeBudget::new(FRONTEND_RESPONSE_TIMEOUT);
+    if dispatch::is_pane_creation(category, target, method) {
+        return dispatch::create_pane(state, method, params, interrupted, &mut budget).await;
+    }
+    bridge_request_once(
+        state,
+        (category, target, method),
+        params,
+        None,
+        interrupted,
+        &mut budget,
+    )
+    .await
+}
+
+async fn bridge_request_once(
+    state: &ServerState,
+    (category, target, method): (&str, &str, &str),
+    params: serde_json::Value,
+    pane_creation_target: Option<PaneCreationTarget>,
+    mut interrupted: std::pin::Pin<&mut impl std::future::Future<Output = crate::error::AppError>>,
+    budget: &mut dispatch::BridgeBudget,
+) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
+    use tokio::time::Instant;
+    if budget.frontend.is_zero() {
+        return Err((
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(err_json("Frontend response timeout")),
+        ));
+    }
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let admission_start = Instant::now();
     let tracks_mutation = admit_bridge_mutation(
         &state.app_state.session_checkpoint,
         &request_id,
-        category,
-        target,
-        method,
+        (category, target, method),
+        pane_creation_target
+            .as_ref()
+            .map(|scope| (scope.terminal_ids.as_slice(), budget.admission)),
+        params.get("id").and_then(serde_json::Value::as_str),
         interrupted.as_mut(),
     )
     .await
     .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
+    if category == "action" && pane_creation_target.is_some() {
+        budget.admission = budget.admission.saturating_sub(admission_start.elapsed());
+    }
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -109,7 +147,8 @@ pub(super) async fn bridge_request_with_cancel(
     // controls Rust's waiter. Capture both before emit so time spent emitting or
     // queued for delivery consumes the same one-shot budget instead of starting
     // a second five-second window afterwards.
-    let response_deadline = tokio::time::Instant::now() + FRONTEND_RESPONSE_TIMEOUT;
+    let response_start = Instant::now();
+    let response_deadline = response_start + budget.frontend;
     let emitted_at_ms = crate::frontend_health::epoch_millis();
     let request = AutomationRequest {
         request_id: request_id.clone(),
@@ -117,22 +156,32 @@ pub(super) async fn bridge_request_with_cancel(
         target: target.into(),
         method: method.into(),
         params,
+        pane_creation_target,
         emitted_at_ms,
-        deadline_ms: emitted_at_ms.saturating_add(FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64),
+        deadline_ms: emitted_at_ms.saturating_add(budget.frontend.as_millis() as u64),
     };
 
     dispatch::emit_admitted_request(
         &state.app_state,
         &request_id,
         tracks_mutation,
-        interrupted,
+        interrupted.as_mut(),
         || state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request),
     )?;
     state.app_state.frontend_health.note_request_emitted();
 
     // Wait only through the absolute deadline captured before emit. Starting a
     // fresh relative timeout here would make `deadlineMs` lie to the frontend.
-    match wait_for_frontend_response_until(response_deadline, rx).await {
+    let response = dispatch::wait_for_response(
+        &state.app_state,
+        &request_id,
+        category,
+        interrupted,
+        wait_for_frontend_response_until(response_deadline, rx),
+    )
+    .await?;
+    budget.frontend = budget.frontend.saturating_sub(response_start.elapsed());
+    match response {
         Ok(Ok(data)) => Ok(data),
         Ok(Err(_)) => {
             // Channel dropped without response — clean up orphaned entry

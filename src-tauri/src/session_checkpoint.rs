@@ -25,6 +25,8 @@ pub(crate) mod update;
 pub use eviction::TerminalMutationPermit;
 #[cfg(test)]
 mod eviction_tests;
+#[cfg(test)]
+mod pane_creation_tests;
 
 pub const EVENT_SESSION_CHECKPOINT_REQUESTED: &str = "session-checkpoint-requested";
 const CHECKPOINT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,7 +68,7 @@ pub struct SessionCheckpointRuntime {
     admission_changed: tokio::sync::Notify,
     pub(crate) pane_creation_stopped: tokio::sync::Notify,
     active_mutations: AtomicUsize,
-    active_navigation: AtomicUsize,
+    active_non_global_bridge_actions: AtomicUsize,
     detached_mutations: Mutex<HashMap<String, DetachedMutationKind>>,
     retired_pty_completions: Mutex<Vec<crate::pty_control::PtyControlCompletion>>,
 }
@@ -91,7 +93,7 @@ impl Default for SessionCheckpointRuntime {
             admission_changed: tokio::sync::Notify::new(),
             pane_creation_stopped: tokio::sync::Notify::new(),
             active_mutations: AtomicUsize::new(0),
-            active_navigation: AtomicUsize::new(0),
+            active_non_global_bridge_actions: AtomicUsize::new(0),
             detached_mutations: Mutex::new(HashMap::new()),
             retired_pty_completions: Mutex::new(Vec::new()),
         }
@@ -205,7 +207,10 @@ impl SessionCheckpointRuntime {
         let drained = tokio::time::timeout(FINALIZATION_DRAIN_TIMEOUT, async {
             loop {
                 let local_drained = self.active_mutations.load(Ordering::Acquire) == 0
-                    && self.active_navigation.load(Ordering::Acquire) == 0
+                    && self
+                        .active_non_global_bridge_actions
+                        .load(Ordering::Acquire)
+                        == 0
                     && self.terminal_mutations_drained()?;
                 let terminal_drained =
                     crate::remote_server::human_control_operations_drained(state)?;

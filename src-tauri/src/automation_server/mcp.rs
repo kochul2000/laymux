@@ -902,7 +902,7 @@ impl McpHandler {
     ) -> Result<WriteOutcome, CallToolResult> {
         let _mutation = app_state
             .session_checkpoint
-            .begin_mutation()
+            .begin_terminal_mutation(terminal_id)
             .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?;
         // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
         let (activity, before_seq) =
@@ -1050,7 +1050,7 @@ impl McpHandler {
     ) -> Result<(u64, usize), CallToolResult> {
         let _mutation = app_state
             .session_checkpoint
-            .begin_mutation()
+            .begin_terminal_mutation(terminal_id)
             .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?;
         let before_seq = {
             let buffers = app_state
