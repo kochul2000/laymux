@@ -2292,7 +2292,7 @@ checkpoint runtime의 terminal permit·eviction guard `Drop`도 discard-only cle
 
 Frontend bridge action은 `session_checkpoint/mutation.rs`가 요청 ID별 종류와 진행 수를 소유한다([ADR-0365](../adr/0365-navigation-admission-during-hidden-eviction.md)). `terminals.setFocus`, `workspaces.switchActive`, `grid.focusPane`, `navigation.spatialStep/directionStep/notificationStep`, `notifications.markRead/markTerminalRead`는 숨김 회수와 독립적으로 승인하는 탐색이다. 분할·스택과 개별 터미널 입력 준비에는 대상별 승인을 쓰고, 나머지 action에는 generic admission을 사용한다. 회수 drain은 기존 generic 변경과 대상에 겹치는 작업을 기다린다. 업데이트 drain은 모든 종류를 기다리며 신규 요청을 거부한다. HTTP timeout만으로 진행 수를 해제하지 않고 늦은 `automation_response`도 해당 ID를 한 번만 해제한다. 탐색으로 회수 대상이 활성화되면 ACK 직전 적격성 검사 또는 close 후 즉시 remount 경로가 처리하며, PTY 입력·생성·종료 보호와 Remote lease는 유지한다.
 
-`panes.split`·`panes.stack`은 프런트엔드에서 원본 슬롯과 소속 터미널 ID를 확인한 뒤 해당 ID들을 함께 승인한다. 실행 직전에 슬롯과 ID 집합을 재확인하고, 달라졌으면 레이아웃을 바꾸기 전에 같은 슬롯의 범위를 다시 조회한다. 대기 요청은 회수 drain에 포함하지 않으며, 승인된 요청은 성공·실패 응답을 받을 때까지 추적한다. 창 닫기와 전역 finalization 시작은 발행 전 요청을 깨워 거절한다. 발행 직전의 취소나 종료는 응답 채널과 변경 등록을 함께 해제한다. [ADR-0389](../adr/0389-scope-pane-creation-to-eviction-targets.md)
+`panes.split`·`panes.stack`은 프런트엔드에서 원본 슬롯과 소속 터미널 ID를 확인한 뒤 해당 ID들을 함께 승인한다. 실행 직전에 워크스페이스·슬롯 ID·위치·기존 레이어를 재확인한다. 원본을 확인할 수 없으면 거절한다. 같은 슬롯의 터미널 집합만 달라졌으면 레이아웃을 바꾸기 전에 범위를 다시 조회한다. 조회 도중 취소되면 읽기 응답 채널을 해제한다. 대기 요청은 회수 drain에 포함하지 않으며, 승인된 요청은 성공·실패 응답을 받을 때까지 추적한다. 창 닫기와 전역 finalization 시작은 발행 전 요청을 깨워 거절한다. 발행 직전의 취소나 종료는 응답 채널과 변경 등록을 함께 해제한다. [ADR-0389](../adr/0389-scope-pane-creation-to-eviction-targets.md)
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 

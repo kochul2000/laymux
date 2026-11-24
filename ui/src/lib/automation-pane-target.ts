@@ -13,11 +13,27 @@ export function paneCreationTarget(
   return {
     workspaceId: target.ws.id,
     slotId: target.pane.id,
+    layerIds: target.pane.layers.map((layer) => layer.id).sort(),
+    origin: [String(target.pane.x), String(target.pane.y)],
     terminalIds: target.pane.layers
       .filter((layer) => layer.view.type === "TerminalView")
       .map((layer) => toTerminalId(layer.id))
       .sort(),
   };
+}
+
+export function isOriginalPaneCreationTarget(
+  expected: PaneCreationTarget,
+  current: PaneCreationTarget,
+): boolean {
+  // The id-sharing layer can leave its slot and reuse the old id in a new slot.
+  return (
+    expected.workspaceId === current.workspaceId &&
+    expected.slotId === current.slotId &&
+    expected.origin[0] === current.origin[0] &&
+    expected.origin[1] === current.origin[1] &&
+    expected.layerIds.every((id) => current.layerIds.includes(id))
+  );
 }
 
 /** Resolve targets before mutation; explicit invalid targets never fall back to the UI. */

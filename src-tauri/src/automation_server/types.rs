@@ -27,6 +27,8 @@ pub struct AutomationRequest {
 pub struct PaneCreationTarget {
     pub workspace_id: String,
     pub slot_id: String,
+    pub layer_ids: Vec<String>,
+    pub origin: [String; 2],
     pub terminal_ids: Vec<String>,
 }
 

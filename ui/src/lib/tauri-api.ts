@@ -1849,6 +1849,8 @@ export async function sendOsNotification(title: string, body: string): Promise<v
 export interface PaneCreationTarget {
   workspaceId: string;
   slotId: string;
+  layerIds: string[];
+  origin: [string, string];
   terminalIds: string[];
 }
 

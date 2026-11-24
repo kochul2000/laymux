@@ -40,6 +40,7 @@ pub(super) async fn create_pane(
     mut interrupted: Pin<&mut impl Future<Output = AppError>>,
     budget: &mut BridgeBudget,
 ) -> Result<Value, (StatusCode, Json<Value>)> {
+    let mut original_target = None;
     loop {
         if let Some(reason) = interrupted.as_mut().now_or_never() {
             return Err((StatusCode::CONFLICT, Json(err_json(&reason.to_string()))));
@@ -48,8 +49,8 @@ pub(super) async fn create_pane(
             state,
             ("query", "panes", "resolveCreationTarget"),
             params.clone(),
-            None,
-            std::pin::pin!(std::future::pending()),
+            original_target.clone(),
+            interrupted.as_mut(),
             budget,
         )
         .await?;
@@ -62,6 +63,7 @@ pub(super) async fn create_pane(
                 Json(err_json("Invalid pane creation target from frontend")),
             )
         })?;
+        original_target.get_or_insert_with(|| scope.clone());
         // 이동한 인덱스나 활성 워크스페이스로 대상이 바뀌지 않게 슬롯 ID를 고정한다.
         let locator = params.as_object_mut().ok_or_else(|| {
             (
@@ -184,10 +186,82 @@ pub(super) fn emit_admitted_request(
     result
 }
 
+/// A query may be abandoned before its ACK. Delivered actions have side
+/// effects and keep their detached registration until the frontend replies.
+pub(super) async fn wait_for_response<T>(
+    state: &AppState,
+    request_id: &str,
+    category: &str,
+    interrupted: impl Future<Output = AppError>,
+    response: impl Future<Output = T>,
+) -> Result<T, (StatusCode, Json<Value>)> {
+    if category != "query" {
+        return Ok(response.await);
+    }
+    tokio::select! {
+        biased;
+        reason = interrupted => {
+            if let Ok(mut channels) = state.automation_channels.lock_or_err() {
+                channels.remove(request_id);
+            }
+            Err((StatusCode::CONFLICT, Json(err_json(&reason.to_string()))))
+        }
+        result = response => Ok(result),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[tokio::test]
+    async fn cancelling_a_pane_target_lookup_releases_only_its_query_channel() {
+        let state = AppState::new();
+        let (query_tx, query_rx) = tokio::sync::oneshot::channel();
+        let (action_tx, action_rx) = tokio::sync::oneshot::channel();
+        {
+            let mut channels = state.automation_channels.lock().unwrap();
+            channels.insert("query".into(), query_tx);
+            channels.insert("action".into(), action_tx);
+        }
+        let (cancel, signal) = tokio::sync::oneshot::channel();
+        let interrupted = bridge_interruption(&state, "action", "panes", "split", async {
+            signal.await.unwrap()
+        });
+        let mut lookup = std::pin::pin!(wait_for_response(
+            &state,
+            "query",
+            "query",
+            interrupted,
+            query_rx
+        ));
+        assert!(futures_util::poll!(&mut lookup).is_pending());
+        cancel.send(()).unwrap();
+        let (status, Json(error)) = lookup.await.unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["error"], "Pane creation cancelled before dispatch");
+        let action_reply = {
+            let mut channels = state.automation_channels.lock().unwrap();
+            assert!(!channels.contains_key("query"));
+            channels.remove("action").unwrap()
+        };
+        let result = Value::Bool(true);
+        action_reply.send(result.clone()).unwrap();
+        assert_eq!(
+            wait_for_response(
+                &state,
+                "action",
+                "action",
+                std::future::ready(AppError::PaneCreationCancelled),
+                action_rx
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+            result
+        );
+    }
 
     #[tokio::test]
     async fn cancellation_after_admission_retires_both_registrations_before_emit() {

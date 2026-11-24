@@ -4705,6 +4705,8 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(located.data).toEqual({
       workspaceId,
       slotId: slot.id,
+      layerIds: [slot.layers[0].id, hiddenLayerId].sort(),
+      origin: [String(slot.x), String(slot.y)],
       terminalIds: [`terminal-${slot.layers[0].id}`, `terminal-${hiddenLayerId}`].sort(),
     });
     store.stackPane(0, { type: "TerminalView" }, { activate: false });
@@ -4719,6 +4721,42 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(handleAutomationRequest(scopedRequest).data).toEqual({ retryPaneCreationTarget: true });
     expect(store.getActiveWorkspace()!.panes).toBe(before);
   });
+
+  it.each(["move", "extract"])(
+    "보호 중 원본 슬롯과 ID를 공유하던 레이어를 %s 하면 새 위치에 생성하지 않는다",
+    (change) => {
+      const store = useWorkspaceStore.getState();
+      store.splitPane(0, "vertical");
+      store.stackPane(0, { type: "TerminalView" }, { activate: false });
+      const { id: workspaceId, panes } = store.getActiveWorkspace()!;
+      const slotId = panes[0].id;
+      const request = {
+        requestId: "creation-target-reused",
+        category: "query",
+        target: "panes",
+        method: "resolveCreationTarget",
+        params: { paneId: slotId, workspaceId },
+        emittedAtMs: 0,
+        deadlineMs: 0,
+      };
+      const origin = handleAutomationRequest(request);
+      expect(origin.success).toBe(true);
+      if (change === "move") expect(store.moveLayer(slotId, panes[1].id)).toBe(true);
+      else expect(store.extractLayer(slotId, "horizontal")).toBe(slotId);
+      const before = store.getActiveWorkspace()!.panes;
+      const againstOrigin = {
+        ...request,
+        paneCreationTarget: origin.data as NonNullable<AutomationRequest["paneCreationTarget"]>,
+      };
+      expect(handleAutomationRequest(againstOrigin).error).toBe(
+        "Pane creation source slot changed",
+      );
+      expect(
+        handleAutomationRequest({ ...againstOrigin, category: "action", method: "stack" }).error,
+      ).toBe("Pane creation source slot changed");
+      expect(store.getActiveWorkspace()!.panes).toBe(before);
+    },
+  );
 
   it("closeById removes only the named stacked layer and clears its side state", () => {
     const added = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });

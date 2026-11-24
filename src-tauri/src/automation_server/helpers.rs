@@ -112,7 +112,7 @@ async fn bridge_request_once(
     )
     .await
     .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
-    if pane_creation_target.is_some() {
+    if category == "action" && pane_creation_target.is_some() {
         budget.admission = budget.admission.saturating_sub(admission_start.elapsed());
     }
 
@@ -165,14 +165,21 @@ async fn bridge_request_once(
         &state.app_state,
         &request_id,
         tracks_mutation,
-        interrupted,
+        interrupted.as_mut(),
         || state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request),
     )?;
     state.app_state.frontend_health.note_request_emitted();
 
     // Wait only through the absolute deadline captured before emit. Starting a
     // fresh relative timeout here would make `deadlineMs` lie to the frontend.
-    let response = wait_for_frontend_response_until(response_deadline, rx).await;
+    let response = dispatch::wait_for_response(
+        &state.app_state,
+        &request_id,
+        category,
+        interrupted,
+        wait_for_frontend_response_until(response_deadline, rx),
+    )
+    .await?;
     budget.frontend = budget.frontend.saturating_sub(response_start.elapsed());
     match response {
         Ok(Ok(data)) => Ok(data),
