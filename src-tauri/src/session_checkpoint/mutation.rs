@@ -1,31 +1,31 @@
 //! Delivered frontend actions stay tracked through late HTTP responses.
 use super::*;
 
-#[derive(Clone, Copy)]
 pub(super) enum DetachedMutationKind {
     Session,
     Navigation,
+    Terminals(Vec<String>),
 }
 
 impl SessionCheckpointRuntime {
-    fn mutation_counter(&self, kind: DetachedMutationKind) -> &AtomicUsize {
+    fn mutation_counter(&self, kind: &DetachedMutationKind) -> &AtomicUsize {
         match kind {
             DetachedMutationKind::Session => &self.active_mutations,
-            DetachedMutationKind::Navigation => &self.active_navigation,
+            DetachedMutationKind::Navigation | DetachedMutationKind::Terminals(_) => {
+                &self.active_non_global_bridge_actions
+            }
         }
     }
 
-    fn ensure_detached_allowed(&self, kind: DetachedMutationKind) -> Result<(), AppError> {
+    fn ensure_detached_allowed(&self, kind: &DetachedMutationKind) -> Result<(), AppError> {
         match kind {
             DetachedMutationKind::Session => self.check_mutation_admission(),
-            DetachedMutationKind::Navigation if self.is_finalizing() => {
-                Err(AppError::SessionFinalizing)
-            }
-            DetachedMutationKind::Navigation => Ok(()),
+            _ if self.is_finalizing() => Err(AppError::SessionFinalizing),
+            _ => Ok(()),
         }
     }
 
-    /// Only explicit navigation may overlap background retirement (ADR-0365).
+    /// Explicit navigation may overlap background retirement (ADR-0365).
     /// It remains part of update drain even after the HTTP waiter times out.
     pub(crate) fn begin_detached_navigation(&self, request_id: &str) -> Result<(), String> {
         self.begin_detached(request_id, DetachedMutationKind::Navigation)
@@ -40,6 +40,7 @@ impl SessionCheckpointRuntime {
     pub(crate) async fn begin_pane_creation_after_eviction(
         &self,
         request_id: &str,
+        terminal_ids: &[String],
         wait_budget: Duration,
     ) -> Result<(), String> {
         let deadline = tokio::time::sleep(wait_budget);
@@ -47,7 +48,10 @@ impl SessionCheckpointRuntime {
         loop {
             // 승인 시도 전에 구독해야 검사 도중 끝난 회수의 알림도 받는다.
             let changed = self.admission_changed.notified();
-            match self.begin_detached(request_id, DetachedMutationKind::Session) {
+            match self.begin_detached(
+                request_id,
+                DetachedMutationKind::Terminals(terminal_ids.to_vec()),
+            ) {
                 // 등록 락을 기다리는 사이 기한이 지났으면 발행 전에 등록을 철회한다.
                 Ok(()) if tokio::time::Instant::now() >= deadline.deadline() => {
                     self.finish_detached_mutation(request_id)?;
@@ -66,35 +70,57 @@ impl SessionCheckpointRuntime {
         }
     }
 
+    pub(crate) fn begin_detached_terminal_mutation(
+        &self,
+        request_id: &str,
+        terminal_id: &str,
+    ) -> Result<(), String> {
+        self.begin_detached(
+            request_id,
+            DetachedMutationKind::Terminals(vec![terminal_id.into()]),
+        )
+        .map_err(Into::into)
+    }
+
     fn begin_detached(&self, request_id: &str, kind: DetachedMutationKind) -> Result<(), AppError> {
-        self.ensure_detached_allowed(kind)?;
-        let counter = self.mutation_counter(kind);
+        self.ensure_detached_allowed(&kind)?;
+        let counter = self.mutation_counter(&kind);
         counter.fetch_add(1, Ordering::AcqRel);
-        if let Err(error) = self.ensure_detached_allowed(kind) {
+        let admission = match &kind {
+            DetachedMutationKind::Terminals(ids) => {
+                self.acquire_terminal_mutations(ids.iter().map(String::as_str))
+            }
+            _ => self.ensure_detached_allowed(&kind),
+        };
+        if let Err(error) = admission {
             counter.fetch_sub(1, Ordering::AcqRel);
             return Err(error);
         }
-        let mut detached = match self.detached_mutations.lock_or_err() {
-            Ok(detached) => detached,
-            Err(error) => {
-                counter.fetch_sub(1, Ordering::AcqRel);
-                return Err(error);
+        let error = match self.detached_mutations.lock_or_err() {
+            Ok(mut detached) if !detached.contains_key(request_id) => {
+                detached.insert(request_id.to_owned(), kind);
+                return Ok(());
             }
-        };
-        if detached.contains_key(request_id) {
-            counter.fetch_sub(1, Ordering::AcqRel);
-            return Err(AppError::Other(format!(
+            Ok(_) => AppError::Other(format!(
                 "session checkpoint mutation {request_id} is already active"
-            )));
+            )),
+            Err(error) => error,
+        };
+        self.release_detached_mutation(&kind);
+        Err(error)
+    }
+
+    fn release_detached_mutation(&self, kind: &DetachedMutationKind) {
+        if let DetachedMutationKind::Terminals(ids) = kind {
+            self.release_terminal_mutations(ids.iter().map(String::as_str));
         }
-        detached.insert(request_id.to_owned(), kind);
-        Ok(())
+        self.mutation_counter(kind).fetch_sub(1, Ordering::AcqRel);
     }
 
     pub fn finish_detached_mutation(&self, request_id: &str) -> Result<bool, String> {
         let removed = self.detached_mutations.lock_or_err()?.remove(request_id);
-        if let Some(kind) = removed {
-            self.mutation_counter(kind).fetch_sub(1, Ordering::AcqRel);
+        if let Some(kind) = &removed {
+            self.release_detached_mutation(kind);
         }
         Ok(removed.is_some())
     }

@@ -575,7 +575,10 @@ pub async fn terminal_write(
 
     match write_terminal_direct_from_state(&state.app_state, &id, body.data.as_bytes()) {
         Ok(()) => (StatusCode::OK, Json(ok_json("written"))),
-        Err(error) if error.contains("finalization") => {
+        Err(error)
+            if error.contains("finalization")
+                || error == crate::error::AppError::HiddenTerminalEviction.to_string() =>
+        {
             (StatusCode::CONFLICT, Json(err_json(&error)))
         }
         Err(error) if error.contains("not found") => {
@@ -593,7 +596,9 @@ fn write_terminal_direct_from_state(
     // If finalization started while a missing pane was prepared, admission at
     // this last side-effect boundary rejects the write. Once admitted, drain
     // waits until the PTY call returns.
-    let _mutation = state.session_checkpoint.begin_mutation()?;
+    let _mutation = state
+        .session_checkpoint
+        .begin_terminal_mutation(terminal_id)?;
     let ptys = state.pty_handles.lock_or_err()?;
     let handle = ptys
         .get(terminal_id)

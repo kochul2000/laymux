@@ -11,6 +11,8 @@ pub struct AutomationRequest {
     pub target: String,
     pub method: String,
     pub params: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_creation_target: Option<PaneCreationTarget>,
     /// Wall-clock ms when the request was emitted. The frontend subtracts it from
     /// `Date.now()` to measure how deep the event delivery queue actually is.
     pub emitted_at_ms: u64,
@@ -18,6 +20,14 @@ pub struct AutomationRequest {
     /// past this point is dropped by the frontend instead of being computed for a
     /// caller that already received `504 Frontend response timeout` (issue #606).
     pub deadline_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneCreationTarget {
+    pub workspace_id: String,
+    pub slot_id: String,
+    pub terminal_ids: Vec<String>,
 }
 
 /// Response from frontend via Tauri invoke.
@@ -435,6 +445,7 @@ mod tests {
             target: "workspaces".into(),
             method: "list".into(),
             params: serde_json::json!({}),
+            pane_creation_target: None,
             emitted_at_ms: 1_000,
             deadline_ms: 6_000,
         };
@@ -455,6 +466,7 @@ mod tests {
             target: "grid".into(),
             method: "setEditMode".into(),
             params: serde_json::json!({ "enabled": true }),
+            pane_creation_target: None,
             emitted_at_ms: 42,
             deadline_ms: 5_042,
         };

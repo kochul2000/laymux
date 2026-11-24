@@ -1,6 +1,6 @@
 # 0388. 자동화 pane 생성은 숨김 터미널 회수가 끝난 뒤 승인한다
 
-- Status: Accepted
+- Status: Superseded by [0389](0389-scope-pane-creation-to-eviction-targets.md)
 - Date: 2026-11-23
 - Source: MCP로 리뷰 pane을 생성할 때의 사용자 보고, [Automation API](../architecture/api-contracts.md#121-아키텍처), [ADR-0231](0231-hidden-eviction-target-scoped-input-admission.md), [ADR-0365](0365-navigation-admission-during-hidden-eviction.md)
 

@@ -1846,12 +1846,19 @@ export async function sendOsNotification(title: string, body: string): Promise<v
 
 // -- Automation API --
 
+export interface PaneCreationTarget {
+  workspaceId: string;
+  slotId: string;
+  terminalIds: string[];
+}
+
 export interface AutomationRequest {
   requestId: string;
   category: string;
   target: string;
   method: string;
   params: Record<string, unknown>;
+  paneCreationTarget?: PaneCreationTarget;
   /** Wall-clock ms when Rust emitted this request. `Date.now()` − this = queue depth. */
   emittedAtMs: number;
   /**

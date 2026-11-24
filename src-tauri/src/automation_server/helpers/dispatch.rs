@@ -1,19 +1,95 @@
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use axum::{http::StatusCode, Json};
 use futures_util::FutureExt;
+use serde_json::Value;
 
-use super::err_json;
+use super::{bridge_request_once, err_json, ServerState};
+use crate::automation_server::types::PaneCreationTarget;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
-// 승인 대기와 전달 후 응답을 합친 예산은 최대 15초다 (ADR-0388).
-const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
+// 회수 대기와 프런트엔드 예산의 합계는 최대 15초다 (ADR-0389).
+pub(crate) const PANE_CREATION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn is_pane_creation(category: &str, target: &str, method: &str) -> bool {
+pub(super) fn is_pane_creation(category: &str, target: &str, method: &str) -> bool {
     category == "action" && target == "panes" && matches!(method, "split" | "stack")
+}
+
+pub(super) struct BridgeBudget {
+    pub(super) frontend: Duration,
+    pub(super) admission: Duration,
+}
+
+impl BridgeBudget {
+    pub(super) fn new(frontend: Duration) -> Self {
+        Self {
+            frontend,
+            admission: PANE_CREATION_ADMISSION_TIMEOUT,
+        }
+    }
+}
+
+pub(super) async fn create_pane(
+    state: &ServerState,
+    method: &str,
+    mut params: Value,
+    mut interrupted: Pin<&mut impl Future<Output = AppError>>,
+    budget: &mut BridgeBudget,
+) -> Result<Value, (StatusCode, Json<Value>)> {
+    loop {
+        if let Some(reason) = interrupted.as_mut().now_or_never() {
+            return Err((StatusCode::CONFLICT, Json(err_json(&reason.to_string()))));
+        }
+        let target = bridge_request_once(
+            state,
+            ("query", "panes", "resolveCreationTarget"),
+            params.clone(),
+            None,
+            std::pin::pin!(std::future::pending()),
+            budget,
+        )
+        .await?;
+        if target.get("success").and_then(Value::as_bool) == Some(false) {
+            return Ok(target);
+        }
+        let scope: PaneCreationTarget = serde_json::from_value(target).map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(err_json("Invalid pane creation target from frontend")),
+            )
+        })?;
+        // 이동한 인덱스나 활성 워크스페이스로 대상이 바뀌지 않게 슬롯 ID를 고정한다.
+        let locator = params.as_object_mut().ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(err_json("Invalid pane creation parameters")),
+            )
+        })?;
+        locator.remove("paneIndex");
+        locator.insert("paneId".into(), scope.slot_id.clone().into());
+        locator.insert("workspaceId".into(), scope.workspace_id.clone().into());
+        let result = bridge_request_once(
+            state,
+            ("action", "panes", method),
+            params.clone(),
+            Some(scope),
+            interrupted.as_mut(),
+            budget,
+        )
+        .await?;
+        if result
+            .get("retryPaneCreationTarget")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Ok(result);
+        }
+        // 슬롯 구성이 달라 실제 변경을 하지 않은 응답에서만 다시 승인한다.
+    }
 }
 
 pub(crate) async fn bridge_interruption(
@@ -40,9 +116,9 @@ pub(crate) async fn bridge_interruption(
 pub(crate) async fn admit_bridge_mutation(
     runtime: &crate::session_checkpoint::SessionCheckpointRuntime,
     request_id: &str,
-    category: &str,
-    target: &str,
-    method: &str,
+    (category, target, method): (&str, &str, &str),
+    pane_scope: Option<(&[String], Duration)>,
+    terminal_id: Option<&str>,
     interrupted: impl Future<Output = AppError>,
 ) -> Result<bool, String> {
     if category != "action" {
@@ -50,15 +126,16 @@ pub(crate) async fn admit_bridge_mutation(
     }
     // Exact allowlist: future structural/write actions keep the session fence.
     // Navigation is still tracked for updater drain through its frontend ACK.
-    if is_pane_creation(category, target, method) {
-        let admission =
-            runtime.begin_pane_creation_after_eviction(request_id, PANE_CREATION_ADMISSION_TIMEOUT);
+    if let Some((ids, wait_budget)) = pane_scope {
+        let admission = runtime.begin_pane_creation_after_eviction(request_id, ids, wait_budget);
         // 취소는 발행 전에만 적용한다. 전달된 action은 늦은 응답까지 추적한다.
         tokio::select! {
             biased;
             reason = interrupted => return Err(reason.into()),
             result = admission => result?,
         }
+    } else if let ("terminals", "prepareForAutomation", Some(id)) = (target, method, terminal_id) {
+        runtime.begin_detached_terminal_mutation(request_id, id)?;
     } else if matches!(
         (target, method),
         ("terminals", "setFocus")
@@ -124,9 +201,9 @@ mod tests {
         let tracked = admit_bridge_mutation(
             &state.session_checkpoint,
             id,
-            "action",
-            "panes",
-            "stack",
+            ("action", "panes", "stack"),
+            Some((&["source-terminal".into()], PANE_CREATION_ADMISSION_TIMEOUT)),
+            None,
             cancelled.as_mut(),
         )
         .await

@@ -265,10 +265,7 @@ pub(crate) async fn create_terminal_session_inner(
     reconnect_generation: Option<u64>,
     startup_colors: Option<crate::terminal::StartupColorReplies>,
 ) -> Result<TerminalSession, String> {
-    let _checkpoint_permit = state
-        .session_checkpoint
-        .begin_mutation_after_finalization()
-        .await;
+    let _checkpoint_permit = state.session_checkpoint.begin_terminal_creation(&id).await;
     // Do not claim while queued behind a finalized close checkpoint: that
     // checkpoint's cleanup must be able to acquire this same lifecycle claim.
     let _reconnect_claim = reconnect_generation

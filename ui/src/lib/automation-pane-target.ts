@@ -1,9 +1,24 @@
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { Workspace, WorkspacePane } from "@/stores/types";
+import { toTerminalId } from "@/lib/pane-ids";
+import type { PaneCreationTarget } from "@/lib/tauri-api";
 
 type PaneTarget =
   | { ws: Workspace; pane: WorkspacePane; paneIndex: number }
   | { err: { success: false; error: string } };
+
+export function paneCreationTarget(
+  target: Exclude<PaneTarget, { err: unknown }>,
+): PaneCreationTarget {
+  return {
+    workspaceId: target.ws.id,
+    slotId: target.pane.id,
+    terminalIds: target.pane.layers
+      .filter((layer) => layer.view.type === "TerminalView")
+      .map((layer) => toTerminalId(layer.id))
+      .sort(),
+  };
+}
 
 /** Resolve targets before mutation; explicit invalid targets never fall back to the UI. */
 export function resolveAutomationPane(params: Record<string, unknown>): PaneTarget {

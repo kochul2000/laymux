@@ -1,4 +1,5 @@
-import { resolveAutomationPane } from "@/lib/automation-pane-target";
+import { paneCreationTarget, resolveAutomationPane } from "@/lib/automation-pane-target";
+import { persistSession } from "@/lib/persist-session";
 import { useEffect } from "react";
 import { requestWorkspaceClose, restoreWorkspaceClose } from "@/lib/workspace-close";
 import { requestTerminalOutputReconnect } from "@/lib/terminal-output-reconnect";
@@ -1809,6 +1810,24 @@ export async function captureScreenshot(paneIndex?: number): Promise<string> {
 
 /** Process a single automation request and return the result. */
 export function handleAutomationRequest(request: AutomationRequest): HandlerResult {
+  const admittedTarget = request.paneCreationTarget;
+  if (
+    request.target === "panes" &&
+    (admittedTarget || (request.category === "query" && request.method === "resolveCreationTarget"))
+  ) {
+    const ctx = resolveAutomationPane(request.params);
+    if ("err" in ctx) return ctx.err;
+    const current = paneCreationTarget(ctx);
+    if (!admittedTarget) return ok(current);
+    if (
+      current.workspaceId !== admittedTarget.workspaceId ||
+      current.slotId !== admittedTarget.slotId ||
+      current.terminalIds.length !== admittedTarget.terminalIds.length ||
+      current.terminalIds.some((id, index) => id !== admittedTarget.terminalIds[index])
+    ) {
+      return ok({ retryPaneCreationTarget: true });
+    }
+  }
   const targetHandlers = handlers[request.target];
   if (!targetHandlers) {
     return err(`Unknown target: ${request.target}`);
@@ -1820,7 +1839,9 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
   }
 
   try {
-    return handler(request.params);
+    const result = handler(request.params);
+    if (result.success && admittedTarget) void persistSession({ reason: "mutation" });
+    return result;
   } catch (e) {
     return err(`Handler error: ${e instanceof Error ? e.message : String(e)}`);
   }
