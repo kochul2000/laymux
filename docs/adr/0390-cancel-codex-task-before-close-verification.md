@@ -1,6 +1,6 @@
 # 0390. 명시적 종료의 Codex 작업 취소는 대화 확인보다 먼저 수행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-25
 - Source: 사용자가 종료 취소를 켜고도 장시간 Codex 리뷰 작업 때문에 닫을 수 없었던 보고, [ADR-0278](0278-codex-status-current-screen.md), [ADR-0314](0314-update-never-interrupts-terminals.md), [ADR-0366](0366-codex-close-proof-lives-through-fenced-save.md)
 - 관계: 명시적 종료의 /status 확인 전에 허용하는 입력을 확장한다.

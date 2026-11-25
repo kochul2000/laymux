@@ -10,11 +10,14 @@ import type { TerminalBufferDump } from "./terminal-serialize-registry";
 describe("Codex status command cell guard", () => {
   it.each([
     ["일반 작업 표시", "• Working (12h 49m 28s • esc to interrupt)"],
+    ["색상 지원이 제한된 터미널의 원형 아이콘", "◦ Working (0s • esc to interrupt)"],
+    ["추론 요약을 제목으로 쓰는 작업", "• Mapping the app structure (15s • esc to interrupt)"],
     [
       "백그라운드 터미널 요약",
       "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close",
     ],
     ["너비가 부족해 요약이 잘린 행", "Working (0s • esc to interrupt)…"],
+    ["요약의 구분자까지만 보이는 행", "Working (0s • esc to interrupt) ·…"],
     [
       "백그라운드 요약과 별도 상세 행",
       "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close\r\n  └ Checking hooks\r\n  └ Reading details\r\n    Continued details",

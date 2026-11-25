@@ -16,8 +16,9 @@ const SCREEN_SETTLE_MS = 180;
 const UNSUPPORTED =
   /Preparing images:|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
 const INTERRUPT_HINT = /esc to interrupt/i;
+// Codex can use its current reasoning summary as the title and vary or hide the activity icon.
 const RUNNING_TASK_HINT =
-  /(?:^|\n) *(?:• )?(?:Working|Thinking|Running) \([^()\n]+ • esc to interrupt\)(?: · .+| ?…)?(?:\n {2}└ [^\n]+(?:\n {4}[^\n]+)*){0,2}$/;
+  /(?:^|\n) *\S[^\n]*? \((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)(?: ·(?: .+|…)| ?…)?(?:\n {2}└ [^\n]+(?:\n {4}[^\n]+)*){0,2}$/;
 
 function visibleLines(screen: TerminalBufferDump): string[] {
   return screen.lines
