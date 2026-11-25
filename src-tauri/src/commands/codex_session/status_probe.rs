@@ -44,6 +44,7 @@ pub struct CodexStatusCheckpointStart {
     token: String,
     targets: Vec<CodexStatusCheckpointTerminal>,
     reused_checkpoint: bool,
+    allow_task_interrupt: bool,
 }
 
 #[derive(Serialize)]
@@ -80,6 +81,9 @@ pub async fn begin_codex_status_checkpoint(
             .begin_finalization_and_drain(&state)
             .await?;
     }
+    let allow_task_interrupt = owns_fence
+        && state.app_update.is_closing()
+        && crate::settings::load_settings().exit.interrupt_terminals;
     let token = uuid::Uuid::new_v4().to_string();
     {
         let mut slot = state.session_checkpoint.codex_status.lock_or_err()?;
@@ -91,6 +95,7 @@ pub async fn begin_codex_status_checkpoint(
             deadline: Instant::now() + PROBE_TIMEOUT,
             sealed: false,
             owns_fence,
+            allow_task_interrupt,
             completed: false,
             update_request_id,
             targets: HashMap::new(),
@@ -145,6 +150,7 @@ pub async fn begin_codex_status_checkpoint(
         token,
         targets: terminals,
         reused_checkpoint,
+        allow_task_interrupt,
     })
 }
 
@@ -261,30 +267,25 @@ fn input_inner(
     }
     let _io = target.io.lock_or_err()?;
     target_for(state, token, id)?;
+    if step == CodexStatusStep::Interrupt {
+        let slot = state.session_checkpoint.codex_status.lock_or_err()?;
+        let checkpoint = slot
+            .as_ref()
+            .ok_or("Codex status checkpoint was cancelled")?;
+        checkpoint.check_acquisition(token)?;
+        if !checkpoint.allow_task_interrupt
+            || !checkpoint.owns_fence
+            || !state.app_update.is_closing()
+        {
+            return Err("Codex task interruption requires an explicit close with terminal interruption enabled".into());
+        }
+    }
     let handle = current_handle(state, id, &target)?;
     // Consume the step before I/O: duplicate/retried IPC must never send a second Enter.
-    change_target(state, token, id, |target| {
-        let dismiss = step == CodexStatusStep::Dismiss
-            && target.next_step == Some(CodexStatusStep::Clear)
-            && !target.dismissed;
-        let clearing =
-            step == CodexStatusStep::Clear && target.next_step == Some(CodexStatusStep::TypeStatus);
-        if target.next_step != Some(step) && !dismiss && !clearing {
-            return Err("Unexpected Codex status query step".into());
-        }
-        if step == CodexStatusStep::Clear {
-            if target.clear_batches >= MAX_CLEAR_BATCHES {
-                return Err("Codex draft exceeds the supported deletion limit".into());
-            }
-            target.clear_batches += 1;
-        }
-        target.next_step = None;
-        target.dismissed |= dismiss;
-        Ok(())
-    })?;
+    change_target(state, token, id, |target| begin_input_step(target, step))?;
     let mut submitted = None;
     let data = match step {
-        CodexStatusStep::Dismiss => vec![0x1b],
+        CodexStatusStep::Interrupt | CodexStatusStep::Dismiss => vec![0x1b],
         CodexStatusStep::Clear => {
             if !target.resized {
                 change_target(state, token, id, |target| {
@@ -322,7 +323,7 @@ fn input_inner(
     handle.write_guarded(&data, || target_for(state, token, id).is_ok())?;
     change_target(state, token, id, |target| {
         target.next_step = match step {
-            CodexStatusStep::Dismiss => Some(CodexStatusStep::Clear),
+            CodexStatusStep::Interrupt | CodexStatusStep::Dismiss => Some(CodexStatusStep::Clear),
             CodexStatusStep::Clear => Some(CodexStatusStep::TypeStatus),
             CodexStatusStep::TypeStatus => Some(CodexStatusStep::Submit),
             CodexStatusStep::Submit => None,
@@ -330,6 +331,26 @@ fn input_inner(
         Ok(())
     })?;
     Ok(submitted)
+}
+
+fn begin_input_step(target: &mut CodexStatusTarget, step: CodexStatusStep) -> Result<(), String> {
+    let escape = matches!(step, CodexStatusStep::Dismiss | CodexStatusStep::Interrupt)
+        && target.next_step == Some(CodexStatusStep::Clear)
+        && !target.escape_sent;
+    let clearing =
+        step == CodexStatusStep::Clear && target.next_step == Some(CodexStatusStep::TypeStatus);
+    if target.next_step != Some(step) && !escape && !clearing {
+        return Err("Unexpected Codex status query step".into());
+    }
+    if step == CodexStatusStep::Clear {
+        if target.clear_batches >= MAX_CLEAR_BATCHES {
+            return Err("Codex draft exceeds the supported deletion limit".into());
+        }
+        target.clear_batches += 1;
+    }
+    target.next_step = None;
+    target.escape_sent |= escape;
+    Ok(())
 }
 
 #[tauri::command(async)]

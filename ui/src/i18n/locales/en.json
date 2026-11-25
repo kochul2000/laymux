@@ -715,7 +715,7 @@
     "codex": {
       "title": "Codex",
       "verifySessionOnExit": "Verify session with /status before exit",
-      "verifySessionOnExitDesc": "Clear unsent input and read the /status screen before closing or updating. Requires Codex's default keymap. Terminal size changes briefly. Supported model and permissions menus are dismissed with Esc. Preparation stops for active tasks, attachments, unsupported dialogs, or failed verification. Runtime keymap changes and switching to a conversation with different key settings are unsupported.",
+      "verifySessionOnExitDesc": "Clear unsent input and read the /status screen before closing. With terminal interruption on, stop a running Codex task first. Requires Codex's default keymap. Terminal size changes briefly. Supported model and permissions menus are dismissed with Esc. Preparation stops for tasks that are still running, attachments, unsupported dialogs, or failed verification. Runtime keymap changes and switching to a conversation with different key settings are unsupported.",
       "groupSessionRestore": "Session Restore",
       "groupTranscript": "Transcript",
       "groupStatusMessage": "Status Message",

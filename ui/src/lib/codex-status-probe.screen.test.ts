@@ -1,9 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { createScreenTerminal } from "@/test/screen/xterm-screen";
-import { isCodexStatusCommandSelected, isCodexIdleTextComposer } from "./codex-status-probe";
+import {
+  hasInterruptibleCodexTask,
+  isCodexStatusCommandSelected,
+  isCodexIdleTextComposer,
+} from "./codex-status-probe";
 import type { TerminalBufferDump } from "./terminal-serialize-registry";
 
 describe("Codex status command cell guard", () => {
+  it("현재 입력창의 작업 표시만 인정하고 다시 그려진 유휴 화면에서는 작업을 찾지 않는다", async () => {
+    const surface = createScreenTerminal({ cols: 96, rows: 12 });
+    const dump = (): TerminalBufferDump => {
+      const buffer = surface.terminal.buffer.active;
+      return {
+        cols: 96,
+        rows: 12,
+        baseY: buffer.baseY,
+        length: buffer.length,
+        lines: Array.from({ length: buffer.length }, (_, index) => ({
+          index,
+          text: buffer.getLine(index)?.translateToString(true) ?? "",
+          isWrapped: buffer.getLine(index)?.isWrapped ?? false,
+        })),
+      };
+    };
+    try {
+      await surface.write(
+        "• Working (12h 49m 28s • esc to interrupt)\r\n\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6",
+      );
+      expect(hasInterruptibleCodexTask(dump())).toBe(true);
+      expect(isCodexIdleTextComposer(dump())).toBe(false);
+      await surface.write("\x1b[H\x1b[2K■ Conversation interrupted");
+      expect(hasInterruptibleCodexTask(dump())).toBe(false);
+      expect(isCodexIdleTextComposer(dump())).toBe(true);
+    } finally {
+      surface.dispose();
+    }
+  });
+
   it("selects the current prefix without clearing previous status output", async () => {
     const surface = createScreenTerminal({ cols: 96, rows: 12 });
     const menu =

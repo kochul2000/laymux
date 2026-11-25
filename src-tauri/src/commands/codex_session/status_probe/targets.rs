@@ -181,7 +181,7 @@ pub(super) fn collect_targets(
                 original_cols: terminal.1,
                 original_rows: terminal.2,
                 resized: false,
-                dismissed: false,
+                escape_sent: false,
                 clear_batches: 0,
                 next_step: if proof.is_some() {
                     None
