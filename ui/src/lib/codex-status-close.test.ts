@@ -84,6 +84,7 @@ describe("종료 중인 Codex 작업의 취소", () => {
     ["취소 설정을 끈 종료", BUSY, false],
     ["출력 상단의 과거 안내", BUSY + "\n후속 출력\n› /other", true],
     ["승인 모달", BUSY + "\n  enter confirm · esc back", true],
+    ["첨부된 초안", BUSY.replace("Ask Codex to do anything", "[Image #1] draft"), true],
   ])("%s에서는 작업 입력을 보내지 않는다", async (_name, initial, allowed) => {
     const { save, steps } = simulate(initial, allowed);
     await expect(withCodexStatusCheckpoint(true, undefined, save)).rejects.toThrow();

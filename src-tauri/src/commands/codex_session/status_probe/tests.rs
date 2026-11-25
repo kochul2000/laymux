@@ -105,10 +105,11 @@ fn hook_proof_rejects_all_status_input_before_accessing_a_pty() {
 
 #[test]
 fn task_interrupt_requires_close_ownership_and_enabled_cleanup_before_pty_access() {
-    for (owns_fence, enabled, closing) in [
-        (true, false, true),
-        (false, true, true),
-        (true, true, false),
+    for (owns_fence, enabled, close_setting) in [
+        (true, false, Some(true)),
+        (false, true, Some(true)),
+        (true, true, Some(false)),
+        (true, true, None),
     ] {
         let state = AppState::new();
         install_probe(&state, owns_fence, false);
@@ -120,8 +121,8 @@ fn task_interrupt_requires_close_ownership_and_enabled_cleanup_before_pty_access
             .as_mut()
             .unwrap()
             .allow_task_interrupt = enabled;
-        if closing {
-            state.claim_app_close().unwrap();
+        if let Some(interrupt_terminals) = close_setting {
+            state.claim_app_close(interrupt_terminals).unwrap();
         }
         let error = input_inner(
             &state,

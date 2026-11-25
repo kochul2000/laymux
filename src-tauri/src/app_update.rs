@@ -4,7 +4,7 @@
 //! status machine shared by the desktop WebView, Automation API, and Remote UI
 //! (ADR-0174).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -141,16 +141,23 @@ impl Default for UpdateStatus {
     }
 }
 
+#[repr(u8)]
+enum AppCloseState {
+    Open,
+    PreserveTerminals,
+    InterruptTerminals,
+}
+
 pub struct UpdateManager {
     status: Mutex<UpdateStatus>,
-    closing: AtomicBool,
+    close: AtomicU8,
 }
 
 impl Default for UpdateManager {
     fn default() -> Self {
         Self {
             status: Mutex::new(UpdateStatus::default()),
-            closing: AtomicBool::new(false),
+            close: AtomicU8::new(AppCloseState::Open as u8),
         }
     }
 }
@@ -164,7 +171,7 @@ impl UpdateManager {
                 channel,
                 ..UpdateStatus::default()
             }),
-            closing: AtomicBool::new(false),
+            close: AtomicU8::new(AppCloseState::Open as u8),
         }
     }
 
@@ -258,7 +265,7 @@ impl UpdateManager {
         force: bool,
     ) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
-        if self.closing.load(Ordering::Acquire) {
+        if self.is_closing() {
             return Err("window close is in progress".into());
         }
         if !status.enabled {

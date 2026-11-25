@@ -80,18 +80,18 @@ export function App() {
       .then(({ getCurrentWindow }) => {
         if (cancelled) return;
         const appWindow = getCurrentWindow();
+        let exitSettings = useSettingsStore.getState().exit;
         const handler = createCloseHandler({
           beforeClose: async () => {
             if (!(await requestCloseConfirmation())) return false;
+            exitSettings = useSettingsStore.getState().exit;
             try {
-              await beginAppClose();
+              await beginAppClose(exitSettings.interruptTerminals);
             } catch {
               useLifecycleStore.getState().openUpdate();
               return false;
             }
-            useLifecycleStore
-              .getState()
-              .startClose(useSettingsStore.getState().exit.interruptTerminals);
+            useLifecycleStore.getState().startClose(exitSettings.interruptTerminals);
             return true;
           },
           onSaveProblem: async (error, pending) => {
@@ -111,17 +111,16 @@ export function App() {
           close: () => appWindow.close(),
           saveBeforeClose: async () => {
             await captureWindowGeometry();
-            await saveBeforeClose(useLifecycleStore.getState().report);
+            await saveBeforeClose(useLifecycleStore.getState().report, exitSettings);
             useLifecycleStore.getState().report({ stage: "closing", completed: 0, total: null });
             await closeOpenTerminalSessions();
           },
           // Widen the base save timeout by the kill-on-exit budget (issue #451)
-          // so a configured Ctrl+C settle delay is not cut off. Read at close
-          // time to reflect current settings.
+          // so the confirmed Ctrl+C settle delay is not cut off.
           timeoutMs: () =>
             5000 +
             TERMINAL_CLOSE_BUDGET_MS +
-            exitInterruptBudgetMs(useSettingsStore.getState().exit) +
+            exitInterruptBudgetMs(exitSettings) +
             (useSettingsStore.getState().codex.verifySessionOnExit ? 30_000 : 0),
         });
         appWindow

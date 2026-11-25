@@ -8,12 +8,23 @@ import {
 import type { TerminalBufferDump } from "./terminal-serialize-registry";
 
 describe("Codex status command cell guard", () => {
-  it("현재 입력창의 작업 표시만 인정하고 다시 그려진 유휴 화면에서는 작업을 찾지 않는다", async () => {
-    const surface = createScreenTerminal({ cols: 96, rows: 12 });
+  it.each([
+    ["일반 작업 표시", "• Working (12h 49m 28s • esc to interrupt)"],
+    [
+      "백그라운드 터미널 요약",
+      "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close",
+    ],
+    ["너비가 부족해 요약이 잘린 행", "Working (0s • esc to interrupt)…"],
+    [
+      "백그라운드 요약과 별도 상세 행",
+      "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close\r\n  └ Checking hooks\r\n  └ Reading details\r\n    Continued details",
+    ],
+  ])("작업 중에만 인정하는 표시 (%s)", async (_name, status) => {
+    const surface = createScreenTerminal({ cols: 120, rows: 12 });
     const dump = (): TerminalBufferDump => {
       const buffer = surface.terminal.buffer.active;
       return {
-        cols: 96,
+        cols: 120,
         rows: 12,
         baseY: buffer.baseY,
         length: buffer.length,
@@ -25,12 +36,12 @@ describe("Codex status command cell guard", () => {
       };
     };
     try {
-      await surface.write(
-        "• Working (12h 49m 28s • esc to interrupt)\r\n\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6",
-      );
+      await surface.write(`${status}\r\n\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6`);
       expect(hasInterruptibleCodexTask(dump())).toBe(true);
       expect(isCodexIdleTextComposer(dump())).toBe(false);
-      await surface.write("\x1b[H\x1b[2K■ Conversation interrupted");
+      await surface.write(
+        "\x1b[H\x1b[2J■ Conversation interrupted\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6",
+      );
       expect(hasInterruptibleCodexTask(dump())).toBe(false);
       expect(isCodexIdleTextComposer(dump())).toBe(true);
     } finally {

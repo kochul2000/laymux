@@ -1,7 +1,6 @@
 //! Exercise the real update preparation without downloading/installing a package.
 use super::{progress::ExitProgress, UpdateOperation, UpdateStatus};
 use crate::{lock_ext::MutexExt, state::AppState};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::AppHandle;
 
@@ -68,7 +67,7 @@ pub(crate) async fn prepare(
 fn begin_preparation(state: &AppState) -> Result<UpdateStatus, String> {
     let mut status = state.app_update.status.lock_or_err()?;
     if status.operation != UpdateOperation::Idle
-        || state.app_update.closing.load(Ordering::Acquire)
+        || state.app_update.is_closing()
         || state.session_checkpoint.is_finalizing()
     {
         return Err("another lifecycle operation is already active".into());
@@ -94,7 +93,7 @@ mod tests {
         let previous = begin_preparation(&state).unwrap();
         assert!(!previous.enabled);
         assert!(!state.app_update.snapshot().unwrap().enabled);
-        assert!(state.app_update.claim_close().is_err());
+        assert!(state.app_update.claim_close(false).is_err());
         let preparing = state.app_update.snapshot().unwrap();
         assert!(begin_preparation(&state).is_err());
         assert_eq!(state.app_update.snapshot().unwrap(), preparing);
@@ -103,7 +102,7 @@ mod tests {
     #[test]
     fn dev_preparation_cannot_steal_an_explicit_close() {
         let state = AppState::new();
-        state.app_update.claim_close().unwrap();
+        state.app_update.claim_close(false).unwrap();
         let previous = state.app_update.snapshot().unwrap();
         assert!(begin_preparation(&state).is_err());
         assert_eq!(state.app_update.snapshot().unwrap(), previous);

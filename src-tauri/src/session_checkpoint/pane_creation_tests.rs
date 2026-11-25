@@ -138,7 +138,7 @@ async fn pane_creation_rejects_window_close_even_without_a_codex_checkpoint() {
         pending()
     ));
     assert!(futures_util::poll!(&mut create).is_pending());
-    state.claim_app_close().unwrap();
+    state.claim_app_close(false).unwrap();
     let result_during_close = futures_util::poll!(&mut create);
     assert!(matches!(
         result_during_close,

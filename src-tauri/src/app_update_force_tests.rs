@@ -77,7 +77,7 @@ fn force_preserves_dev_channel_and_close_guards() {
     assert!(manager
         .begin_install_with_force(UpdateChannel::Beta, true)
         .is_err());
-    manager.claim_close().unwrap();
+    manager.claim_close(false).unwrap();
     assert!(manager
         .begin_install_with_force(UpdateChannel::Stable, true)
         .is_err());

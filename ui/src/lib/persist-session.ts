@@ -1,4 +1,5 @@
 import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
+import type { ExitSettings } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
@@ -391,7 +392,10 @@ export function persistSession(options: SessionCheckpointOptions = {}): Promise<
  * Sets closingDown flag to suppress any concurrent persistSession() calls
  * that store actions might trigger during teardown.
  */
-export async function saveBeforeClose(report?: ProgressReporter): Promise<void> {
+export async function saveBeforeClose(
+  report?: ProgressReporter,
+  exit?: ExitSettings,
+): Promise<void> {
   closingDown = true;
   await report?.({ stage: "checkpoint", completed: 0, total: null });
   const codex = useSettingsStore.getState().codex;
@@ -410,7 +414,7 @@ export async function saveBeforeClose(report?: ProgressReporter): Promise<void> 
           !(reused && committed && committed === getReusableSessionCheckpointCommit())
         )
           await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
-        await prepareTerminalExit(report);
+        await prepareTerminalExit(report, exit);
       },
       committed?.receiptToken,
     );
@@ -427,8 +431,11 @@ export async function saveBeforeClose(report?: ProgressReporter): Promise<void> 
  * restart (ADR-0308), so interrupting would end the work the update
  * preserves (ADR-0314). It caches history with `cacheTerminalOutputs` only.
  */
-export async function prepareTerminalExit(report?: ProgressReporter): Promise<void> {
-  await interruptTerminalsOnExit(report);
+export async function prepareTerminalExit(
+  report?: ProgressReporter,
+  exit?: ExitSettings,
+): Promise<void> {
+  await interruptTerminalsOnExit(report, exit);
   await cacheTerminalOutputs(report);
 }
 

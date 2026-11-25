@@ -2249,8 +2249,8 @@ export async function installAppUpdate(force = false): Promise<AppUpdateStatus> 
   return invoke("install_app_update", { force });
 }
 
-export async function beginAppClose(): Promise<void> {
-  return invoke("begin_app_close");
+export async function beginAppClose(interruptTerminals: boolean): Promise<void> {
+  return invoke("begin_app_close", { interruptTerminals });
 }
 export async function reportAppUpdatePreparation(
   requestId: number,

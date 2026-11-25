@@ -85,6 +85,7 @@ vi.mock("@/lib/tauri-api", () => {
     beginAppClose: vi.fn().mockResolvedValue(undefined),
     cancelAppClose: vi.fn().mockResolvedValue(undefined),
     onTerminalOutput: vi.fn().mockResolvedValue(unlisten),
+    onTerminalDisplayCleared: vi.fn().mockResolvedValue(unlisten),
     loadSettings: vi.fn().mockResolvedValue({
       defaultProfile: "PowerShell",
       profiles: [],
@@ -296,6 +297,31 @@ describe("App", () => {
     expect(beginAppClose).toHaveBeenCalledOnce();
     expect(saveBeforeClose).toHaveBeenCalledOnce();
     expect(appWindow.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("닫기를 확정할 때의 작업 중단 설정을 준비와 정리에 함께 사용한다", async () => {
+    const appWindow = getCurrentWindow();
+    vi.mocked(appWindow.onCloseRequested).mockClear();
+    vi.mocked(beginAppClose).mockClear();
+    vi.mocked(saveBeforeClose).mockClear();
+    render(<App />);
+    await screen.findByTestId("workspace-area");
+    await waitFor(() => expect(appWindow.onCloseRequested).toHaveBeenCalled());
+    const exit = {
+      ...useSettingsStore.getState().exit,
+      confirmBeforeExit: false,
+      interruptTerminals: false,
+    };
+    useSettingsStore.setState({ exit });
+    vi.mocked(beginAppClose).mockImplementationOnce(async () => {
+      useSettingsStore.setState({ exit: { ...exit, interruptTerminals: true } });
+    });
+    const handler = vi.mocked(appWindow.onCloseRequested).mock.calls.at(-1)![0];
+    await act(async () => {
+      await handler({ preventDefault: vi.fn() } as Parameters<typeof handler>[0]);
+    });
+    expect(beginAppClose).toHaveBeenCalledWith(false);
+    expect(saveBeforeClose).toHaveBeenCalledWith(expect.any(Function), exit);
   });
 
   it("mirrors the desktop viewer signal before the session finishes loading (ADR-0291)", () => {

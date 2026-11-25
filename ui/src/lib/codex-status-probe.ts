@@ -14,8 +14,10 @@ const POLL_MS = 60;
 const TARGET_TIMEOUT_MS = 15_000;
 const SCREEN_SETTLE_MS = 180;
 const UNSUPPORTED =
-  /Preparing images:|esc to interrupt|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
-const RUNNING_TASK_HINT = /^\s*(?:• )?(?:Working|Thinking|Running) \([^()]+ • esc to interrupt\)$/;
+  /Preparing images:|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
+const INTERRUPT_HINT = /esc to interrupt/i;
+const RUNNING_TASK_HINT =
+  /(?:^|\n) *(?:• )?(?:Working|Thinking|Running) \([^()\n]+ • esc to interrupt\)(?: · .+| ?…)?(?:\n {2}└ [^\n]+(?:\n {4}[^\n]+)*){0,2}$/;
 
 function visibleLines(screen: TerminalBufferDump): string[] {
   return screen.lines
@@ -24,7 +26,7 @@ function visibleLines(screen: TerminalBufferDump): string[] {
 }
 
 function unsupported(lines: string[]): boolean {
-  if (lines.some((line) => UNSUPPORTED.test(line))) return true;
+  if (lines.some((line) => UNSUPPORTED.test(line) || INTERRUPT_HINT.test(line))) return true;
   const prompt = lines.reduce((last, line, index) => (line.startsWith("› ") ? index : last), -1);
   return hasBlockingFooter(lines, prompt);
 }
@@ -44,14 +46,15 @@ function hasBlockingFooter(lines: string[], prompt: number): boolean {
 export function hasInterruptibleCodexTask(screen: TerminalBufferDump): boolean {
   const lines = visibleLines(screen);
   const prompt = lines.reduce((last, line, index) => (line.startsWith("› ") ? index : last), -1);
-  if (prompt < 0 || hasBlockingFooter(lines, prompt)) return false;
-  // A live task shows the interrupt hint immediately above the composer.
-  // Markers in older output or inside a draft cannot authorize an escape.
-  const progress = lines
-    .slice(0, prompt)
-    .reverse()
-    .find((line) => line.trim().length > 0);
-  return progress !== undefined && RUNNING_TASK_HINT.test(progress);
+  if (
+    prompt < 0 ||
+    lines.some((line) => UNSUPPORTED.test(line)) ||
+    hasBlockingFooter(lines, prompt)
+  )
+    return false;
+  // The status block above the composer can include an inline summary and
+  // indented hook/detail rows. Older transcript rows and draft text stay out.
+  return RUNNING_TASK_HINT.test(lines.slice(0, prompt).join("\n").trimEnd());
 }
 
 export function isCodexIdleTextComposer(screen: TerminalBufferDump): boolean {
@@ -70,7 +73,7 @@ export function isCodexEmptyTextComposer(screen: TerminalBufferDump): boolean {
 
 export function isCodexDismissibleMenu(screen: TerminalBufferDump): boolean {
   const lines = visibleLines(screen);
-  if (lines.some((line) => UNSUPPORTED.test(line))) return false;
+  if (lines.some((line) => UNSUPPORTED.test(line) || INTERRUPT_HINT.test(line))) return false;
   const footer = lines
     .filter((line) => line.trim())
     .slice(-2)

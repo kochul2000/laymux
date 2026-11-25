@@ -81,9 +81,7 @@ pub async fn begin_codex_status_checkpoint(
             .begin_finalization_and_drain(&state)
             .await?;
     }
-    let allow_task_interrupt = owns_fence
-        && state.app_update.is_closing()
-        && crate::settings::load_settings().exit.interrupt_terminals;
+    let allow_task_interrupt = owns_fence && state.app_update.close_interrupts_terminals();
     let token = uuid::Uuid::new_v4().to_string();
     {
         let mut slot = state.session_checkpoint.codex_status.lock_or_err()?;
@@ -275,7 +273,7 @@ fn input_inner(
         checkpoint.check_acquisition(token)?;
         if !checkpoint.allow_task_interrupt
             || !checkpoint.owns_fence
-            || !state.app_update.is_closing()
+            || !state.app_update.close_interrupts_terminals()
         {
             return Err("Codex task interruption requires an explicit close with terminal interruption enabled".into());
         }
