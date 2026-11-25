@@ -1,5 +1,5 @@
 //! Update preparation observed by desktop and Remote (ADR-0264).
-use super::{UpdateManager, UpdateOperation, UpdateStatus};
+use super::{AppCloseState, UpdateManager, UpdateOperation, UpdateStatus};
 use crate::{lock_ext::MutexExt, state::AppState};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
@@ -25,8 +25,8 @@ pub struct ExitProgress {
 }
 
 impl AppState {
-    pub(crate) fn claim_app_close(&self) -> Result<(), String> {
-        self.app_update.claim_close()?;
+    pub(crate) fn claim_app_close(&self, interrupt_terminals: bool) -> Result<(), String> {
+        self.app_update.claim_close(interrupt_terminals)?;
         self.session_checkpoint
             .pane_creation_stopped
             .notify_waiters();
@@ -36,14 +36,18 @@ impl AppState {
 
 impl UpdateManager {
     pub(crate) fn is_closing(&self) -> bool {
-        self.closing.load(Ordering::Acquire)
+        self.close.load(Ordering::Acquire) != AppCloseState::Open as u8
+    }
+
+    pub(crate) fn close_interrupts_terminals(&self) -> bool {
+        self.close.load(Ordering::Acquire) == AppCloseState::InterruptTerminals as u8
     }
 
     pub fn cancel_close(&self) -> bool {
-        self.closing.swap(false, Ordering::AcqRel)
+        self.close.swap(AppCloseState::Open as u8, Ordering::AcqRel) != AppCloseState::Open as u8
     }
 
-    pub(super) fn claim_close(&self) -> Result<(), String> {
+    pub(super) fn claim_close(&self, interrupt_terminals: bool) -> Result<(), String> {
         let status = self.status.lock_or_err()?;
         if matches!(
             status.operation,
@@ -51,7 +55,19 @@ impl UpdateManager {
         ) {
             return Err("an update is already running".into());
         }
-        self.closing.store(true, Ordering::Release);
+        let close = if interrupt_terminals {
+            AppCloseState::InterruptTerminals
+        } else {
+            AppCloseState::PreserveTerminals
+        };
+        self.close
+            .compare_exchange(
+                AppCloseState::Open as u8,
+                close as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map_err(|_| "an app close is already running")?;
         Ok(())
     }
 
@@ -102,6 +118,22 @@ pub fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_keeps_the_first_confirmation_until_cancelled() {
+        let manager = UpdateManager::default();
+        manager.claim_close(false).unwrap();
+        assert!(manager.is_closing());
+        assert!(!manager.close_interrupts_terminals());
+        assert!(manager.claim_close(true).is_err());
+        assert!(!manager.close_interrupts_terminals());
+        assert!(manager.cancel_close());
+        manager.claim_close(true).unwrap();
+        assert!(manager.close_interrupts_terminals());
+        assert!(manager.cancel_close());
+        assert!(!manager.close_interrupts_terminals());
+    }
+
     #[test]
     fn preparation_reports_real_stage_and_survives_failure() {
         let manager = UpdateManager::default();
@@ -117,13 +149,13 @@ mod tests {
         assert_eq!(json["operation"], "preparing");
         assert_eq!(json["preparation"]["completed"], 300);
         assert_eq!(json["preparation"]["total"], 700);
-        assert!(manager.claim_close().is_err());
+        assert!(manager.claim_close(false).is_err());
         manager.fail_operation("cache failed".into()).unwrap();
         assert_eq!(
             manager.snapshot().unwrap().preparation,
             Some(progress.clone())
         );
         assert!(manager.report_preparation(progress).is_err());
-        assert!(manager.claim_close().is_ok());
+        assert!(manager.claim_close(false).is_ok());
     }
 }

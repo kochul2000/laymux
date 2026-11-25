@@ -16,6 +16,7 @@ pub(crate) struct CodexStatusProcess {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CodexStatusStep {
+    Interrupt,
     Dismiss,
     Clear,
     TypeStatus,
@@ -36,7 +37,7 @@ pub(crate) struct CodexStatusTarget {
     pub original_cols: u16,
     pub original_rows: u16,
     pub resized: bool,
-    pub dismissed: bool,
+    pub escape_sent: bool,
     pub clear_batches: u16,
     pub next_step: Option<CodexStatusStep>,
     pub output_start: Option<u64>,
@@ -53,6 +54,7 @@ pub(crate) struct CodexStatusCheckpoint {
     /// through persistence and exit cleanup (ADR-0366).
     pub sealed: bool,
     pub owns_fence: bool,
+    pub allow_task_interrupt: bool,
     pub completed: bool,
     pub update_request_id: Option<u64>,
     pub targets: HashMap<String, CodexStatusTarget>,

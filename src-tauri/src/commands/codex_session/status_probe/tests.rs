@@ -21,7 +21,7 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
         original_cols: 60,
         original_rows: 20,
         resized: false,
-        dismissed: false,
+        escape_sent: false,
         clear_batches: 0,
         next_step: None,
         output_start: Some(40),
@@ -37,6 +37,7 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
             Instant::now() + Duration::from_secs(5)
         },
         owns_fence,
+        allow_task_interrupt: false,
         sealed: false,
         completed: false,
         update_request_id: None,
@@ -87,6 +88,7 @@ fn hook_proof_rejects_all_status_input_before_accessing_a_pty() {
             .unwrap()
             .hook_binding = Some(binding);
         for step in [
+            CodexStatusStep::Interrupt,
             CodexStatusStep::Dismiss,
             CodexStatusStep::Clear,
             CodexStatusStep::TypeStatus,
@@ -99,6 +101,54 @@ fn hook_proof_rejects_all_status_input_before_accessing_a_pty() {
         finish_inner(&state, "test-token").unwrap();
         assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
     }
+}
+
+#[test]
+fn task_interrupt_requires_close_ownership_and_enabled_cleanup_before_pty_access() {
+    for (owns_fence, enabled, close_setting) in [
+        (true, false, Some(true)),
+        (false, true, Some(true)),
+        (true, true, Some(false)),
+        (true, true, None),
+    ] {
+        let state = AppState::new();
+        install_probe(&state, owns_fence, false);
+        state
+            .session_checkpoint
+            .codex_status
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .allow_task_interrupt = enabled;
+        if let Some(interrupt_terminals) = close_setting {
+            state.claim_app_close(interrupt_terminals).unwrap();
+        }
+        let error = input_inner(
+            &state,
+            "test-token",
+            "terminal-test",
+            CodexStatusStep::Interrupt,
+        )
+        .unwrap_err();
+        assert!(error.contains("requires an explicit close"));
+    }
+}
+
+#[test]
+fn only_one_escape_is_admitted_before_the_status_command() {
+    let state = AppState::new();
+    install_probe(&state, true, false);
+    change_target(&state, "test-token", "terminal-test", |target| {
+        target.next_step = Some(CodexStatusStep::Clear);
+        begin_input_step(target, CodexStatusStep::Interrupt)?;
+        assert_eq!(target.next_step, None);
+        target.next_step = Some(CodexStatusStep::Clear);
+        assert!(begin_input_step(target, CodexStatusStep::Interrupt).is_err());
+        assert!(begin_input_step(target, CodexStatusStep::Dismiss).is_err());
+        begin_input_step(target, CodexStatusStep::Clear)
+    })
+    .unwrap();
 }
 
 #[test]

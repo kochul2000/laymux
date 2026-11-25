@@ -14,7 +14,11 @@ const POLL_MS = 60;
 const TARGET_TIMEOUT_MS = 15_000;
 const SCREEN_SETTLE_MS = 180;
 const UNSUPPORTED =
-  /Preparing images:|esc to interrupt|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
+  /Preparing images:|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
+const INTERRUPT_HINT = /esc to interrupt/i;
+// Codex can use its current reasoning summary as the title and vary or hide the activity icon.
+const RUNNING_TASK_HINT =
+  /(?:^|\n) *\S[^\n]*? \((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)(?: ·(?: .+|…)| ?…)?(?:\n {2}└ [^\n]+(?:\n {4}[^\n]+)*){0,2}$/;
 
 function visibleLines(screen: TerminalBufferDump): string[] {
   return screen.lines
@@ -23,8 +27,12 @@ function visibleLines(screen: TerminalBufferDump): string[] {
 }
 
 function unsupported(lines: string[]): boolean {
-  if (lines.some((line) => UNSUPPORTED.test(line))) return true;
+  if (lines.some((line) => UNSUPPORTED.test(line) || INTERRUPT_HINT.test(line))) return true;
   const prompt = lines.reduce((last, line, index) => (line.startsWith("› ") ? index : last), -1);
+  return hasBlockingFooter(lines, prompt);
+}
+
+function hasBlockingFooter(lines: string[], prompt: number): boolean {
   const footer = lines
     .slice(prompt + 1)
     .filter((line) => line.trim())
@@ -34,6 +42,20 @@ function unsupported(lines: string[]): boolean {
       /(?:^\s{2,}|\|\s*)Vim: (?:Normal|Insert|Replace)(?:\s*\||\s*$)/.test(line) ||
       /\b(?:enter|esc)\s+(?:select|confirm|continue|back|cancel)\b/i.test(line),
   );
+}
+
+export function hasInterruptibleCodexTask(screen: TerminalBufferDump): boolean {
+  const lines = visibleLines(screen);
+  const prompt = lines.reduce((last, line, index) => (line.startsWith("› ") ? index : last), -1);
+  if (
+    prompt < 0 ||
+    lines.some((line) => UNSUPPORTED.test(line)) ||
+    hasBlockingFooter(lines, prompt)
+  )
+    return false;
+  // The status block above the composer can include an inline summary and
+  // indented hook/detail rows. Older transcript rows and draft text stay out.
+  return RUNNING_TASK_HINT.test(lines.slice(0, prompt).join("\n").trimEnd());
 }
 
 export function isCodexIdleTextComposer(screen: TerminalBufferDump): boolean {
@@ -52,7 +74,7 @@ export function isCodexEmptyTextComposer(screen: TerminalBufferDump): boolean {
 
 export function isCodexDismissibleMenu(screen: TerminalBufferDump): boolean {
   const lines = visibleLines(screen);
-  if (lines.some((line) => UNSUPPORTED.test(line))) return false;
+  if (lines.some((line) => UNSUPPORTED.test(line) || INTERRUPT_HINT.test(line))) return false;
   const footer = lines
     .filter((line) => line.trim())
     .slice(-2)
@@ -111,21 +133,28 @@ async function probeTerminal(
   token: string,
   target: CheckpointGeometry & { terminalId: string },
   releases: (() => void)[],
+  allowTaskInterrupt: boolean,
 ): Promise<void> {
   const { terminalId } = target;
   const deadline = Date.now() + TARGET_TIMEOUT_MS;
-  const input = (step: "dismiss" | "clear" | "typeStatus" | "submit") =>
+  const input = (step: "interrupt" | "dismiss" | "clear" | "typeStatus" | "submit") =>
     invoke<TerminalRenderCheckpointTarget | null>("codex_status_checkpoint_input", {
       token,
       terminalId,
       step,
     });
-  if (isCodexDismissibleMenu(inspect(terminalId))) {
-    await input("dismiss");
+  const initial = inspect(terminalId);
+  const working = hasInterruptibleCodexTask(initial);
+  if (working && !allowTaskInterrupt) {
+    throw new Error(`Codex status: ${terminalId} is still running a task`);
+  }
+  const escape = working ? "interrupt" : isCodexDismissibleMenu(initial) ? "dismiss" : null;
+  if (escape) {
+    await input(escape);
     await waitFor(
       () => (isCodexIdleTextComposer(inspect(terminalId)) ? true : undefined),
       deadline,
-      "menu dismissal",
+      escape === "interrupt" ? "task interrupt" : "menu dismissal",
     );
   }
   if (!isCodexIdleTextComposer(inspect(terminalId))) {
@@ -206,10 +235,11 @@ export async function withCodexStatusCheckpoint<T>(
   committedReceiptToken?: string,
 ): Promise<T> {
   if (!enabled) return checkpoint(false);
-  const { token, targets, reusedCheckpoint } = await invoke<{
+  const { token, targets, reusedCheckpoint, allowTaskInterrupt } = await invoke<{
     token: string;
     targets: (CheckpointGeometry & { terminalId: string })[];
     reusedCheckpoint?: boolean;
+    allowTaskInterrupt?: boolean;
   }>("begin_codex_status_checkpoint", {
     updateRequestId,
     ...(committedReceiptToken ? { committedReceiptToken } : {}),
@@ -222,7 +252,7 @@ export async function withCodexStatusCheckpoint<T>(
     const results = await Promise.allSettled(
       targets.map(async (target) => {
         try {
-          await probeTerminal(token, target, releases);
+          await probeTerminal(token, target, releases, allowTaskInterrupt === true);
         } catch (error) {
           throw new Error(
             `[${target.terminalId}] ${error instanceof Error ? error.message : String(error)}`,

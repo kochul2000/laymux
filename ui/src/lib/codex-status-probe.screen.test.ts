@@ -1,9 +1,57 @@
 import { describe, expect, it } from "vitest";
 import { createScreenTerminal } from "@/test/screen/xterm-screen";
-import { isCodexStatusCommandSelected, isCodexIdleTextComposer } from "./codex-status-probe";
+import {
+  hasInterruptibleCodexTask,
+  isCodexStatusCommandSelected,
+  isCodexIdleTextComposer,
+} from "./codex-status-probe";
 import type { TerminalBufferDump } from "./terminal-serialize-registry";
 
 describe("Codex status command cell guard", () => {
+  it.each([
+    ["일반 작업 표시", "• Working (12h 49m 28s • esc to interrupt)"],
+    ["색상 지원이 제한된 터미널의 원형 아이콘", "◦ Working (0s • esc to interrupt)"],
+    ["추론 요약을 제목으로 쓰는 작업", "• Mapping the app structure (15s • esc to interrupt)"],
+    [
+      "백그라운드 터미널 요약",
+      "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close",
+    ],
+    ["너비가 부족해 요약이 잘린 행", "Working (0s • esc to interrupt)…"],
+    ["요약의 구분자까지만 보이는 행", "Working (0s • esc to interrupt) ·…"],
+    [
+      "백그라운드 요약과 별도 상세 행",
+      "Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close\r\n  └ Checking hooks\r\n  └ Reading details\r\n    Continued details",
+    ],
+  ])("작업 중에만 인정하는 표시 (%s)", async (_name, status) => {
+    const surface = createScreenTerminal({ cols: 120, rows: 12 });
+    const dump = (): TerminalBufferDump => {
+      const buffer = surface.terminal.buffer.active;
+      return {
+        cols: 120,
+        rows: 12,
+        baseY: buffer.baseY,
+        length: buffer.length,
+        lines: Array.from({ length: buffer.length }, (_, index) => ({
+          index,
+          text: buffer.getLine(index)?.translateToString(true) ?? "",
+          isWrapped: buffer.getLine(index)?.isWrapped ?? false,
+        })),
+      };
+    };
+    try {
+      await surface.write(`${status}\r\n\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6`);
+      expect(hasInterruptibleCodexTask(dump())).toBe(true);
+      expect(isCodexIdleTextComposer(dump())).toBe(false);
+      await surface.write(
+        "\x1b[H\x1b[2J■ Conversation interrupted\r\n\r\n› Ask Codex to do anything\r\n\r\n  GPT-6",
+      );
+      expect(hasInterruptibleCodexTask(dump())).toBe(false);
+      expect(isCodexIdleTextComposer(dump())).toBe(true);
+    } finally {
+      surface.dispose();
+    }
+  });
+
   it("selects the current prefix without clearing previous status output", async () => {
     const surface = createScreenTerminal({ cols: 96, rows: 12 });
     const menu =

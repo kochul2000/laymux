@@ -413,6 +413,7 @@ ADR 이 필요한 대표 기준:
 | [0387](0387-remote-direct-clear-display-history.md) | Remote 직접 입력의 clear가 마지막 입력 표시를 초기화한다 | Accepted |
 | [0388](0388-pane-creation-waits-for-hidden-eviction.md) | 자동화 pane 생성은 숨김 터미널 회수가 끝난 뒤 승인한다 | Superseded by [0389](0389-scope-pane-creation-to-eviction-targets.md) |
 | [0389](0389-scope-pane-creation-to-eviction-targets.md) | 회수와 겹치는 터미널의 pane 생성만 기다린다 | Accepted |
+| [0390](0390-cancel-codex-task-before-close-verification.md) | 명시적 종료의 Codex 작업 취소는 대화 확인보다 먼저 수행한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
